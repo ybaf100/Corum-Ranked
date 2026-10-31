@@ -13,7 +13,7 @@ function method(name,from=0){
 }
 for(const debugOn of [false,true]) test(`native update/rotation/teleport -> completed camera snapshot -> 50ms capture (Debug ${debugOn?'ON':'OFF'})`,()=>{
     const owner=['bool observesSpectatorPlayer(', 'corum::ranked::SpectatorGhostPose observedSpectatorPose(',
-        'corum::ranked::SpectatorGhostPose observedSpectatorPlayerPose(', 'bool tracesSpectatorPlayer(', 'void traceSpectatorSource(', 'void observeSpectatorNativeUpdate(', 'void observeSpectatorNativeSnap(', 'void sampleSpectatorPresentation()'].map(n=>method(n)).join('\n');
+        'corum::ranked::SpectatorGhostPose observedSpectatorPlayerPose(', 'bool tracesSpectatorPlayer(', 'void traceSpectatorSource(', 'void observeSpectatorNativeUpdate(', 'void observeSpectatorNativeSnap(', 'void noteSpectatorCaptureResult(', 'void sampleSpectatorPresentation()'].map(n=>method(n)).join('\n');
     const playerAt=source.indexOf('class $modify(CorumRankedSpectatorDummyPlayer');
     const worldAt=source.indexOf('class $modify(CorumRankedSpectatorCameraHook');
     const capture=readFileSync(join(root,'src/spectator/SpectatorPlayerCapture.cpp'),'utf8').replace(/^#include.*$/gm,'');
@@ -35,7 +35,7 @@ namespace corum::ranked {struct SurvivalSpectatorRuntime {static SurvivalSpectat
 #include <vector>
 using namespace corum::ranked;
 static std::int64_t clockMs=0;
-namespace geode::log {template<class... T>void info(T...){} }
+namespace geode::log {template<class... T>void info(T...){} template<class... T>void warn(T...){} }
 using namespace geode;
 struct CCDirector { static CCDirector* sharedDirector(){static CCDirector d;return &d;} unsigned getTotalFrames()const{return 0;} };
 struct ScopedRealGameplayEnd { bool& flag;bool previous;ScopedRealGameplayEnd(bool& f,bool b):flag(f),previous(f){flag=b;}~ScopedRealGameplayEnd(){flag=previous;} };
@@ -95,7 +95,7 @@ struct DebugSpectateRuntime {
 struct CorumRankedPlayLayer:PlayLayer {
  corum::ranked::SpectatorLiveRuntime& spectatorTransport(){return corum::ranked::SpectatorLiveRuntime::get();}
  bool blockEntryGameplayUpdate(){return false;}
- struct Fields{SpectatorSourceTrace spectatorSourceTrace;int levelId=123;bool survivalLiveLevel=false,survivalReplayLevel=false,survivalLevel=false;struct Driver{bool partialHistory()const{return false;}template<class...T>bool apply(T...){return false;}std::optional<float> takeNativeDeltaSeconds(){return {};}}spectatorWorldDriver;bool spectatorWorldPoseApplied=false,spectatorCollisionChecked=false;SpectatorNativeProbe spectatorNativeProbe;bool rankedInitialized=false,rankedLevel=true,safetyRetired=false,spectatorMode=false,spectatorPending=false;
+ struct Fields{SpectatorSourceTrace spectatorSourceTrace;unsigned spectatorCaptureDrops=0;int levelId=123;bool survivalLiveLevel=false,survivalReplayLevel=false,survivalLevel=false;struct Driver{bool partialHistory()const{return false;}template<class...T>bool apply(T...){return false;}std::optional<float> takeNativeDeltaSeconds(){return {};}}spectatorWorldDriver;bool spectatorWorldPoseApplied=false,spectatorCollisionChecked=false;SpectatorNativeProbe spectatorNativeProbe;bool rankedInitialized=false,rankedLevel=true,safetyRetired=false,spectatorMode=false,spectatorPending=false;
   corum::ranked::SpectatorSceneContext sceneContext;std::optional<SpectatorRemoteFrame>spectatorRenderedFrame;struct Remote{template<class...T>void update(T...){}void presentationVisible(bool){}}remotePlayer;
   bool debugRecordScene=false,debugPlaybackScene=false,debugRecordHasFrame=false;SpectatorCapturePolicy spectatorCapture;std::shared_ptr<SpectatorCosmetics const> spectatorCosmetics;std::chrono::steady_clock::time_point nextCosmeticCaptureAt{};bool spectatorWorldUpdateInProgress=false,spectatorWorldResetInProgress=false;std::optional<unsigned> spectatorCameraFrameNumber;}fields;
  Fields* m_fields=&fields;
@@ -172,7 +172,7 @@ test('actual Debug recording clock seeds at the first valid native world and pre
 #include <cassert>
 #include <limits>
 #include "${join(root,'src/spectator/SpectatorPoseCodec.hpp')}"
-namespace geode::log {template<class... T>void info(T...){} }
+namespace geode::log {template<class... T>void info(T...){} template<class... T>void warn(T...){} }
 using namespace geode;
 namespace corum::ranked::debug {
 static std::chrono::steady_clock::time_point wall{};

@@ -119,6 +119,7 @@ export interface LiveStream {
   packets: BufferedPacket[];
   history?: BufferedPacket[];
   historyContinuous?: boolean;
+  historyBytes?: number;
   cosmetics?: SpectatorCosmetics;
 }
 

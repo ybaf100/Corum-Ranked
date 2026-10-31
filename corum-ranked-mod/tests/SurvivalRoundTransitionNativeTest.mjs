@@ -30,7 +30,7 @@ const preamble=`
 #include <vector>
 ${json}
 auto wall=std::chrono::steady_clock::time_point{};auto testNow(){return wall;}
-namespace geode::log{template<class...T>void info(T const&...){}}
+namespace geode::log{template<class...T>void info(T const&...){}template<class...T>void warn(T const&...){}}
 namespace utils::random{std::string generateUUID(){static int n=0;return "event-"+std::to_string(++n);}}
 `;
 
@@ -49,7 +49,7 @@ struct SurvivalRuntime{std::string m_spectatorAcceptedAttempt;
  struct View{std::string id="match",state="PLAYING",roundKey="r1",error,presentationGate;int mapGeneration=1;struct Map{int levelId=40000000;}map;bool online=false,ownEliminated=false;matjson::Value result;}m_view;
  std::string m_surrenderEventId;bool m_surrenderAccepted=false;void resetSurrender(){m_surrenderEventId.clear();}void pumpSurrenderReturn(){}bool surrenderPending()const{return !m_surrenderEventId.empty()&&!m_surrenderAccepted;}
  bool m_eventBusy=false;std::uint64_t m_generation=1,m_eventGeneration=0;std::string m_session="session",m_presentationContext;
- std::deque<matjson::Value>m_events;std::chrono::steady_clock::time_point m_retryAt{},m_nextPoll{};Request m_eventRequest;int observations=0;
+ std::deque<matjson::Value>m_events;std::uint64_t m_eventOverflowEvictions=0;std::chrono::steady_clock::time_point m_retryAt{},m_nextPoll{};Request m_eventRequest;int observations=0;
  bool active()const{return !m_view.id.empty();}bool current(std::uint64_t gen,std::string const& session)const{return gen==m_generation&&session==m_session;}
  std::string matchEndpoint(std::string const&path)const{return path;}
  void observe(matjson::Value const&body){++observations;if(body.contains("state"))m_view.state=body["state"].asString().unwrapOr("");discardObsoleteEvents();}
@@ -58,6 +58,15 @@ struct SurvivalRuntime{std::string m_spectatorAcceptedAttempt;
 ${['matjson::Value SurvivalRuntime::event(', 'void SurvivalRuntime::enqueue(', 'void SurvivalRuntime::pumpEvents()', 'void SurvivalRuntime::discardObsoleteEvents()', 'void SurvivalRuntime::presentationComplete()'].map(n=>method(source,n)).join('\n')}
 }
 int main(){using corum::ranked::SurvivalRuntime;SurvivalRuntime r;
+ {// P0-A: a telemetry backlog evicts advisory PROGRESS, never an official Start/End.
+  SurvivalRuntime q;q.m_eventBusy=true;q.m_events.push_back(q.event("ATTEMPT_START"));
+  for(int i=0;i<256;i++)q.m_events.push_back(q.event("PROGRESS"));
+  auto end=q.event("ATTEMPT_END");q.enqueue(end);assert(q.m_events.size()==257&&q.m_eventOverflowEvictions==1&&q.m_view.error.empty());
+  assert(q.m_events.front()["type"].asString().unwrapOr("")=="ATTEMPT_START"&&q.m_events.back()["eventId"].asString().unwrapOr("x")==end["eventId"].asString().unwrapOr("y"));
+  SurvivalRuntime full;full.m_eventBusy=true;for(int i=0;i<300;i++)full.m_events.push_back(full.event("ATTEMPT_END"));
+  full.enqueue(full.event("ATTEMPT_END"));assert(full.m_events.size()==301&&full.m_view.error.empty()); // official event retained up to the hard cap
+  full.enqueue(full.event("PROGRESS"));assert(full.m_events.size()==301&&!full.m_view.error.empty());
+  web::pending.clear();}
  auto start=r.event("ATTEMPT_START");r.enqueue(start);auto progress=r.event("PROGRESS");r.enqueue(progress);auto end=r.event("ATTEMPT_END");r.enqueue(end);
  assert(web::pending.size()==1&&r.m_events.size()==3);web::pending[0].done({201,{}});r.pumpEvents();assert(web::pending.size()==2);
  auto oldProgress=web::pending[1].done;r.m_view.state="ROUND_RESULT";r.m_view.presentationGate="ROUND_RESULT";

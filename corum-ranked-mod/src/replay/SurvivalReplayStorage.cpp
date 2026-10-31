@@ -1,6 +1,8 @@
 #include "SurvivalReplayPlayback.hpp"
 #include "SurvivalReplayStorage.hpp"
 #include <map>
+#include <algorithm>
+#include <chrono>
 #if defined(_WIN32)
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -144,6 +146,43 @@ std::optional<Document> Storage::loadBest(Json const& identity){
 std::future<std::optional<Document>> Storage::best(Json identity){return submit([this,identity]{return loadBest(identity);});}
 std::future<std::unique_ptr<Playback>> Storage::playback(Json identity){return submit([this,identity]()->std::unique_ptr<Playback>{auto d=loadBest(identity);return d?std::make_unique<Playback>(std::move(*d)):nullptr;});}
 std::future<std::optional<Json>> Storage::inspect(Json identity){return submit([this,identity]()->std::optional<Json>{auto d=loadBest(identity);return d?std::optional(d->metadata):std::nullopt;});}
+std::future<Json> Storage::inspectState(Json identity){return submit([this,identity]{
+    Json state=Json::object();
+    try{
+        if(auto d=loadBest(identity)){
+            state["best"]=d->metadata;
+            if(d->footer.isObject())state["best"]["captureCompleteness"]=d->footer["captureCompleteness"];
+            // Same launch gate as Runtime::pump, evaluated off the main thread.
+            if(auto problem=d->records.empty()?std::string("INITIAL_STATE_MISSING"):replayInitialDataProblem(d->records.front());!problem.empty())state["initialProblem"]=problem;
+        }
+    }catch(std::exception const& e){state["damaged"]=std::string(e.what()).substr(0,160);return state;}
+    auto attempt=str(identity,"attemptId");if(attempt.empty())return state;
+    auto m=manifest();auto key=sha256Text(attempt);
+    if(!state.contains("best")&&(m["pending"].contains(key)||m["closing"].contains(key)||fs::exists(pending(attempt)))){
+        Json pendingState=Json::object();pendingState["replayValidationStatus"]="AWAITING_OFFICIAL_RECEIPT";
+        pendingState["captureCompleteness"]=m["pending"].contains(key)?Json(str(m["pending"][key],"captureCompleteness")):Json("UNKNOWN");
+        state["pending"]=pendingState;
+    }
+    return state;
+});}
+std::future<std::string> Storage::exportDiagnostics(Json report,std::string label){return submit([this,report=std::move(report),label]()mutable{
+    auto dir=m_root/"diagnostics";safeDirectories(dir);
+    auto text=report.dump(matjson::NO_INDENTATION);
+    if(text.size()>MaxDiagnosticBytes){report["verifiedBefore"]=Json::array();report["sourceAfter"]=Json::array();report["truncated"]=true;text=report.dump(matjson::NO_INDENTATION);}
+    if(text.size()>MaxDiagnosticBytes)throw std::runtime_error("Replay diagnostics exceed bound");
+    if(fs::space(m_root).available<text.size()+16*1024*1024)throw std::runtime_error("Replay storage full; diagnostics skipped");
+    auto stamp=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    auto name="replay-"+sha256Text(label).substr(0,16)+"-"+std::to_string(stamp)+".json";auto next=dir/(name+".next"),dest=dir/name;
+    if(fs::is_symlink(fs::symlink_status(next))||fs::is_symlink(fs::symlink_status(dest)))throw std::runtime_error("Replay symlink refused");
+    {std::ofstream out(next,std::ios::binary|std::ios::trunc);out<<text;out.flush();if(!out)throw std::runtime_error("Replay diagnostics write failed");}
+    durable(next);replace(next,dest);
+    // Bounded retention: only files this exporter created are ever removed.
+    std::vector<fs::directory_entry> files;
+    for(auto const& f:fs::directory_iterator(dir))if(f.is_regular_file()&&!f.is_symlink()&&f.path().extension()==".json"&&f.path().filename().string().starts_with("replay-"))files.push_back(f);
+    std::sort(files.begin(),files.end(),[](auto const& a,auto const& b){return a.last_write_time()>b.last_write_time();});
+    for(std::size_t i=MaxDiagnostics;i<files.size();++i){std::error_code ec;fs::remove(files[i].path(),ec);}
+    return dest.string();
+});}
 std::future<void> Storage::journalClose(Json metadata){return submit([this,metadata]{
     auto const& e=metadata["closingEvent"];
     if(!metadataValid(metadata)||str(e,"type")!="ATTEMPT_END"||str(e,"attemptId")!=str(metadata,"attemptId")||str(e,"roundKey")!=str(metadata,"roundKey")||integer(e,"mapGeneration")!=integer(metadata,"mapGeneration")||integer(e,"levelId")!=integer(metadata,"levelId")||str(e,"eventId").empty()||score(number(e,"progress"),str(metadata,"phase")=="TIEBREAK")<0)throw std::runtime_error("Replay closing ownership invalid");
@@ -168,14 +207,29 @@ std::future<std::vector<Json>> Storage::recover(){return submit([this]{
             try{auto d=decode(orphan);if(d.metadata==metadata)replace(orphan,source);}catch(...){/* Preserve both known best and damaged orphan. */}
         }
     }
+    std::vector<fs::path> damaged;
     for(auto const& entry:fs::directory_iterator(m_root/"pending")){
       if(result.size()>=MaxPending)break;if(!entry.is_regular_file()||entry.is_symlink()||entry.path().extension()!=".tmp")continue;
       try{auto d=decode(entry.path(),true);if(entry.path()!=pending(str(d.metadata,"attemptId")))continue;
         if(!d.complete){fs::resize_file(entry.path(),d.validBytes);d.metadata["captureCompleteness"]="PARTIAL_RECOVERED";}
         auto const& cm=m;if(str(cm["closing"][sha256Text(str(d.metadata,"attemptId"))]["closingEvent"],"type")=="ATTEMPT_END")d.metadata["closingEvent"]=cm["closing"][sha256Text(str(d.metadata,"attemptId"))]["closingEvent"];
         result.push_back(d.metadata);
-      }catch(...){/* A corrupt pending file never authorizes deleting an existing best. */}
+      }catch(...){
+        // A corrupt pending file never authorizes deleting an existing best.
+        damaged.push_back(entry.path());
+      }
     }
+    // P2-E: an unrecoverable (header-damaged) journal no longer consumes the
+    // pending budget forever. It moves to a quarantine; only files beyond the
+    // newest MaxQuarantine AND older than 14 days are ever removed.
+    for(auto const& path:damaged){try{auto q=m_root/"quarantine";safeDirectories(q);auto dest=q/path.filename();
+        if(!fs::exists(dest)){replace(path,dest);
+          std::vector<fs::directory_entry> held;for(auto const& f:fs::directory_iterator(q))if(f.is_regular_file()&&!f.is_symlink())held.push_back(f);
+          std::sort(held.begin(),held.end(),[](auto const& a,auto const& b){return a.last_write_time()>b.last_write_time();});
+          auto const cutoff=fs::file_time_type::clock::now()-std::chrono::hours(24*14);
+          for(std::size_t i=MaxQuarantine;i<held.size();++i)if(held[i].last_write_time()<cutoff){std::error_code ec;fs::remove(held[i].path(),ec);}}
+      }catch(...){}}
+    {std::error_code ec;auto stale=m_root/"manifest.next";if(fs::exists(stale,ec)&&!fs::is_symlink(fs::symlink_status(stale,ec)))fs::remove(stale,ec);}
     if(m["closing"].isObject())for(auto const& metadata:m["closing"]){if(result.size()>=MaxPending)break;if(metadataValid(metadata)&&std::none_of(result.begin(),result.end(),[&](auto const& e){return str(e,"attemptId")==str(metadata,"attemptId");}))result.push_back(metadata);}
     return result;
 });}

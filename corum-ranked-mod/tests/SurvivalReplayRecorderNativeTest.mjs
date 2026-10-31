@@ -112,6 +112,17 @@ int main(){Recorder r;r.m_recovery.get();testEnvironment["cbf"]["loaded"]=true;t
  frame(r,90,false);r.finish("ROUND_TIMEOUT",90);r.sceneExited("foreign-attempt","SCENE_EXIT");assert(r.active());r.sceneExited("scene-retired","SCENE_EXIT");assert(!r.active());drain(r);
  auto proofReceipt=receipt("scene-retired",40);proofReceipt.roundKey="retired-round";proofReceipt.bestAttemptId="scene-retired";assert(r.storage().reconcile(proofReceipt).get());auto preserved=r.storage().best(partial).get();assert(preserved&&number(preserved->records.back(),"progress")==40&&str(preserved->footer,"captureCompleteness")=="PARTIAL_RECOVERED");
  assert(str(r.storage().best(metadata("x")).get()->metadata,"attemptId")=="new-good");
+ // P0-D: real disk exhaustion for the CURRENT capture is a Space notice; the capture
+ // is marked damaged (never promoted) and the existing best is untouched.
+ {r.begin(metadata("space"));initial(r);std::promise<void> full;full.set_exception(std::make_exception_ptr(std::runtime_error("Replay storage full; best preserved")));
+  r.m_writes.push_back({full.get_future(),"STORAGE_APPEND","space","r1"});r.pump();
+  assert(r.notice()==ReplayNotice::Space&&r.m_captures.at("space").damaged);
+  assert(str(r.storage().best(metadata("x")).get()->metadata,"attemptId")=="new-good");}
+ // P0-D: a durable official End journal cannot be rewritten with a different event.
+ {auto closing=metadata("journal-owner");closing["roundKey"]="journal-round";Json e;e["type"]="ATTEMPT_END";e["attemptId"]="journal-owner";e["roundKey"]="journal-round";e["mapGeneration"]=1;e["levelId"]=123;e["eventId"]="end-1";e["progress"]=12.;
+  closing["closingEvent"]=e;r.storage().journalClose(closing).get();r.storage().journalClose(closing).get(); // idempotent retry
+  auto changed=closing;changed["closingEvent"]["eventId"]="end-2";bool refused=false;try{r.storage().journalClose(changed).get();}catch(std::exception const& error){refused=std::string(error.what()).find("changed")!=std::string::npos;}
+  assert(refused);r.storage().closeAcknowledged("journal-owner").get();}
 }
 
 `;

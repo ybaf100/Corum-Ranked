@@ -181,6 +181,7 @@ private:
     std::int64_t m_lastServerNow=0;
     std::set<std::string> m_audioReported;
     std::deque<matjson::Value> m_events;
+    std::uint64_t m_eventOverflowEvictions=0;
     std::chrono::steady_clock::time_point m_pollStartedAt{},m_nextPoll{},m_nextProgress{},m_retryAt{},m_recoverRetryAt{},m_nextQueuePoll{},m_ackRetryAt{};
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_controlRequest,m_pollRequest,m_eventRequest,m_recoverRequest,m_queueRequest;
 };

@@ -2,6 +2,8 @@
 #include "SpectatorRemotePolicy.hpp"
 #include <algorithm>
 #include <deque>
+#include <cmath>
+#include <vector>
 
 namespace corum::ranked {
 
@@ -39,6 +41,8 @@ public:
         if (interval > 0 && interval <= 3000) {
             m_arrivalMs = m_responses ? m_arrivalMs * 0.75 + interval * 0.25 : interval;
             if (m_responses) { m_arrivalTotal += interval; ++m_arrivalCount; }
+            if (m_intervals.size() >= kJitterWindow) m_intervals.pop_front();
+            m_intervals.push_back(interval);
         }
         m_lastResponseMs = nowMs;
         ++m_responses; m_packets += packets;
@@ -91,7 +95,12 @@ public:
             auto const wanted = m_renderMs + delta;
             m_renderMs = std::min(wanted, latest);
             if (wanted > latest + 0.001 && !terminal && !m_sourcePaused) {
-                if (!m_starved) { ++m_starvations; m_starvedSinceMs = nowMs; }
+                if (!m_starved) {
+                    ++m_starvations; m_starvedSinceMs = nowMs;
+                    // P1-C: an actual stall raises the floor by one sample period.
+                    m_starvationFloorMs = std::min(kMaxDelayMs, std::max(m_starvationFloorMs, m_delayMs) + m_sampleMs);
+                    updateDelay();
+                }
                 m_starved = true;
                 if (nowMs - m_starvedSinceMs >= 250) m_running = false;
             } else {
@@ -174,19 +183,47 @@ public:
     [[nodiscard]] double averageRttMs() const { return m_responses ? m_rttTotal / m_responses : 0; }
     [[nodiscard]] double averageArrivalMs() const { return m_arrivalCount ? m_arrivalTotal / m_arrivalCount : 0; }
     [[nodiscard]] double packetsPerResponse() const { return m_responses ? static_cast<double>(m_packets) / m_responses : 0; }
+    /** p95 of the last kJitterWindow response intervals (0 until 4 samples). */
+    [[nodiscard]] double p95ArrivalMs() const {
+        if (m_intervals.size() < 4) return 0;
+        std::vector<double> sorted(m_intervals.begin(), m_intervals.end()); std::sort(sorted.begin(), sorted.end());
+        return sorted[std::min(sorted.size() - 1, static_cast<std::size_t>(std::ceil(sorted.size() * 0.95)) - 1)];
+    }
+    [[nodiscard]] double maxDelayMs() const { return m_maxDelayMs; }
+    /** P1-C experiment, OFF by default. A/B on bursty/alternating/uniform/rare
+     * stall traces (tests/SpectatorInterpolationBufferTest.cpp) showed equal
+     * starvation and rebuffer counts with +70..330ms average delay, because the
+     * render clock runs at 1x once started and delay only gates (re)start.
+     * Metrics (p95ArrivalMs/maxDelayMs) are always collected. */
+    void setAdaptiveJitter(bool enabled) { m_adaptiveJitter = enabled; }
+    static constexpr std::size_t kJitterWindow = 32;
+    static constexpr double kDecreaseStepMs = 4;   // slow recovery per update
 
 private:
-    void updateDelay() { m_delayMs = std::clamp(std::ceil(std::max(2 * m_sampleMs, m_arrivalMs + 2*m_sampleMs)), kMinDelayMs, kMaxDelayMs); }
+    // P1-C: target = max(EWMA budget, p95 arrival jitter + one sample, recent
+    // stall floor). Increase immediately; decrease by a bounded step so one
+    // calm response cannot undo the buffer that a jitter burst needed.
+    void updateDelay() {
+        auto target = std::max(2 * m_sampleMs, m_arrivalMs + 2 * m_sampleMs);
+        if (!m_adaptiveJitter) { m_delayMs = std::clamp(std::ceil(target), kMinDelayMs, kMaxDelayMs); m_maxDelayMs = std::max(m_maxDelayMs, m_delayMs); return; }
+        if (auto p95 = p95ArrivalMs(); p95 > 0) target = std::max(target, p95 + m_sampleMs);
+        target = std::max(target, m_starvationFloorMs);
+        target = std::clamp(std::ceil(target), kMinDelayMs, kMaxDelayMs);
+        m_delayMs = target >= m_delayMs ? target : std::max(target, m_delayMs - kDecreaseStepMs);
+        m_starvationFloorMs = std::max(0.0, m_starvationFloorMs - kDecreaseStepMs);
+        m_maxDelayMs = std::max(m_maxDelayMs, m_delayMs);
+    }
     void prune() {
         while (m_samples.size() > 1 && m_samples[1].publisherElapsedMs <= m_renderMs) m_samples.pop_front();
     }
     std::deque<SpectatorBufferedSample> m_samples;
     double m_renderMs = 0, m_lastRenderWallMs = 0, m_starvedSinceMs = 0;
-    double m_delayMs = 100, m_sampleMs = 50, m_arrivalMs = 0;
+    double m_delayMs = 100, m_sampleMs = 50, m_arrivalMs = 0, m_starvationFloorMs = 0, m_maxDelayMs = 0;
+    std::deque<double> m_intervals;
     double m_lastResponseMs = 0, m_rttTotal = 0, m_arrivalTotal = 0;
     std::uint64_t m_responses = 0, m_packets = 0, m_arrivalCount = 0, m_starvations = 0;
     std::uint64_t m_segment = 0;
     bool m_running = false, m_wallSet = false, m_starved = false, m_terminalRendered = false;
-    bool m_sourcePaused = false;
+    bool m_sourcePaused = false, m_adaptiveJitter = false;
 };
 } // namespace corum::ranked

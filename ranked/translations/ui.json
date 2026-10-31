@@ -2391,6 +2391,82 @@
     "en": "VIEW REPLAY",
     "ko": "리플레이 보기"
   },
+  "spectator-partial-history": {
+    "en": "PARTIAL SYNC · HISTORY TRUNCATED",
+    "ko": "부분 동기화 · 기록 일부 누락"
+  },
+  "spectator-syncing": {
+    "en": "SYNCING...",
+    "ko": "동기화 중..."
+  },
+  "spectator-reconnecting": {
+    "en": "RECONNECTING...",
+    "ko": "재연결 중..."
+  },
+  "spectator-partial": {
+    "en": "PARTIAL SYNC",
+    "ko": "부분 동기화"
+  },
+  "spectator-world-desync": {
+    "en": "WORLD DESYNC · WAITING FOR NEXT ATTEMPT",
+    "ko": "월드 불일치 · 다음 시도 대기"
+  },
+  "spectator-recapture": {
+    "en": "RECAPTURE REQUIRED · WAITING FOR NEXT ATTEMPT",
+    "ko": "재캡처 필요 · 다음 시도 대기"
+  },
+  "spectator-disconnected": {
+    "en": "DISCONNECTED · REOPEN SPECTATE",
+    "ko": "연결 끊김 · 관전을 다시 여세요"
+  },
+  "spectator-buffering": {
+    "en": "BUFFERING...",
+    "ko": "버퍼링 중..."
+  },
+  "spectator-history-gap": {
+    "en": "HISTORY GAP · RESYNCING",
+    "ko": "기록 누락 · 재동기화 중"
+  },
+  "spectator-polling": {
+    "en": "POLLING...",
+    "ko": "수신 대기 중..."
+  },
+  "spectator-waiting": {
+    "en": "WAITING...",
+    "ko": "대기 중..."
+  },
+  "replay-view-partial": {
+    "en": "VIEW REPLAY · PARTIAL RECOVERED",
+    "ko": "리플레이 보기 · 부분 복구"
+  },
+  "replay-view-prefix": {
+    "en": "VIEW REPLAY · OFFICIAL PREFIX",
+    "ko": "리플레이 보기 · 공식 구간만"
+  },
+  "replay-waiting-receipt": {
+    "en": "Replay waiting for official receipt",
+    "ko": "공식 확정 대기 중인 리플레이"
+  },
+  "replay-unavailable": {
+    "en": "Replay unavailable (missing evidence)",
+    "ko": "리플레이 재생 불가 (증거 부족)"
+  },
+  "replay-incompatible-setting": {
+    "en": "Replay incompatible: unsupported CBF setting",
+    "ko": "리플레이 호환 불가: 지원하지 않는 CBF 설정"
+  },
+  "replay-incompatible-version": {
+    "en": "Replay incompatible: version mismatch",
+    "ko": "리플레이 호환 불가: 버전 불일치"
+  },
+  "replay-incompatible-hook": {
+    "en": "Replay incompatible: hook unavailable",
+    "ko": "리플레이 호환 불가: 후크 사용 불가"
+  },
+  "replay-incompatible-evidence": {
+    "en": "Replay incompatible: missing native evidence",
+    "ko": "리플레이 호환 불가: Native 증거 부족"
+  },
   "replay-capture-error": {
     "en": "Replay capture failed; existing best preserved",
     "ko": "리플레이 녹화 실패 · 기존 최고기록은 보존됩니다"

@@ -37,7 +37,7 @@ const common=`
 #include <variant>
 #include <vector>
 ${json}
-namespace geode::log{template<class...T>void info(T const&...){}}
+namespace geode::log{template<class...T>void info(T const&...){}template<class...T>void warn(T const&...){}}
 auto wall=std::chrono::steady_clock::time_point{};auto testNow(){return wall;}
 template<class T>struct Ref{T* p=nullptr;Ref()=default;Ref(T* p):p(p){}T* data()const{return p;}T* operator->()const{return p;}explicit operator bool()const{return p;}};
 template<class T>struct WeakRef{T* p;explicit WeakRef(T* p):p(p){}Ref<T> lock()const{return {p&&p->alive?p:nullptr};}};
@@ -114,7 +114,7 @@ struct SurvivalRuntime{std::string m_spectatorAcceptedAttempt;
  struct View{std::string id="match",roundKey="r1",state="PLAYING",phase="ROUND_1",error,activeAttemptId="a";double activeAttemptProgress=45;int mapGeneration=1,roundNumber=1;bool ownEliminated=false;struct{int levelId=4;}map;}m_view;
  std::string m_surrenderEventId,m_surrenderMatchId,m_session="session",m_attempt="a",m_attemptContext="r1",m_presentationContext;bool m_surrenderAccepted=false,m_eventBusy=false;
  std::optional<WeakRef<PlayLayer>>m_surrenderOwner;std::optional<WeakRef<CCScene>>m_surrenderScene;
- std::uint64_t m_generation=1,m_eventGeneration=0;double m_attemptBest=77;std::deque<matjson::Value>m_events;Request m_eventRequest;std::chrono::steady_clock::time_point m_retryAt{},m_nextPoll{};
+ std::uint64_t m_generation=1,m_eventGeneration=0;double m_attemptBest=77;std::deque<matjson::Value>m_events;std::uint64_t m_eventOverflowEvictions=0;Request m_eventRequest;std::chrono::steady_clock::time_point m_retryAt{},m_nextPoll{};
  bool active()const{return !m_view.id.empty();}bool current(std::uint64_t g,std::string const&s)const{return g==m_generation&&s==m_session;}
  bool freePlaying()const{return false;}bool observing()const{return false;}void chooseOutcome(SurvivalOutcomeChoice value){assert(m_view.ownEliminated);assert(value==SurvivalOutcomeChoice::PersonalResult);}
  bool surrenderPending()const{return !m_surrenderEventId.empty()&&!m_surrenderAccepted;}

@@ -27,6 +27,7 @@ const valueModel=viewerTest.slice(viewerTest.indexOf('namespace matjson {'),view
 const decoderHarness=`
 #include "${join(root, 'src/domain/SpectatorInterpolationBuffer.hpp')}"
 #include "${join(root, 'src/domain/SpectatorRestoreTimeline.hpp')}"
+#include "${join(root, 'src/domain/SpectatorFailureFingerprint.hpp')}"
 #include <chrono>
 #include <limits>
 #include <map>

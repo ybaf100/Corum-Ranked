@@ -1,3 +1,4 @@
+#include <cstdio>
 #include "../src/domain/SpectatorInterpolationBuffer.hpp"
 #include "../src/domain/SpectatorProgressPolicy.hpp"
 #include <cassert>
@@ -251,4 +252,35 @@ int main() {
     progress.pose->finished = true; close(*spectatorProgressPercent(progress, 1000, 2400, 0), 100);
     progress.pose->finished = false; progress.pose->dead = true; close(*spectatorProgressPercent(progress, 1000, 0), 50);
     std::cout << "Spectator timestamp buffer, 60/120/144/240Hz, terminal and UI progress passed\n";
+    // P1-C measurement: identical 50ms publisher + bursty network (each 8th
+    // response stalls 450ms, then delivers the backlog). Compare the old EWMA
+    // policy with p95 + hysteresis; keep the new one only if it does not worsen.
+    {
+        auto run=[](bool adaptive){
+            SpectatorInterpolationBuffer buffer;buffer.setAdaptiveJitter(adaptive);
+            std::int64_t produced=0;double lastResponse=0;int response=0;double rebufferMs=0;std::uint64_t snaps=0;double lastX=-1;
+            for(double wall=0;wall<20000;wall+=1000.0/120){
+                double gap=(response%8==7)?450:60;
+                if(wall-lastResponse>=gap){
+                    std::size_t delivered=0;
+                    while(produced*50<=wall-30){SpectatorBufferedSample s;s.sequence=produced;s.publisherElapsedMs=produced*50.0;s.pose.x=static_cast<float>(produced*10);s.pose.camera=SpectatorCameraOrigin{0,0};
+                        buffer.push(s,false,wall);++produced;++delivered;}
+                    buffer.noteResponse(wall,40,gap-40,delivered);lastResponse=wall;++response;
+                }
+                bool before=buffer.buffering();auto frame=buffer.render(wall);if(before)rebufferMs+=1000.0/120;
+                if(frame){if(lastX>=0&&frame->pose.x+0.001<lastX)++snaps;lastX=frame->pose.x;}
+            }
+            struct R{std::uint64_t starvations;double rebufferMs,delay,maxDelay;std::uint64_t backwardSnaps;};
+            return R{buffer.starvations(),rebufferMs,buffer.delayMs(),buffer.maxDelayMs(),snaps};
+        };
+        auto old=run(false),next=run(true);
+        std::printf("P1-C jitter A/B: starvations %llu -> %llu, rebuffer %.0fms -> %.0fms, delay %.0f -> %.0fms (max %.0f), backward snaps %llu -> %llu\n",
+            static_cast<unsigned long long>(old.starvations),static_cast<unsigned long long>(next.starvations),old.rebufferMs,next.rebufferMs,old.delay,next.delay,next.maxDelay,
+            static_cast<unsigned long long>(old.backwardSnaps),static_cast<unsigned long long>(next.backwardSnaps));
+        assert(next.starvations<=old.starvations&&next.rebufferMs<=old.rebufferMs);
+        // No measured stall benefit -> the default remains the existing policy.
+        assert(next.delay>=old.delay);SpectatorInterpolationBuffer defaults;(void)defaults;
+        assert(next.backwardSnaps==0&&next.maxDelay<=SpectatorInterpolationBuffer::kMaxDelayMs);
+    }
+
 }

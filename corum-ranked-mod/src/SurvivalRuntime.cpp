@@ -4,6 +4,7 @@
 #include "replay/SurvivalReplayRecorder.hpp"
 #include "SurvivalSpectatorRuntime.hpp"
 #include "SurvivalRuntime.hpp"
+#include <algorithm>
 #include "RankedRuntime.hpp"
 #include "RankedAudioManager.hpp"
 #include "RankedLevelPreparation.hpp"
@@ -467,7 +468,18 @@ matjson::Value SurvivalRuntime::event(std::string const& type) const {
 }
 void SurvivalRuntime::enqueue(matjson::Value body) {
     if(!active() || m_session.empty())return;
-    if(m_events.size()>256){m_view.error="Survival telemetry is pending. Reconnect to recover the game.";return;}
+    if(m_events.size()>256){
+        // P0-A: advisory PROGRESS is coalescable; an official Start/End/Forfeit
+        // is never dropped because telemetry backed up. Evict the oldest queued
+        // PROGRESS that is not the in-flight head, and bound the hard cap.
+        bool const advisory=body["type"].asString().unwrapOr("")=="PROGRESS";
+        auto victim=std::find_if(m_events.begin()+(m_eventBusy?1:0),m_events.end(),[](auto const& e){return e["type"].asString().unwrapOr("")=="PROGRESS";});
+        if(victim!=m_events.end()){m_events.erase(victim);++m_eventOverflowEvictions;}
+        else if(advisory||m_events.size()>=512){
+            geode::log::warn("[SurvivalEvents] stage=QUEUE_OVERFLOW type={} depth={} evictions={}",body["type"].asString().unwrapOr(""),m_events.size(),m_eventOverflowEvictions);
+            m_view.error="Survival telemetry is pending. Reconnect to recover the game.";return;
+        }
+    }
     m_events.push_back(std::move(body));pumpEvents();
 }
 void SurvivalRuntime::pumpEvents() {

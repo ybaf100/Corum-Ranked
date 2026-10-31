@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { InMemoryMatchRuntimeState } from "../src/match/match-runtime-state.js";
 import { MatchService } from "../src/match/match.service.js";
 import { SpectatorLiveService, parseSpectatorKeyframe } from "../src/match/spectator-live.service.js";
+import type { MatchRuntimeStatePort } from "../src/match/match-runtime-state.js";
 import type { RankedSessionContext } from "../src/session/session.types.js";
 
 const session = { playerId: "player-a" } as RankedSessionContext;
@@ -70,6 +71,49 @@ const setup = () => {
 describe("SpectatorLiveService", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("P2-C: 16 viewers x 5 polls share one stream and cost one locked authority read per viewer session", async () => {
+    const stateCall = vi.fn(async () => standardState("B", true));
+    const service = new SpectatorLiveService({ state: stateCall } as unknown as MatchService,
+      new InMemoryMatchRuntimeState() as unknown as MatchRuntimeStatePort, undefined, 250);
+    const started = performance.now();
+    for (let poll = 0; poll < 5; ++poll)
+      await Promise.all(Array.from({ length: 16 }, (_, viewer) =>
+        service.subscribe("match-1", "token", { ...session, sessionId: `viewer-${viewer}` } as RankedSessionContext, "2").catch(() => null)));
+    const elapsedMs = performance.now() - started;
+    expect(stateCall).toHaveBeenCalledTimes(16);
+    expect(service.diagnostics().streams).toBeLessThanOrEqual(1);
+    expect(service.diagnostics().reused + service.diagnostics().coalesced).toBe(64);
+    expect(elapsedMs).toBeLessThan(1000);
+  });
+
+  it("P0-A: spectator traffic reuses one locked authority read per session and never shares or caches failures", async () => {
+    let state = standardState("B", false);
+    let fail = false;
+    const stateCall = vi.fn(async () => { if (fail) throw new ForbiddenException("MATCH_TOKEN_INVALID"); return state; });
+    const service = new SpectatorLiveService({ state: stateCall } as unknown as MatchService,
+      new InMemoryMatchRuntimeState() as unknown as MatchRuntimeStatePort, undefined, 250);
+    await Promise.all(Array.from({ length: 8 }, (_, i) => service.publish("match-1", "token", session, packet({ sequence: i, elapsedMs: 10 + i * 50 })).catch(() => undefined)));
+    expect(stateCall).toHaveBeenCalledTimes(1);
+    const sub = (svc: SpectatorLiveService, token: string, who: RankedSessionContext = session) =>
+      svc.subscribe("match-1", token, who, "2").then(() => null, (error: unknown) => error);
+    for (let i = 0; i < 10; ++i) await sub(service, "token");
+    expect(stateCall).toHaveBeenCalledTimes(1);
+    // A different session or token never reuses another caller's authorization.
+    await sub(service, "token", { ...session, sessionId: "other" } as RankedSessionContext);
+    await sub(service, "other-token");
+    expect(stateCall).toHaveBeenCalledTimes(3);
+    expect(service.diagnostics().reused).toBeGreaterThanOrEqual(10);
+    // Failures are not cached; the window expires; default construction keeps per-request reads.
+    fail = true;
+    expect(await sub(service, "fresh-token")).toBeInstanceOf(ForbiddenException);
+    fail = false;state = standardState("B", true);
+    await sub(service, "fresh-token");
+    expect(stateCall).toHaveBeenCalledTimes(5);
+    const plain = new SpectatorLiveService({ state: stateCall } as unknown as MatchService, new InMemoryMatchRuntimeState() as unknown as MatchRuntimeStatePort);
+    await sub(plain, "token");await sub(plain, "token");
+    expect(stateCall).toHaveBeenCalledTimes(7);
   });
 
   it("holds an authorized opponent pause without timeout, then resumes the same generation and gameplay clock", async () => {

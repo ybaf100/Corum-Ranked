@@ -69,7 +69,7 @@ matjson::Value replayPose(PlayLayer* layer){
 class $modify(CorumSurvivalReplayLayer,PlayLayer){
 public:
  struct ReplayCamera {CCPoint origin,second,diff;float zoom=1,angle=0;struct Layer{CCPoint pos;float x=1,y=1,angle=0;};std::array<Layer,3> layers;};
- struct Fields {Json trace=Json::array();std::array<unsigned,2> playerUpdates{};bool preInput=false;std::optional<ReplayCamera> nativeCamera;bool ready=false,replayOwned=false,liveWorldOwned=false,replayAdvancing=false,internalReset=false,desyncReported=false,retiring=false;CCLabelBMFont* replayText=nullptr;CCLabelBMFont* captureError=nullptr;std::string captureErrorText,captureAttempt,initialAttempt;Slider* replaySlider=nullptr;float replayHudWait=0;unsigned lastRenderFrame=0;
+ struct Fields {Json trace=Json::array();std::array<unsigned,2> playerUpdates{};bool preInput=false;std::optional<ReplayCamera> nativeCamera;bool ready=false,replayOwned=false,liveWorldOwned=false,replayAdvancing=false,internalReset=false,desyncReported=false,retiring=false;CCLabelBMFont* replayText=nullptr;CCLabelBMFont* captureError=nullptr;std::string captureErrorText,captureAttempt,initialAttempt;Slider* replaySlider=nullptr;float replayHudWait=0;corum::ranked::SpectatorAudioClockPolicy replayAudio;bool replayMarkersAdded=false;CCNode* replayDesyncMarker=nullptr;unsigned lastRenderFrame=0;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
  double captureUs=0,captureMaxUs=0;unsigned captureFrames=0;
 #endif
@@ -160,7 +160,12 @@ public:
     }
     void reportReplayFailure(Json before=nullptr){
         auto* replay=worldPlayback();if(!replay)return;
-        if(replay->desync()&&!m_fields->desyncReported){m_fields->desyncReported=true;log::warn("[SurvivalReplayDesync] attemptId={} initial={} failure={} actualBefore={} actualAfter={} inputClock={} environment={}",corum::ranked::replay::str(replay->metadata(),"attemptId"),replay->initial().dump(matjson::NO_INDENTATION),replay->failure().dump(matjson::NO_INDENTATION),before.dump(matjson::NO_INDENTATION),physicsEvidence(true).dump(matjson::NO_INDENTATION),corum::ranked::replay::nativeInputClockDiagnostics().dump(matjson::NO_INDENTATION),corum::ranked::replay::captureReplayPhysicsEnvironment().dump(matjson::NO_INDENTATION));}
+        if(replay->desync()&&!m_fields->desyncReported){m_fields->desyncReported=true;log::warn("[SurvivalReplayDesync] attemptId={} initial={} failure={} actualBefore={} actualAfter={} inputClock={} environment={}",corum::ranked::replay::str(replay->metadata(),"attemptId"),replay->initial().dump(matjson::NO_INDENTATION),replay->failure().dump(matjson::NO_INDENTATION),before.dump(matjson::NO_INDENTATION),physicsEvidence(true).dump(matjson::NO_INDENTATION),corum::ranked::replay::nativeInputClockDiagnostics().dump(matjson::NO_INDENTATION),corum::ranked::replay::captureReplayPhysicsEnvironment().dump(matjson::NO_INDENTATION));
+          // P0-C/P2-D: bounded first-divergence report on the storage worker (no main-thread IO).
+          try{auto report=replay->diagnosticsReport();report["actualBefore"]=before;report["actualAfter"]=physicsEvidence(true);
+            report["inputClock"]=corum::ranked::replay::nativeInputClockDiagnostics();report["currentEnvironment"]=corum::ranked::replay::captureReplayPhysicsEnvironment();
+            (void)corum::ranked::replay::Recorder::get().storage().exportDiagnostics(std::move(report),corum::ranked::replay::str(replay->metadata(),"attemptId"));
+          }catch(...){}}
     }
     void onReplayControl(CCObject* sender){
         auto* replay=worldPlayback();if(!replay||!sender)return;
@@ -185,6 +190,18 @@ public:
           auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(CorumSurvivalReplayLayer::onReplayControl));item->setTag(i+1);item->setPosition({(size.width-width)/2+cell*(i+.5f),16});menu->addChild(item);
         }
         m_fields->replaySlider=Slider::create(this,menu_selector(CorumSurvivalReplayLayer::onReplaySeek),.65f);m_fields->replaySlider->setPosition({size.width/2,43});addChild(m_fields->replaySlider,1500);
+    }
+    // P2-D: timeline markers for events actually present in the recorded tape,
+    // on a self-sized strip above the controls (does not move existing buttons).
+    void addReplayMarkers(corum::ranked::replay::Playback* replay){
+        m_fields->replayMarkersAdded=true;if(!replay||replay->duration()<=0||m_fields->liveWorldOwned)return;
+        auto size=CCDirector::sharedDirector()->getWinSize();auto width=std::min(460.f,size.width-12),left=(size.width-width)/2;
+        auto* strip=CCLayerColor::create(ccc4(255,255,255,40),width,3);strip->setPosition({left,31});addChild(strip,1500);
+        for(auto const& marker:replay->markers()){
+            auto color=marker.kind=='D'?ccc4(255,70,70,230):marker.kind=='C'?ccc4(80,255,120,230):marker.kind=='R'?ccc4(80,200,255,200):ccc4(255,220,80,200);
+            auto* tick=CCLayerColor::create(color,2,7);tick->setPosition({left+static_cast<float>(marker.time/replay->duration())*width-1,29});addChild(tick,1501);
+        }
+        auto* desync=CCLayerColor::create(ccc4(255,0,255,240),2,9);desync->setVisible(false);desync->setPosition({left,28});addChild(desync,1502);m_fields->replayDesyncMarker=desync;
     }
     void pumpReplay(float dt){
         auto* replay=worldPlayback();if(!replay)return;
@@ -226,18 +243,30 @@ public:
         reportReplayFailure();
         if(m_fields->liveWorldOwned){for(auto* player:{m_player1,m_player2})corum::ranked::CorumRemotePlayer::hideNativeVisuals(player);return;}
         auto* audio=FMODAudioEngine::sharedEngine();auto const* presented=replay->presentedPose();
-        if(replay->paused()||replay->seeking()||replay->ended()||replay->desync()||replay->speed()!=1||!presented||!(*presented)["audio"].isObject())audio->pauseMusic(0);
+        auto& audioClock=m_fields->replayAudio;
+        if(replay->paused()||replay->seeking()||replay->ended()||replay->desync()||replay->speed()!=1||!presented||!(*presented)["audio"].isObject()){audio->pauseMusic(0);audioClock.interrupt();}
         else{
-            auto const& sample=(*presented)["audio"];auto track=std::string(audio->getActiveMusic(0));
-            if(!track.empty()&&corum::ranked::spectatorTrackHash(track)==corum::ranked::replay::str(sample,"trackHash")){
-                auto expected=corum::ranked::replay::number(sample,"positionMs");if(std::abs(static_cast<double>(audio->getMusicTimeMS(0))-expected)>100)audio->setMusicTimeMS(static_cast<unsigned>(expected),true,0);audio->resumeMusic(0);
-            }else audio->pauseMusic(0);
+            // P1-E: one exact alignment after pause/seek/speed change, then the
+            // shared hysteresis policy (no per-frame >100ms chasing).
+            auto const& sample=(*presented)["audio"];auto track=std::string(audio->getActiveMusic(0));auto hash=corum::ranked::replay::str(sample,"trackHash");
+            if(!track.empty()&&corum::ranked::spectatorTrackHash(track)==hash){
+                auto expected=corum::ranked::replay::number(sample,"positionMs");auto now=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
+                if(audioClock.needsSeek(hash,expected,static_cast<double>(audio->getMusicTimeMS(0)),replay->time()*1000,now)){
+                    audio->setMusicTimeMS(static_cast<unsigned>(expected),true,0);audioClock.sought(now,std::abs(static_cast<double>(audio->getMusicTimeMS(0))-expected)<=20);
+                }
+                audio->resumeMusic(0);
+            }else{audio->pauseMusic(0);audioClock.interrupt();}
         }
         m_fields->replayHudWait-=dt;if(m_fields->replayHudWait<=0){m_fields->replayHudWait=.1f;
-          auto status=replay->unprovenCollisionIdentity()?"COLLISION IDENTITY UNAVAILABLE":replay->desync()?"REPLAY DESYNC":replay->seeking()?"SEEKING":replay->ended()?"FINISHED":replay->paused()?"PAUSED":"PLAYING";
+          std::string status=replay->unprovenCollisionIdentity()?"COLLISION IDENTITY UNAVAILABLE":replay->desync()?"REPLAY DESYNC · "+corum::ranked::replay::str(replay->failure(),"category"):
+            replay->seeking()?fmt::format("SEEKING -> {:.1f}s {:.0f}%",replay->seekTarget(),replay->seekProgress()*100):replay->ended()?"FINISHED":replay->paused()?"PAUSED":"PLAYING";
+          if(!m_fields->replayMarkersAdded)addReplayMarkers(replay);
           auto text=fmt::format("{} · {} · {:.1f}/{:.1f}s · {:.1f}x · BEST {:.3f}%",(corum::ranked::replay::str(replay->metadata(),"officialCompletion")=="OFFICIAL_PREFIX"||corum::ranked::replay::str(replay->metadata(),"captureCompleteness")=="PARTIAL_RECOVERED")?"PARTIAL REPLAY":"INPUT REPLAY",status,replay->time(),replay->duration(),replay->speed(),replay->metadata()["officialBestProgress"].asDouble().unwrapOr(0));
           m_fields->replayText->setString(text.c_str());corum::ranked::ui::fitFullMenuLabel(m_fields->replayText,CCDirector::sharedDirector()->getWinSize().width-20,20,.25f);
           m_fields->replaySlider->setValue(replay->duration()>0?replay->time()/replay->duration():0);
+          if(auto* marker=m_fields->replayDesyncMarker;marker&&replay->desync()&&!marker->isVisible()&&replay->duration()>0){
+            auto size=CCDirector::sharedDirector()->getWinSize();auto width=std::min(460.f,size.width-12);
+            marker->setPosition({(size.width-width)/2+static_cast<float>(replay->time()/replay->duration())*width-1,28});marker->setVisible(true);}
         }
     }
 

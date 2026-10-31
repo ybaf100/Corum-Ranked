@@ -33,6 +33,7 @@ test('production HTTP decoder, bounded restoration, recovery and compositor shar
 #include "domain/SpectatorCapturePolicy.hpp"
 #include "domain/SpectatorInterpolationBuffer.hpp"
 #include "domain/SpectatorRestoreTimeline.hpp"
+#include "domain/SpectatorFailureFingerprint.hpp"
 #include "domain/SpectatorViewerPollPolicy.hpp"
 #include <functional>
 #include <sstream>

@@ -32,6 +32,15 @@ int main(){
  assert(!policy.needsSeek("track",clock+500,clock+900,clock+500,clock+500));
  assert(policy.needsSeek("track",clock+800,clock+1200,clock+800,clock+800));policy.sought(clock+800,true);
  assert(!policy.needsSeek("track",clock+900,clock+1300,clock+900,clock+900));assert(policy.seeks==1);
+ {// P1-E replay: 30 repeated pause/seek/resume cycles align exactly once each, never per frame.
+  SpectatorAudioClockPolicy replay;double now=0,pos=0;unsigned resumes=0;
+  for(int cycle=0;cycle<30;++cycle){
+    for(int f=0;f<120;++f){now+=16;pos+=16;double actual=pos+(f%5)*8;
+      if(replay.needsSeek("song",pos,actual,pos,now)){replay.sought(now,true);}}
+    replay.interrupt();pos+=7000;now+=500;++resumes; // user seek: audio paused while simulating
+    if(replay.needsSeek("song",pos,pos-7000,pos,now)){replay.sought(now,true);}
+  }
+  assert(replay.seeks<=resumes+1&&replay.failedSeeks==0&&replay.maxDrift<=32&&replay.averageDrift()<=17);}
  Owner o;auto* audio=FMODAudioEngine::sharedEngine();o.startMusic();assert(o.starts==0);o.syncSpectatorAudio();assert(audio->paused&&o.starts==0);
  SpectatorGhostPose p;p.audio=SpectatorAudioSample{spectatorTrackHash("/mobile/GD/VOICE.mp3"),62150};
  o.fields.spectatorRenderedFrame=SpectatorRemoteFrame{{"m",1,0,123,"a",1,1},0,p,60000,0};o.transport.state=SpectatorLiveStatus::Syncing;o.syncSpectatorAudio();assert(o.starts==1&&audio->paused);

@@ -58,6 +58,20 @@ template<class Command> Command decodeReplayButton(Json const& input){
 inline bool replayDispatchValid(Json const& value){
     return replayButtonCommandValid(value)&&(value["before"].isArray()||value["before"].isNull())&&(value["after"].isArray()||value["after"].isNull());
 }
+/** P0-C: first-failure category so unrelated causes are never reported as one DESYNC. */
+inline std::string replayFailureCategory(std::string const& reason){
+    auto has=[&](char const* s){return reason.find(s)!=std::string::npos;};
+    if(has("RANDOM"))return "RANDOM";
+    if(has("COLLISION"))return "COLLISION_TARGET";
+    if(has("CBF"))return "CBF_SUBSTEP";
+    if(has("CLOCK")||has("TIMESTAMP"))return "NATIVE_CLOCK";
+    if(has("INPUT")||has("BUTTON")||has("DISPATCH"))return "NATIVE_INPUT";
+    if(has("ANCHOR")||has("WORLD")||has("TRIGGER")||has("FOLLOW")||has("SPAWN"))return "WORLD_EVENT";
+    if(has("CALLBACK")||has("UNCONSUMED")||has("STEP"))return "NATIVE_SCHEDULE";
+    if(has("PHYSICS")||has("POSE"))return "PHYSICS_STATE";
+    if(has("ENVIRONMENT")||has("INITIAL")||has("LEGACY"))return "ENVIRONMENT";
+    return "OTHER";
+}
 inline std::string replayInitialDataProblem(Json const& initial){
     if(integer(initial,"physicsSchema")!=ReplayPhysicsSchema)return "LEGACY_INITIAL_PHYSICS_UNAVAILABLE";
     if(auto problem=replayPlayerDataProblem(initial["player1"]);!problem.empty())return problem;

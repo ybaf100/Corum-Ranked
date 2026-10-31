@@ -1,11 +1,11 @@
 // Shared visual relay only. Authority belongs to the Solo/Survival adapters.
 import { ConflictException } from "@nestjs/common";
 import type { BufferedPacket,LiveStream,SpectatorLivePacket,SpectatorLiveSubscribeResponse } from "./spectator-live.protocol.js";
-import { SPECTATOR_HISTORY_MAX_PACKETS,SPECTATOR_HISTORY_PAGE_PACKETS,SPECTATOR_LIVE_BUFFER_MS,SPECTATOR_LIVE_MAX_PACKETS,SPECTATOR_LIVE_PROTOCOL_VERSION } from "./spectator-live.policy.js";
+import { SPECTATOR_HISTORY_MAX_BYTES,SPECTATOR_HISTORY_MAX_PACKETS,SPECTATOR_HISTORY_PAGE_PACKETS,SPECTATOR_LIVE_BUFFER_MS,SPECTATOR_LIVE_MAX_PACKETS,SPECTATOR_LIVE_PROTOCOL_VERSION } from "./spectator-live.policy.js";
 const queryInteger=(value:string|undefined):number|null=>{if(value===undefined||value==="")return null;const n=Number(value);return Number.isSafeInteger(n)&&n>=0?n:null;};
 const publicPacket=({receivedAtMs:_,...packet}:BufferedPacket):SpectatorLivePacket=>packet;
 export const relayFallback=(reason:string):SpectatorLiveSubscribeResponse=>({protocolVersion:SPECTATOR_LIVE_PROTOCOL_VERSION,active:true,waiting:false,fallback:true,reason,bufferWindowMs:SPECTATOR_LIVE_BUFFER_MS,maxPackets:SPECTATOR_LIVE_MAX_PACKETS,stream:null,packets:[]});
-export function appendSpectatorPacket(stream: LiveStream, packet: SpectatorLivePacket, nowMs: number, historyLimit: number = SPECTATOR_HISTORY_MAX_PACKETS): void {
+export function appendSpectatorPacket(stream: LiveStream, packet: SpectatorLivePacket, nowMs: number, historyLimit: number = SPECTATOR_HISTORY_MAX_PACKETS, historyByteLimit: number = SPECTATOR_HISTORY_MAX_BYTES): void {
     const last = stream.packets.at(-1);
     if (last?.keyframe.dead || last?.keyframe.finished) throw new ConflictException("SPECTATOR_TERMINAL_STREAM");
     if (last && packet.elapsedMs < last.elapsedMs) throw new ConflictException("SPECTATOR_REVERSE_TIMESTAMP");
@@ -18,8 +18,13 @@ export function appendSpectatorPacket(stream: LiveStream, packet: SpectatorLiveP
       stream.cosmetics=cosmetic;
     }
     const buffered={...packet,receivedAtMs:nowMs};
+    const size=(p:BufferedPacket)=>Buffer.byteLength(JSON.stringify(p));
     (stream.history??=[]).push(buffered);
-    if(stream.history.length>historyLimit)stream.history.splice(0,stream.history.length-historyLimit);
+    stream.historyBytes=(stream.historyBytes??stream.history.slice(0,-1).reduce((n,p)=>n+size(p),0))+size(buffered);
+    if(stream.history.length>historyLimit)stream.historyBytes-=stream.history.splice(0,stream.history.length-historyLimit).reduce((n,p)=>n+size(p),0);
+    // Trimming the oldest packets makes history[0].sequence > 0, which the read
+    // path reports as HISTORY_WINDOW_EXPIRED (partial), never a full restore.
+    while(stream.historyBytes>historyByteLimit&&stream.history.length>1)stream.historyBytes-=size(stream.history.shift()!);
     stream.lastSequence = packet.sequence;
     stream.lastReceivedAtMs = nowMs;
     stream.packets.push(buffered);

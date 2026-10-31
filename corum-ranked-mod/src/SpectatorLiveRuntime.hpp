@@ -4,6 +4,7 @@
 #include "domain/SpectatorRemotePolicy.hpp"
 #include "domain/SpectatorInterpolationBuffer.hpp"
 #include "domain/SpectatorRestoreTimeline.hpp"
+#include "domain/SpectatorFailureFingerprint.hpp"
 
 #include <Geode/Geode.hpp>
 #include <Geode/utils/web.hpp>
@@ -12,6 +13,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <utility>
 #include <set>
 
 namespace corum::ranked {
@@ -60,6 +62,15 @@ public:
 
     [[nodiscard]] SpectatorLiveStatus status() const;
     [[nodiscard]] std::string const& reason() const;
+    /** P2-D Debug HUD line: no token, pointer or user identity. */
+    [[nodiscard]] std::string diagnosticsLine() const {
+        auto [applied,total]=restoreProgress();
+        return fmt::format("delay {:.0f}ms p95 {:.0f}ms starve {} rtt {:.0f}ms | {} {} | seq {} ep {} | restore {}/{} | ledger {} suppressed {}",
+            m_sampleBuffer.delayMs(),m_sampleBuffer.p95ArrivalMs(),m_sampleBuffer.starvations(),m_sampleBuffer.averageRttMs(),
+            spectatorFailureClassName(spectatorFailureClass(m_reason)),m_reason,m_lastViewSequence,m_viewPresentationEpoch,applied,total,m_failureLedger.size(),m_failureLedger.suppressed());
+    }
+    /** P1-B restore progress: {applied packets, applied + queued}. */
+    [[nodiscard]] std::pair<std::uint64_t,std::uint64_t> restoreProgress() const{auto applied=m_restoreTimeline.appliedCount();return {applied,applied+m_restoreTimeline.queued()};}
     [[nodiscard]] std::string const& opponentName() const;
     [[nodiscard]] std::optional<SpectatorGhostPose> interpolatedPose() const;
     [[nodiscard]] std::optional<SpectatorRemoteFrame> presentationFrame() const;
@@ -118,6 +129,7 @@ private:
     bool m_publishBusy = false;
     std::string m_publishBudgetAttemptId;
     unsigned m_attemptPublishFailures=0;
+    std::uint64_t m_publishRetries=0;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
     std::chrono::steady_clock::time_point m_nextCameraMetricAt{};
     unsigned m_cameraMetricCount=0;
@@ -133,6 +145,9 @@ private:
 
     std::string m_viewMatchId;
     std::string m_rejectedWorldContext;
+    // P0-B: survives resetViewer()/requestSceneRestore(); only a new Attempt or
+    // stream generation (a different key) may retry a rejected proof.
+    SpectatorFailureLedger m_failureLedger;
     SpectatorRandomTimeline m_randomEvents;
     bool m_presentationAudioReady=false,m_debugBarrierPending=false;
     bool m_viewOpponentPaused = false;

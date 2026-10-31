@@ -30,6 +30,13 @@ import {
   type SpectatorPublicState,
 } from "./spectator-live.policy.js";
 
+/** Optional DI token: spectator-only reuse window for MatchService.state(). 0 keeps
+ * one authoritative locked read per request (tests/default). Production uses a
+ * short window so 20 Hz publish + 5-40 ms viewer polls cannot queue behind, or
+ * in front of, official Attempt/score transactions on the same match row lock. */
+export const SPECTATOR_AUTHORITY_CACHE_MS = Symbol("SPECTATOR_AUTHORITY_CACHE_MS");
+const SPECTATOR_AUTHORITY_CACHE_LIMIT = 512;
+
 const isRecord=(value:unknown):value is Record<string,unknown>=>typeof value==="object"&&value!==null&&!Array.isArray(value);
 
 const streamKey = (matchId: string, slot: number, side: PlayerSide): string =>
@@ -49,12 +56,45 @@ export class SpectatorLiveService {
   private readonly streams = new Map<string, LiveStream>();
   private liveEnabled = true;
   private liveSettingVersion = 0;
+  private liveCheckedAtMs = Number.NEGATIVE_INFINITY;
+  private readonly authority = new Map<string, { promise: Promise<unknown>; settledAtMs: number | null }>();
+  private readonly authorityMetrics = { lockedReads: 0, reused: 0, coalesced: 0 };
 
   public constructor(
     private readonly matches: MatchService,
     @Inject(MATCH_RUNTIME_STATE) private readonly runtimeState: MatchRuntimeStatePort,
     @Optional() @Inject(DATABASE) private readonly database?: DatabasePort,
+    @Optional() @Inject(SPECTATOR_AUTHORITY_CACHE_MS) private readonly authorityCacheMs: number = 0,
   ) {}
+
+  /** Spectator-only authority read. Key binds match, session and the exact match
+   * token, so a cached result never authorizes a different caller. Failures are
+   * never cached. Official endpoints keep calling MatchService directly. */
+  private spectatorAuthority(matchId: string, matchToken: string, session: RankedSessionContext): Promise<unknown> {
+    const key = `${matchId}\u0000${session.sessionId}\u0000${session.playerId}\u0000${matchToken}`;
+    const now = Date.now();
+    const cached = this.authority.get(key);
+    if (cached) {
+      if (cached.settledAtMs === null) { ++this.authorityMetrics.coalesced; return cached.promise; }
+      if (now - cached.settledAtMs < this.authorityCacheMs) { ++this.authorityMetrics.reused; return cached.promise; }
+    }
+    if (this.authority.size >= SPECTATOR_AUTHORITY_CACHE_LIMIT) {
+      for (const [k, v] of this.authority) if (v.settledAtMs !== null && now - v.settledAtMs >= this.authorityCacheMs) this.authority.delete(k);
+      if (this.authority.size >= SPECTATOR_AUTHORITY_CACHE_LIMIT) this.authority.delete(this.authority.keys().next().value!);
+    }
+    ++this.authorityMetrics.lockedReads;
+    const entry: { promise: Promise<unknown>; settledAtMs: number | null } = { promise: Promise.resolve(), settledAtMs: null };
+    entry.promise = this.matches.state(matchId, matchToken, session).then(
+      value => { entry.settledAtMs = Date.now(); if (this.authorityCacheMs <= 0 && this.authority.get(key) === entry) this.authority.delete(key); return value; },
+      error => { if (this.authority.get(key) === entry) this.authority.delete(key); throw error; },
+    );
+    this.authority.set(key, entry);
+    return entry.promise;
+  }
+
+  public diagnostics() {
+    return { streams: this.streams.size, authorityEntries: this.authority.size, ...this.authorityMetrics };
+  }
 
   public decorateState(raw: unknown): SpectatorPublicState {
     const state = decorateSpectatorState(raw);
@@ -72,13 +112,15 @@ export class SpectatorLiveService {
     }
   }
 
-  public async getLiveEnabled(): Promise<boolean> {
+  public async getLiveEnabled(maxAgeMs = 0): Promise<boolean> {
+    if (maxAgeMs > 0 && Date.now() - this.liveCheckedAtMs < maxAgeMs) return this.liveEnabled;
     if (this.database) {
       const result = await this.database.query<{ enabled: boolean; revision: number | string }>(
         "SELECT enabled, revision FROM ranked_runtime_features WHERE feature = 'live_spectator'",
       );
       this.liveEnabled = result.rows[0]?.enabled ?? true;
       this.liveSettingVersion = Number(result.rows[0]?.revision ?? 0);
+      this.liveCheckedAtMs = Date.now();
     }
     if (!this.liveEnabled) {
       for (const [key] of this.streams) if (!key.startsWith("recorded:")) this.streams.delete(key);
@@ -93,6 +135,11 @@ export class SpectatorLiveService {
       revision = ranked_runtime_features.revision + CASE WHEN ranked_runtime_features.enabled <> EXCLUDED.enabled THEN 1 ELSE 0 END`, [enabled]);
     this.liveEnabled = enabled;
     return this.getLiveEnabled();
+  }
+
+  private async decorateSpectatorAuthority(raw: unknown): Promise<SpectatorPublicState> {
+    await this.getLiveEnabled(this.authorityCacheMs > 0 ? 1000 : 0);
+    return this.decorateState(raw);
   }
 
   public async decorateConfiguredState(raw: unknown): Promise<SpectatorPublicState> {
@@ -122,7 +169,7 @@ export class SpectatorLiveService {
       if (previous && (item.sequence !== previous.sequence + 1 || item.elapsedMs < previous.elapsedMs ||
           previous.keyframe.dead || previous.keyframe.finished)) throw new BadRequestException("SPECTATOR_BATCH_ORDER");
     }
-    const state = await this.decorateConfiguredState(await this.matches.state(matchId, matchToken, session));
+    const state = await this.decorateSpectatorAuthority(await this.spectatorAuthority(matchId, matchToken, session));
     if (!this.liveEnabled) throw new ForbiddenException("LIVE_SPECTATOR_DISABLED");
     const context = spectatorLiveContext(state);
     if (!context) throw new ConflictException(`SPECTATOR_PUBLISH_NOT_ACCEPTED_IN_${state.state}`);
@@ -202,7 +249,7 @@ export class SpectatorLiveService {
     worldHistoryText?: string,
     cosmeticRevisionText?: string,
   ): Promise<SpectatorLiveSubscribeResponse> {
-    const state = await this.decorateConfiguredState(await this.matches.state(matchId, matchToken, session));
+    const state = await this.decorateSpectatorAuthority(await this.spectatorAuthority(matchId, matchToken, session));
     if (!this.liveEnabled) throw new ForbiddenException("LIVE_SPECTATOR_DISABLED");
     if (!state.spectator.active) {
       this.clearViewerObsoleteStreams(state);

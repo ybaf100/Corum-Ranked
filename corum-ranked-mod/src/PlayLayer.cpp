@@ -250,6 +250,7 @@ public:
         bool gameplayFrameObserved = false;
         corum::ranked::SpectatorCapturePolicy spectatorCapture;
         corum::ranked::SpectatorSourceTrace spectatorSourceTrace;
+        unsigned spectatorCaptureDrops=0;
         std::shared_ptr<corum::ranked::SpectatorCosmetics const> spectatorCosmetics;
         std::chrono::steady_clock::time_point nextCosmeticCaptureAt{};
 
@@ -999,14 +1000,25 @@ public:
         if(player==m_player2 && m_gameState.m_isDualMode && observesSpectatorPlayer(m_player1)){
             auto const after=corum::ranked::captureSpectatorPose(player);
             auto result=m_fields->spectatorCapture.secondaryNativeSnap(type,before,after,identity);
+            noteSpectatorCaptureResult(result,true);
             traceSpectatorSource(8,"CAPTURE_P2",player,before,player->m_wasTeleported,0,-1,result);
             return;
         }
         if (!observesSpectatorPlayer(player)) return;
         auto const after = corum::ranked::captureSpectatorPose(player, false, false, false);
         auto result=m_fields->spectatorCapture.nativeSnap(type, before, after,identity);
+        noteSpectatorCaptureResult(result,false);
         traceSpectatorSource(9,"CAPTURE_P1",player,before,player->m_wasTeleported,0,-1,result);
         (void)observedSpectatorPose();
+    }
+
+    // P0-A/P0-C: a native discontinuity that could not be captured is evidence
+    // loss, not a quiet LIVE frame. Viewers still fail closed on the unproven
+    // jump; the publisher now reports the exact capture reason (bounded).
+    void noteSpectatorCaptureResult(char const* result,bool player2){
+        if(!result||std::string_view(result)=="CAPTURED"||std::string_view(result)=="SPIDER_MODE_OR_GRAVITY")return;
+        if(++m_fields->spectatorCaptureDrops<=4)
+            log::warn("[SpectatorEvidence] stage=CAPTURE_DROPPED reason={} player2={} level={} levelTimeMs={:.1f} drops={}",result,player2,m_fields->levelId,m_gameState.m_levelTime*1000,m_fields->spectatorCaptureDrops);
     }
 
     void sampleSpectatorPresentation() {
@@ -1338,6 +1350,8 @@ public:
                     status==corum::ranked::SpectatorLiveStatus::Reconnecting?std::string("RECONNECTING..."):
                     waiting?std::string("WAITING FOR OPPONENT..."):buffering?std::string("BUFFERING..."):
                     fallback?std::string("POLLING..."):status==corum::ranked::SpectatorLiveStatus::PartialSync?std::string("PARTIAL SYNC"):std::string("LIVE SPECTATOR");
+                auto const& audioClock=m_fields->spectatorAudioPolicy;
+                caption+="\n"+live.diagnosticsLine()+fmt::format(" | audio seeks {} fail {} drift avg {:.0f} max {:.0f}ms",audioClock.seeks,audioClock.failedSeeks,audioClock.averageDrift(),audioClock.maxDrift);
                 m_fields->debugSpectateHud->setString(caption.c_str());
             }
             return;
@@ -1611,7 +1625,7 @@ public:
             if(m_fields->survivalReplayLevel)m_isTestMode=true;return;
         }
         m_fields->spectatorCapture.reset();
-        m_fields->spectatorSourceTrace={};
+        m_fields->spectatorSourceTrace={};m_fields->spectatorCaptureDrops=0;
         auto& runtime = corum::ranked::RankedRuntime::get();
         syncSpectatorLocalSafety();
         ScopedPersistenceOwner persistence(this);
@@ -2807,17 +2821,26 @@ public:
             setHudText(m_fields->spectatorNameLabel, presentation.spectatorOpponentText);
             auto const status = corum::ranked::SpectatorLiveRuntime::get().status();
             auto const rendered = m_fields->remotePlayer.cameraFrame();
+            namespace i18n=corum::ranked::i18n;
+            auto const failureClass=corum::ranked::spectatorFailureClass(corum::ranked::SpectatorLiveRuntime::get().reason());
+            // P0-B: short localized name + required action; the exact reason,
+            // sequence and Attempt stay in Debug HUD/logs only.
             std::string state=rendered && rendered->pose && rendered->pose->finished ? "CLEARED" :
                 rendered && rendered->pose && rendered->pose->dead ? "OPPONENT DOWN" :
-                status == corum::ranked::SpectatorLiveStatus::Syncing ? "SYNCING..." :
-                status == corum::ranked::SpectatorLiveStatus::Reconnecting ? "RECONNECTING..." :
-                status == corum::ranked::SpectatorLiveStatus::PartialSync ? "PARTIAL SYNC" :
-                status == corum::ranked::SpectatorLiveStatus::RecaptureRequired ? "RECAPTURE REQUIRED" :
-                status == corum::ranked::SpectatorLiveStatus::Disconnected ? "DISCONNECTED" :
-                status == corum::ranked::SpectatorLiveStatus::Buffering ? "BUFFERING..." :
+                status == corum::ranked::SpectatorLiveStatus::Syncing ? [&]{auto [applied,total]=corum::ranked::SpectatorLiveRuntime::get().restoreProgress();
+                    auto text=i18n::text("spectator-syncing","SYNCING...");return total>0?fmt::format("{} {}/{}",text,applied,total):text;}() :
+                status == corum::ranked::SpectatorLiveStatus::Reconnecting ? i18n::text("spectator-reconnecting","RECONNECTING...") :
+                status == corum::ranked::SpectatorLiveStatus::PartialSync && failureClass==corum::ranked::SpectatorFailureClass::HistoryGap ? i18n::text("spectator-partial-history","PARTIAL SYNC · HISTORY TRUNCATED") :
+                status == corum::ranked::SpectatorLiveStatus::PartialSync ? i18n::text("spectator-partial","PARTIAL SYNC") :
+                status == corum::ranked::SpectatorLiveStatus::RecaptureRequired ?
+                    (failureClass==corum::ranked::SpectatorFailureClass::WorldDesync?i18n::text("spectator-world-desync","WORLD DESYNC · WAITING FOR NEXT ATTEMPT"):
+                     i18n::text("spectator-recapture","RECAPTURE REQUIRED · WAITING FOR NEXT ATTEMPT")) :
+                status == corum::ranked::SpectatorLiveStatus::Disconnected ? i18n::text("spectator-disconnected","DISCONNECTED · REOPEN SPECTATE") :
+                status == corum::ranked::SpectatorLiveStatus::Buffering ? i18n::text("spectator-buffering","BUFFERING...") :
                 status == corum::ranked::SpectatorLiveStatus::Fallback && corum::ranked::SpectatorLiveRuntime::get().reason()=="DUAL_UNSUPPORTED" ? "DUAL UNSUPPORTED" :
-                status == corum::ranked::SpectatorLiveStatus::Fallback ? "POLLING..." :
-                m_fields->spectatorCamera.state() == corum::ranked::SpectatorCameraState::Waiting ? "WAITING..." : "LIVE";
+                status == corum::ranked::SpectatorLiveStatus::Fallback && failureClass==corum::ranked::SpectatorFailureClass::HistoryGap ? i18n::text("spectator-history-gap","HISTORY GAP · RESYNCING") :
+                status == corum::ranked::SpectatorLiveStatus::Fallback ? i18n::text("spectator-polling","POLLING...") :
+                m_fields->spectatorCamera.state() == corum::ranked::SpectatorCameraState::Waiting ? i18n::text("spectator-waiting","WAITING...") : "LIVE";
             if(rendered && rendered->pose && rendered->pose->dual)state+=" · DUAL";
             setHudText(m_fields->spectatorStatusLabel,state);
             limitHudWidth(m_fields->spectatorStatusLabel,140.f,.20f,.14f);

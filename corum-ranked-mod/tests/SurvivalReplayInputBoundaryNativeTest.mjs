@@ -35,6 +35,11 @@ int main(){
   assert(total==40&&step==404);p.seek(.1);assert(p.takeReset());p.restart();step=364;while(p.due())advance(p,step);assert(!p.desync()&&step>=374&&step<=375);
  }
  Playback missing(tape());missing.nativeStep(.01,false,true,364);missing.completeFrame(missing.current()->poses[0]);assert(missing.desync()&&str(missing.failure(),"reason")=="UNCONSUMED_NATIVE_EVENTS");
+ {// P0-C: bounded first-divergence report names the exact unconsumed Source evidence.
+  auto report=missing.diagnosticsReport();assert(str(missing.failure(),"category")=="NATIVE_SCHEDULE");
+  assert(report["schema"].asInt().unwrapOr(0)==1&&report["failure"]["expected"].isObject()&&report["sourceAfter"].asArray().unwrap().size()>=1);
+  assert(report["stageCounts"]["recordedFrames"].asInt().unwrapOr(0)>=1&&report["verifiedBefore"].asArray().unwrap().size()<=Playback::kTrailBefore);
+  assert(report.dump().size()<256*1024&&!report.dump().contains("token"));}
  Playback wrong(tape());auto event=wrong.current()->dispatches[0];event["after"][0]=false;wrong.nativeDispatch(event);assert(wrong.desync()&&str(wrong.failure(),"reason")=="HANDLE_BUTTON_after");
  Playback physics(tape());physics.nativeStep(.01,false,true,364);physics.nativeDispatch(physics.current()->dispatches[0]);auto pose=physics.current()->poses[0];pose["physics"]["held"]=false;physics.completeFrame(pose);assert(physics.desync()&&str(physics.failure(),"reason")=="NATIVE_PHYSICS_STATE");
  Json env;env["schema"]=2;env["cbf"]["loaded"]=false;assert(replayPhysicsEnvironmentProblem(env).empty());env["cbf"]["loaded"]=true;assert(replayPhysicsEnvironmentProblem(env)=="CBF_VERSION_UNVERIFIED");env["cbf"]["version"]="v1.5.0";env["cbf"]["disabled"]=true;env["cbf"]["clickOnSteps"]=false;env["cbf"]["physicsBypass"]=false;assert(replayPhysicsEnvironmentProblem(env).empty());env["cbf"]["disabled"]=false;assert(replayPhysicsEnvironmentProblem(env)=="CBF_NATIVE_BOUNDARIES_UNAVAILABLE");env["cbf"]["disabled"]=true;env["cbf"]["clickOnSteps"]=true;assert(replayPhysicsEnvironmentProblem(env)=="CBF_COS_PIPELINE_UNSUPPORTED");env["cbf"]["physicsBypass"]=true;assert(replayPhysicsEnvironmentProblem(env)=="CBF_PHYSICS_BYPASS_UNSUPPORTED");

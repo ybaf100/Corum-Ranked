@@ -40,6 +40,8 @@ namespace corum::ranked {struct SurvivalSpectatorRuntime {static SurvivalSpectat
 #include <memory>
 #include <vector>
 #include <functional>
+#include <string>
+namespace fmt{template<class...T>std::string format(char const* s,T const&...){return s;}}
 namespace geode::log { template<class... T> void info(T...) {} }
 namespace geode {template<class T>struct WeakRef {T* p;explicit WeakRef(T* v):p(v){}struct Ref{T* p;T* data(){return p;}T* operator->(){return p;}explicit operator bool(){return p;}};Ref lock()const{return {p};}};}
 std::vector<std::function<void()>> pendingSceneReturns;
@@ -105,7 +107,7 @@ void requestSceneRestore(){}
     static SpectatorLiveRuntime& get(){static SpectatorLiveRuntime l;return l;}
     void tickPublisher(SpectatorGhostPose const&,bool){}
     void tickViewer(){++viewers;}
-    auto presentationFrame()const{return frame;}auto worldFrame()const{return frame;}bool restoringWorld()const{return false;}bool presentationPending()const{return false;}char const*restorationPhase()const{return "LIVE";}
+    auto presentationFrame()const{return frame;}auto worldFrame()const{return frame;}bool restoringWorld()const{return false;}bool presentationPending()const{return false;}char const*restorationPhase()const{return "LIVE";}std::string diagnosticsLine()const{return "metrics";}
     enum class Status {Waiting,Fallback,Buffering,RecaptureRequired,Disconnected,Reconnecting,PartialSync};
     Status status()const{return Status::Waiting;}
     void reset(){++resets;frame.reset();}
@@ -134,7 +136,8 @@ struct CorumRankedPlayLayer: PlayLayer {
     corum::ranked::SpectatorSceneContext survivalSpectatorSceneContext(){return {};}
 
  bool blockEntryGameplayUpdate(){return false;}
-    struct Fields {bool survivalLiveLevel=false;
+    struct AudioMetricsDouble{unsigned seeks=0,failedSeeks=0;double maxDrift=0;double averageDrift()const{return 0;}};
+    struct Fields {AudioMetricsDouble spectatorAudioPolicy;bool survivalLiveLevel=false;
         bool safetyRetired=false,vanillaGameplayEndInProgress=false,rankedInitialized=true,rankedLevel=true;
         bool rankedPractice=false,spectatorMode=false,spectatorPending=false,spectatorScenePrepared=false;
         bool spectatorPresentationRetired=false,spectatorWorldResetInProgress=false,spectatorWorldPoseApplied=false,spectatorCollisionChecked=false;

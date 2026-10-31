@@ -22,10 +22,16 @@ public:
     std::future<bool> reconcile(Receipt receipt);
     std::future<std::optional<Document>> best(Json identity);
     std::future<std::optional<Json>> inspect(Json identity);
+    /** History quality evidence: best metadata, pending/closing journal state or the damage reason. */
+    std::future<Json> inspectState(Json identity);
     std::future<std::unique_ptr<Playback>> playback(Json identity);
     std::future<std::vector<Json>> recover();
     std::future<void> journalClose(Json metadata);
     std::future<void> closeAcknowledged(std::string attempt);
+    /** P0-C/P2-D: atomically write one bounded diagnostics JSON (never a
+     * replay, manifest or best). Keeps at most MaxDiagnostics newest files. */
+    std::future<std::string> exportDiagnostics(Json report,std::string label);
+    static constexpr std::size_t MaxDiagnostics=10,MaxDiagnosticBytes=256*1024,MaxQuarantine=8;
     std::string error()const;
 private:
     std::filesystem::path m_root;

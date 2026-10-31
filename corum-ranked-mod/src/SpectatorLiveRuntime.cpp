@@ -405,10 +405,16 @@ void SpectatorLiveRuntime::publish(SpectatorGhostPose const&) {
                 m_nextPublishAt = std::chrono::steady_clock::now(); // no extra ACK-bound 50ms wait
                 return;
             }
-            ++m_attemptPublishFailures;
+            // P0-A: "nobody is watching" is demand, not a transport failure. It
+            // must not exhaust the Attempt budget, or a viewer who arrives
+            // later finds the stream permanently suspended.
+            auto const idle=response.code()==409&&response.json().unwrapOr(matjson::Value())["message"].asString().unwrapOr("").find("NO_VIEWERS")!=std::string::npos;
+            if(!idle)++m_attemptPublishFailures;
             if(response.code()==401 || response.code()==403)m_attemptPublishFailures=12;
-            m_nextPublishAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(
-                std::min(1000,100*(1<<std::min(3,static_cast<int>(m_attemptPublishFailures)-1))));
+            ++m_publishRetries;
+            m_nextPublishAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(idle?1000:
+                std::min(1000,100*(1<<std::min(3,std::max(0,static_cast<int>(m_attemptPublishFailures)-1)))));
+            if(m_attemptPublishFailures>=12)log::warn("[SpectatorPublisher] stage=SUSPENDED attempt={} code={} retries={} queued={}",attemptId,response.code(),m_publishRetries,m_publishQueue.size());
             if (response.code() == 409) {
                 ++m_publishGeneration; if (!m_publishGeneration) m_publishGeneration = 1;
                 m_publishQueue = {}; m_publishBatchBody = nullptr; m_publishBatchLastSequence = -1;
@@ -678,6 +684,18 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
     auto const streamChanged = attemptId != m_viewAttemptId || generation != m_viewGeneration;
     auto const worldIdentity=attemptId+":"+std::to_string(generation);
     if(!streamChanged&&m_rejectedWorldContext==worldIdentity)return;
+    if(m_rejectedWorldContext!=worldIdentity){
+        if(auto known=m_failureLedger.find(m_external?"survival":"ranked",m_viewMatchId,m_viewContextKey,attemptId,static_cast<std::uint64_t>(generation))){
+            // Same immutable evidence that already failed (e.g. after scene
+            // re-entry). Do not restore/seek/reset to 0% again; wait for new proof.
+            m_failureLedger.noteSuppressed();
+            m_viewAttemptId=attemptId;m_viewGeneration=generation;m_rejectedWorldContext=worldIdentity;
+            m_restoreTimeline.reset();m_randomEvents.reset();m_forceRestoreRequest=false;
+            m_status=SpectatorLiveStatus::Fallback;m_reason=known->reason;
+            if(m_failureLedger.suppressed()<=8)log::info("[SpectatorLive] stage=REJECTION_SUPPRESSED reason={} attempt={} generation={} firstFailureSequence={}",known->reason,attemptId,generation,known->firstFailureSequence);
+            return;
+        }
+    }
     if(!streamChanged&&hasRestoration&&restoration["reason"].asString().unwrapOr("")=="ATTEMPT_ENDED_DURING_RESTORE"){
         auto packets=root["packets"].asArray();
         if(!packets.isErr()&&!packets.unwrap().empty()){
@@ -927,12 +945,22 @@ void SpectatorLiveRuntime::applyViewerResponse(matjson::Value const& root) {
 }
 
 void SpectatorLiveRuntime::setFallback(std::string reason) {
+    auto recordWorldRejection=[this]{
+    if(m_viewAttemptId.empty())return;
+    // No session token, pointer or user identity: channel label + match/context ids only.
+    SpectatorFailureFingerprint fingerprint;
+    fingerprint.session=m_external?"survival":"ranked";fingerprint.match=m_viewMatchId;fingerprint.context=m_viewContextKey;fingerprint.attemptId=m_viewAttemptId;
+    fingerprint.streamGeneration=static_cast<std::uint64_t>(m_viewGeneration);fingerprint.viewerEpoch=static_cast<std::uint64_t>(m_viewPresentationEpoch);
+    fingerprint.reason=m_reason;fingerprint.firstFailureSequence=m_lastViewSequence;m_failureLedger.record(std::move(fingerprint));
+    log::warn("[SpectatorLive] stage=REJECTION_RECORDED class={} reason={} match={} attempt={} generation={} firstFailureSequence={} epoch={} ledger={}",
+        spectatorFailureClassName(spectatorFailureClass(m_reason)),m_reason,m_viewMatchId,m_viewAttemptId,m_viewGeneration,m_lastViewSequence,m_viewPresentationEpoch,m_failureLedger.size());
+};
     if((reason=="POSE_DISCONTINUITY"||reason=="PLAYER2_POSE_DISCONTINUITY"||reason=="INVALID_POSE")&&!m_viewAttemptId.empty()){
         // Re-fetching an immutable invalid event cannot repair its proof. Hold
         // safely and keep checking for an authoritative NEW Attempt, without
         // repeatedly resetting the same world/epoch back to 0%.
         m_rejectedWorldContext=m_viewAttemptId+":"+std::to_string(m_viewGeneration);m_restoreTimeline.reset();m_randomEvents.reset();
-        m_status=SpectatorLiveStatus::Fallback;m_reason=std::move(reason);m_forceRestoreRequest=false;return;
+        m_status=SpectatorLiveStatus::Fallback;m_reason=std::move(reason);m_forceRestoreRequest=false;recordWorldRejection();return;
     }
     if (m_status != SpectatorLiveStatus::Fallback || m_reason != reason) {
         log::warn(
@@ -953,8 +981,10 @@ void SpectatorLiveRuntime::setFallback(std::string reason) {
     m_forceRestoreRequest=true;
     if(++m_restoreFailures>=12 || m_reason=="DUAL_UNSUPPORTED" || m_reason=="UNSUPPORTED_PROTOCOL_VERSION"){
         m_rejectedWorldContext=m_viewAttemptId+":"+std::to_string(m_viewGeneration);m_forceRestoreRequest=false;m_restoreTimeline.reset();
+        if(!m_viewAttemptId.empty())recordWorldRejection();
     }
 }
+
 
 void SpectatorLiveRuntime::requestSceneRestore(){
     m_disconnected=false;m_consecutiveViewerErrors=0;m_restoreFailures=0;

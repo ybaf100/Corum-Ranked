@@ -100,7 +100,7 @@ export class SurvivalSpectatorLiveService {
       if(p.sequence<=stream.lastSequence){const prior=stream.history?.find(v=>v.sequence===p.sequence);if(!prior)throw new ConflictException('SPECTATOR_STALE_SEQUENCE');
         const {receivedAtMs:_,...plain}=prior;if(JSON.stringify(plain)!==JSON.stringify(p))throw new ConflictException('SPECTATOR_CHANGED_RETRY');continue;}
       if(p.sequence!==stream.lastSequence+1)throw new ConflictException('SPECTATOR_SEQUENCE_GAP');
-      appendSpectatorPacket(stream,p,this.now(),SURVIVAL_RELAY_LIMITS.historyPackets);
+      appendSpectatorPacket(stream,p,this.now(),SURVIVAL_RELAY_LIMITS.historyPackets,Number.POSITIVE_INFINITY); // Survival keeps its own byte accounting below
       if(context.levelId===143308401&&p.elapsedMs>=70000&&p.elapsedMs<=73000&&traceLogs++<64)
         this.logger.log(JSON.stringify({stage:'RELAY_ACCEPTED',attemptId:p.attemptId,generation:p.generation,sequence:p.sequence,elapsedMs:p.elapsedMs,p1:p.keyframe.discontinuity??null,p2:p.keyframe.player2?.discontinuity??null}));
     }

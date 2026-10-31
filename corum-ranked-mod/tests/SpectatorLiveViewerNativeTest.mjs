@@ -31,6 +31,7 @@ test('actual viewer decoder recovers timeout only on fresh validated packets and
 #include "${join(root, 'src/debug/DebugSpectatePolicy.hpp')}"
 #include "${join(root, 'src/domain/SpectatorInterpolationBuffer.hpp')}"
 #include "${join(root, 'src/domain/SpectatorRestoreTimeline.hpp')}"
+#include "${join(root, 'src/domain/SpectatorFailureFingerprint.hpp')}"
 #include <algorithm>
 namespace corum::ranked::debug {struct DebugSpectateRuntime{static DebugSpectateRuntime&get(){static DebugSpectateRuntime r;return r;}int levelId()const{return kDebugSpectateLevelId;}};}
 #include <cassert>
@@ -132,6 +133,25 @@ int main(){
         assert(entropie.m_reason=="POSE_DISCONTINUITY"&&!entropie.m_rejectedWorldContext.empty()&&!entropie.m_disconnected);
         assert(entropie.m_lastAcceptedPose->x==static_cast<float>(values[4])&&entropie.m_lastAcceptedPose->y==static_cast<float>(values[5]));
         entropie.applyViewerResponse(next);assert(entropie.m_viewPresentationEpoch==epoch);
+        // P0-B: a local viewer reset/scene re-entry cannot re-run the same rejected proof.
+        assert(entropie.m_failureLedger.size()==1);
+        entropie.m_rejectedWorldContext.clear();entropie.m_viewAttemptId.clear();entropie.m_viewGeneration=0;entropie.m_lastViewSequence=-1;entropie.m_reason.clear();
+        entropie.applyViewerResponse(first);
+        assert(!entropie.m_rejectedWorldContext.empty()&&entropie.m_reason=="POSE_DISCONTINUITY"&&entropie.m_failureLedger.suppressed()==1);
+        // A NEW Attempt is a different evidence identity and is evaluated normally.
+        entropie.applyViewerResponse(response(0,10,"next-attempt"));
+        assert(entropie.m_rejectedWorldContext.empty()&&entropie.m_viewAttemptId=="next-attempt");
+    }
+    {// Reason classes keep transport, history and world proof failures distinct.
+        assert(spectatorFailureClass("NETWORK_RETRY_EXHAUSTED")==SpectatorFailureClass::Disconnected);
+        assert(spectatorFailureClass("POSE_DISCONTINUITY")==SpectatorFailureClass::RecaptureRequired);
+        assert(spectatorFailureClass("HISTORY_WINDOW_EXPIRED")==SpectatorFailureClass::HistoryGap);
+        assert(spectatorFailureClass("ATTEMPT_START_MISSING")==SpectatorFailureClass::HistoryGap);
+        assert(spectatorFailureClass("RANDOM_IDENTITY_OR_HISTORY")==SpectatorFailureClass::WorldDesync);
+        assert(spectatorFailureClass("CBF_COLLISION_TARGET_MISMATCH")==SpectatorFailureClass::WorldDesync);
+        assert(spectatorFailureClass("STREAM_TIMEOUT")==SpectatorFailureClass::Buffering);
+        SpectatorFailureLedger ledger;for(int i=0;i<100;i++){SpectatorFailureFingerprint f;f.attemptId=std::to_string(i);ledger.record(f);}
+        assert(ledger.size()==SpectatorFailureLedger::kCapacity&&!ledger.find("","","","0",0)&&ledger.find("","","","99",0));
     }
 
     // Real shared codec and decoder: all discrete states stay exact at alpha=0.

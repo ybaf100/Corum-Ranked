@@ -24,6 +24,12 @@ int main(){Playback p(source());assert(!p.due());p.accumulate(.01);assert(p.due(
  p.pause(true);p.accumulate(1);assert(!p.due());p.speed(4);assert(p.speed()==4);p.speed(3);assert(p.speed()==4);
  p.seek(1);assert(p.seeking()&&p.due());int frames=0;while(p.due()&&frames<SeekPolicy::MaxFramesPerPump){advance(p,tick);++frames;}assert(frames==96&&p.seeking());
  while(p.due())advance(p,tick);assert(!p.seeking()&&!p.desync());p.seek(.1);assert(p.takeReset());p.restart();tick=0;while(p.due())advance(p,tick);assert(p.time()>=.1&&p.time()<.12);
+ {// P1-D: rapid slider moves coalesce; newest target wins and a backward target replays from reset.
+  auto generation=p.seekGeneration();p.seek(1.5);p.seek(.6);p.seek(.4);assert(p.seekGeneration()==generation+3&&p.seekTarget()==.4);
+  if(p.takeReset()){p.restart();tick=0;}assert(p.seeking()&&p.seekProgress()<1);while(p.due())advance(p,tick);
+  assert(!p.seeking()&&p.time()>=.4&&p.time()<.42&&p.seekProgress()==1&&!p.desync());
+  // Markers come only from recorded evidence: this tape reaches 99.5%, no death/clear/random/anchor.
+  for(auto const& m:p.markers())assert(m.kind=='C'||m.kind=='D'||m.kind=='R'||m.kind=='T');assert(p.markers().size()<=Playback::kMaxMarkers);}
  auto frame=p.current();p.nativeStep(.02,false,true,tick);p.completeFrame(frame->poses[0]);assert(p.desync()&&!p.due());
  Playback bad(source());bad.accumulate(.01);bad.nativeStep(.01,false,true,0);auto pose=bad.current()->poses[0];pose["x"]=400.;bad.completeFrame(pose);assert(bad.desync());
  Playback follow(source());follow.followRemote("attempt1",1,50);assert(follow.takeReset()&&follow.seeking());follow.restart();tick=0;while(follow.due())advance(follow,tick);auto before=follow.time();

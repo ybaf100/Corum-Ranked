@@ -12,6 +12,7 @@ test('production replay storage atomically promotes official best only, preserve
  const code=String.raw`
 #include "${join(root,'src/replay/SurvivalReplayStorage.hpp')}"
 #include "${join(root,'src/replay/SurvivalReplayPlayback.hpp')}"
+#include "${join(root,'src/replay/SurvivalReplayQuality.hpp')}"
 #include <cassert>
 #include <iostream>
 using namespace corum::ranked::replay;
@@ -76,6 +77,34 @@ int main(){
  auto notBest=metadata("not-official-best");notBest["roundKey"]="tie-identity";s.begin(notBest).get();initial(s,"not-official-best",40);t["progress"]=40.;s.append("not-official-best",{t},true).get();auto tied=receipt("not-official-best",40);tied.roundKey="tie-identity";tied.bestAttemptId="earlier-official-attempt";assert(!s.reconcile(tied).get()&&!s.best(notBest).get());
  // A different generation, map or debug partition cannot read this best.
  auto other=metadata("x");other["mapGeneration"]=2;assert(!s.best(other).get());other=metadata("x");other["debug"]=true;assert(!s.best(other).get());
+ // P1-F/P2-B: history quality comes from stored evidence only.
+ {auto state=s.inspectState(cutoff).get();auto v=classifyReplayQuality(state,cutoff,"");
+  assert(state["best"].isObject()&&str(state,"initialProblem")=="LEGACY_INITIAL_PHYSICS_UNAVAILABLE");
+  assert(v.quality==ReplayQuality::Unavailable&&!v.playable&&v.compatibility==ReplayCompatibility::MissingNativeEvidence);
+  auto awaiting=metadata("awaiting");awaiting["roundKey"]="awaiting-round";s.begin(awaiting).get();initial(s,"awaiting",15);
+  v=classifyReplayQuality(s.inspectState(awaiting).get(),awaiting,"");assert(v.quality==ReplayQuality::WaitingReceipt&&!v.playable);
+  auto absent=metadata("absent");absent["roundKey"]="absent-round";
+  v=classifyReplayQuality(s.inspectState(absent).get(),absent,"");assert(v.quality==ReplayQuality::NotOnDevice&&!v.playable);
+  Json good=Json::object();good["best"]=cutoff;good["best"]["officialCompletion"]="FULL_CAPTURE";good["best"]["captureCompleteness"]="COMPLETE";
+  v=classifyReplayQuality(good,cutoff,"");assert(v.quality==ReplayQuality::CompleteVerified&&v.playable);
+  good["best"]["officialCompletion"]="OFFICIAL_PREFIX";v=classifyReplayQuality(good,cutoff,"");assert(v.quality==ReplayQuality::OfficialPrefix&&v.playable);
+  good["best"]["captureCompleteness"]="PARTIAL_RECOVERED";v=classifyReplayQuality(good,cutoff,"");assert(v.quality==ReplayQuality::PartialRecovered&&v.playable);
+  v=classifyReplayQuality(good,cutoff,"CBF_SETTINGS_MISMATCH");assert(v.quality==ReplayQuality::Incompatible&&!v.playable&&v.compatibility==ReplayCompatibility::UnsupportedSetting);
+  v=classifyReplayQuality(good,cutoff,"CBF_NATIVE_DRIVER_MISMATCH");assert(v.compatibility==ReplayCompatibility::VersionMismatch&&!v.playable);
+  auto wrongAttempt=cutoff;wrongAttempt["attemptId"]="other";v=classifyReplayQuality(good,wrongAttempt,"");assert(v.quality==ReplayQuality::Unavailable&&!v.playable);
+  // A damaged immutable best is reported, never deleted.
+  {std::ofstream out(recoveredFile,std::ios::app);out<<"{damage";}
+  v=classifyReplayQuality(s.inspectState(torn).get(),torn,"");assert(v.quality==ReplayQuality::Damaged&&!v.playable&&std::filesystem::exists(recoveredFile));}
+ // P0-C/P2-D: bounded diagnostics export never touches replay files.
+ {Json report;report["schema"]=1;report["verifiedBefore"]=Json::array();for(int i=0;i<4000;i++){Json f;f["frame"]=i;f["pad"]=std::string(64,'x');report["verifiedBefore"].push(f);}
+  for(int i=0;i<12;i++){auto path=s.exportDiagnostics(report,"attempt").get();assert(std::filesystem::file_size(path)<=Storage::MaxDiagnosticBytes);}
+  std::size_t count=0;for(auto const& f:std::filesystem::directory_iterator("${dir}/replays/diagnostics"))count+=f.path().extension()==".json";assert(count==Storage::MaxDiagnostics);
+  assert(std::filesystem::exists(recoveredFile));}
+ // P2-E: a header-damaged pending journal is quarantined out of the pending budget; bests untouched.
+ {auto bad=std::filesystem::path("${dir}/replays/pending/"+corum::ranked::sha256Text("header-damaged")+".tmp");{std::ofstream out(bad);out<<"not-json\n";}
+  {std::ofstream out("${dir}/replays/manifest.next");out<<"{stale";}
+  s.recover().get();assert(!std::filesystem::exists(bad)&&std::filesystem::exists("${dir}/replays/quarantine/"+bad.filename().string()));
+  assert(!std::filesystem::exists("${dir}/replays/manifest.next")&&s.best(cutoff).get());}
 }
 `;
  const file=join(dir,'test.cpp'),bin=join(dir,'test');writeFileSync(file,code);
