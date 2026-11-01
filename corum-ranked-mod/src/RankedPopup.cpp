@@ -555,7 +555,7 @@ class CorumRankedLayer final : public CCLayerColor {
     CCLabelBMFont* m_spectatorScoreLabel = nullptr;
     CCLabelBMFont* m_spectatorHintLabel = nullptr;
     // Solo VS board / round overview intro.
-    std::string m_soloIntroPlayed, m_soloScoreAnimated, m_matchFoundMotionKey, m_banMotionKey;
+    std::string m_soloIntroPlayed, m_soloScoreAnimated, m_matchFoundMotionKey, m_banMotionKey, m_resultMotionKey;
     bool m_soloIntroRunning = false;
     // Live spectating is entered from the finished-attempt board, not automatically.
     std::string m_spectateRequestKey;
@@ -4597,7 +4597,16 @@ class CorumRankedLayer final : public CCLayerColor {
         auto* roundsCaption = makeLabel("ROUNDS", 0.21f, {size.width / 2.0f, panelTop - 13.0f}, kCyan, "semibold");
         m_root->addChild(roundsCaption, 5);
         float y = panelTop - 34.0f;
+        // Once per match: rows land one by one from the left, then WIN / LOSE
+        // stamps onto both cards at the same moment.
+        auto const resultKey = match.matchId.empty() ? fmt::format("{}:{}", match.playerAName, match.stateVersion) : match.matchId;
+        auto const animateRows = m_resultMotionKey != resultKey;
+        m_resultMotionKey = resultKey;
+        int rowIndex = 0;
+        auto* rowsRoot = m_root;
         auto addRow = [&](std::string const& label, std::string const& map, double ownScore, double oppScore, std::string const& winner, bool deathmatch) {
+            auto* rowGroup = makeMotionGroup();
+            auto* outer = m_root; m_root = rowGroup;
             auto const draw = winner == "DRAW" || winner.empty();
             auto const won = !draw && winner == (ownA ? "A" : "B");
             auto const accent = draw ? corum::ranked::ui::TextMuted : won ? kGold : kSideRed;
@@ -4610,6 +4619,9 @@ class CorumRankedLayer final : public CCLayerColor {
             auto* score = makeLabel(fmt::format("{} : {}", formatScore(ownScore, deathmatch), formatScore(oppScore, deathmatch)), 0.27f,
                 {right, y}, accent, "black");
             score->setAnchorPoint({1, 0.5f}); corum::ranked::ui::fitMenuLabelWidth(score, centerWidth * 0.42f, 0.27f, 0.16f); m_root->addChild(score, 5);
+            m_root = outer;
+            if (animateRows) { rowGroup->setPositionX(-30.0f); revealGroup(rowGroup, 0.35f + 0.28f * static_cast<float>(rowIndex), {30.0f, 0}, 0.22f); }
+            ++rowIndex;
             y -= 30.0f;
         };
         for (auto const& round : match.rounds)
@@ -4618,6 +4630,24 @@ class CorumRankedLayer final : public CCLayerColor {
             addRow(fmt::format("DEATH MATCH {}", deathmatch.sequence), deathmatch.mapTitle, ownA ? deathmatch.scoreA : deathmatch.scoreB,
                 ownA ? deathmatch.scoreB : deathmatch.scoreA, deathmatch.winnerSide, true);
 
+        (void)rowsRoot;
+        // Big verdict stamp on each card (both together, after the last row).
+        auto const stampDelay = 0.35f + 0.28f * static_cast<float>(rowIndex) + 0.15f;
+        for (int side = 0; side < 2; ++side) {
+            auto const own = side == 0;
+            auto const won = own ? ownWon : !ownWon && !match.winnerSide.empty();
+            auto const color = won ? kGreen : kRed;
+            auto* stamp = makeLabel(won ? tr("win", "WIN") : tr("lose", "LOSE"), 1.05f, {own ? leftX : rightX, cardY + 18.0f}, color, "black");
+            corum::ranked::ui::fitMenuLabelWidth(stamp, 140.0f, 1.05f, 0.6f);
+            stamp->setRotation(own ? -8.0f : 8.0f);
+            m_root->addChild(stamp, 12);
+            if (!animateRows) continue;
+            auto const finalScale = stamp->getScale();
+            stamp->setVisible(false); stamp->setScale(finalScale * 2.2f); stamp->setOpacity(0);
+            stamp->runAction(CCSequence::create(CCDelayTime::create(stampDelay), CCShow::create(),
+                CCSpawn::create(CCFadeIn::create(0.08f), CCEaseIn::create(CCScaleTo::create(0.16f, finalScale), 3.0f), nullptr),
+                CCSequence::create(CCMoveBy::create(0.04f, {3.0f, 0}), CCMoveBy::create(0.04f, {-6.0f, 0}), CCMoveBy::create(0.04f, {3.0f, 0}), nullptr), nullptr));
+        }
         auto const eventLeft = ratingEventText(ownA ? match.ratingEventA : match.ratingEventB);
         auto const eventRight = ratingEventText(ownA ? match.ratingEventB : match.ratingEventA);
         if (!eventLeft.first.empty()) m_root->addChild(makeLabel(eventLeft.first, 0.27f, {leftX, 18.0f}, eventLeft.second, "black"), 8);

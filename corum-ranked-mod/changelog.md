@@ -1,3 +1,8 @@
+# v0.5.0-beta.136
+
+- Solo match result: the round rows land one by one from the left, then a large WIN / LOSE stamps onto both player cards at the same moment (once per match; later renders show the final state).
+- Actual GD/device behaviour is unverified.
+
 # v0.5.0-beta.135
 
 - Queue card motion order fixed: the MATCHMAKING card (including its frames) fades out first, then the score card widens, then the queue fades in; leaving reverses it (queue fades out, card narrows, the action card fades back in). Queue contents are centred in the widened area (iPad offset).
