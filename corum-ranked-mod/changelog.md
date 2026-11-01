@@ -1,3 +1,15 @@
+# v0.5.0-beta.135
+
+- Queue card motion order fixed: the MATCHMAKING card (including its frames) fades out first, then the score card widens, then the queue fades in; leaving reverses it (queue fades out, card narrows, the action card fades back in). Queue contents are centred in the widened area (iPad offset).
+- Solo queue FREE PLAY: same as Survival; "SOLO - mm:ss" stays top-left outside the lobby and a found match exits any level back to MATCH FOUND. The Solo queue card shows the waiting time.
+- Solo scores and score differences drop a trailing ".0" (12.0 -> 12, 12.5 unchanged) in the HUD, board and result.
+- Solo board: player/map cards centred lower between the header and status bar (header unchanged); option buttons are three equal buttons; the board is fully hidden behind the round overview / map reveal and fades in afterwards.
+- Match found: cards slide in from the sides, VS pops, the ban countdown box opens. Ban phase: the box opens across the row and the map cards rise in one by one. Both play once per match.
+- Match result redesign: final series scoreboard on top, WIN/LOSE verdict top-right, own card left and opponent right with a WIN / LOSE / PERFECT WIN strip, round-by-round list (map and both scores) in the centre, rating events under the cards, QUEUE AGAIN at the bottom. No more overlapping summary box.
+- Survival (Debug builds): END ROUND button on the standings board (with confirmation).
+- Survival: the final ceremony is shown to everyone still with the match when it ends (finalists outside the podium and eliminated players who kept following), not only the podium and live watchers.
+- Actual GD/device behaviour is unverified.
+
 # v0.5.0-beta.134
 
 - Solo match board redesign (same Corum style, new layout): series scoreboard top-centre (round tab, own/opponent names, BO3 pips, match-point / tiebreaker / death-match banner), countdown clock top-right, own card left and opponent card right with a per-round state strip (READY / DOWNLOADING / death-match attempt pips), map column in the centre (title, creator, difficulty band, MAP/AUDIO rows, load bar, LDM / Disable Shake / Jukebox), status bar at the bottom.

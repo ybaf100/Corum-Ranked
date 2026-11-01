@@ -15,12 +15,12 @@ test('actual Solo point and signed-difference formatters preserve tenths without
 ${method(source,'std::string formatNumber(')}
 ${method(source,'std::string signedValue(')}
 int main(){
- assert(formatNumber(118.5)=="118.5"&&formatNumber(73)=="73.0");
+ assert(formatNumber(118.5)=="118.5"&&formatNumber(73)=="73"); // whole values drop ".0"
  assert(formatNumber(382.06)=="382.1");
  assert(signedValue(118.5-118.4,"")=="+0.1");
  assert(signedValue(118.4-118.5,"")=="-0.1");
- assert(signedValue(0,"")=="0.0"&&signedValue(-.001,"")=="0.0");
- assert(formatNumber(std::numeric_limits<double>::quiet_NaN())=="0.0");
+ assert(signedValue(0,"")=="0"&&signedValue(-.001,"")=="0"&&signedValue(2,"")=="+2");
+ assert(formatNumber(std::numeric_limits<double>::quiet_NaN())=="0");
  assert(corum::ranked::rankedScoreText(59.46)=="59");
  assert(corum::ranked::rankedScoreText(94.3705,true)=="94.371");
 }`);

@@ -131,11 +131,21 @@ public:
     // A found match exits any running level and opens the match board.
     bool canQueueFreePlay() const { return m_queue.status=="QUEUED" && !active() && !m_creating && !m_freePlay.active && !m_session.empty(); }
     bool beginQueueFreePlay();
+    // Solo queue Free Play shares the same return path; a Solo match exits
+    // any level and pops back to the Ranked lobby, which shows MATCH FOUND.
+    bool canSoloQueueFreePlay() const;
+    bool beginSoloQueueFreePlay();
+    bool soloQueueFreePlaying() const { return m_soloQueueFreePlay && m_freePlay.active; }
+    // Seconds the local Solo queue has been waiting (client clock).
+    int soloQueueWaitingSeconds() const;
     bool queueFreePlaying() const { return m_queueFreePlay && m_freePlay.active; }
     void requestQueueFreePlayReturn();
 private:
     void pumpQueueFreePlay();
-    bool m_queueFreePlay=false;
+    bool startQueueFreePlay(bool solo);
+    bool m_queueFreePlay=false,m_soloQueueFreePlay=false;
+    std::optional<std::chrono::steady_clock::time_point> m_soloQueueSince;
+    float m_soloTick=0;
     void pumpSurrenderReturn();
     void resetSurrender();
     std::string m_surrenderEventId,m_surrenderMatchId;

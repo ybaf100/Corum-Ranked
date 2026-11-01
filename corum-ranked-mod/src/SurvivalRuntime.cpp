@@ -242,7 +242,12 @@ void SurvivalRuntime::observe(matjson::Value const& root) {
     m_view.certificate=root["map"];m_view.result=root["result"];
     m_view.roundBadges=root["roundBadges"];
     m_view.completedRound=root["completedRound"];m_view.nextMap=root["nextMap"];m_view.participants=root["participants"];
-    if(oldState!="FINAL_RESULT"&&m_view.state=="FINAL_RESULT"&&watchedFinal)Mod::get()->setSavedValue(resultFlowKey()+":watched",true);
+    // The ceremony is for everyone still with the match when it ends: live
+    // watchers, finalists outside the podium and eliminated players who kept
+    // following (observing / free play). A player already on their personal
+    // result, or one recovering a finished match, keeps the score screen.
+    auto const stayedToEnd=watchedFinal || (!oldState.empty() && outcomeChoice()!=SurvivalOutcomeChoice::PersonalResult);
+    if(oldState!="FINAL_RESULT"&&m_view.state=="FINAL_RESULT"&&stayedToEnd)Mod::get()->setSavedValue(resultFlowKey()+":watched",true);
     m_view.selectionOpensAt=root["selectionOpensAt"].asString().unwrapOr("");
     m_view.mapError=root["mapSelection"]["errorCode"].asString().unwrapOr("");
     auto const diagnostic=m_view.id+":"+m_view.roundKey+":"+std::to_string(m_view.mapGeneration)+":"+m_view.mapError+
@@ -712,6 +717,7 @@ void SurvivalRuntime::requestDirectFreePlayReturn(PlayLayer* owner) {
     m_freePlay.returnRequested=true;
 }
 bool SurvivalRuntime::freePlayReturnPending() const {
+    if(m_soloQueueFreePlay && m_freePlay.active && RankedRuntime::get().view().stage==RuntimeStage::Matched)return true;
     return m_freePlay.needsReturn({m_view.id,m_view.roundKey,m_view.mapGeneration},m_view.state,
         m_view.completedRound["key"].asString().unwrapOr(""),m_view.ownEliminated);
 }
@@ -739,7 +745,7 @@ void SurvivalRuntime::pumpFreePlayReturn() {
         auto origin=m_freePlayOrigin?m_freePlayOrigin->lock():Ref<CCScene>();
         auto const fromQueue=m_queueFreePlay;
         m_freePlay.finish();m_freePlayQuitLevel=nullptr;m_freePlayQuitScene.reset();m_freePlayNativeQuitFinished=false;
-        m_freePlayOrigin.reset();m_queueFreePlay=false;
+        m_freePlayOrigin.reset();m_queueFreePlay=m_soloQueueFreePlay=false;
         if(origin && director->levelForSceneInStack(origin.data())>=0){
             if(origin.data()!=scene.data())director->popToSceneInStack(origin.data());
             // The queue lobby is only the return target; a found match opens
@@ -748,18 +754,27 @@ void SurvivalRuntime::pumpFreePlayReturn() {
         }else if(!fromQueue || active())showSurvivalGame();
     });
 }
-bool SurvivalRuntime::beginQueueFreePlay() {
+bool SurvivalRuntime::beginQueueFreePlay() {return canQueueFreePlay() && startQueueFreePlay(false);}
+bool SurvivalRuntime::canSoloQueueFreePlay() const {
+    return RankedRuntime::get().view().stage==RuntimeStage::Queued && !active() && !queueing() && !m_freePlay.active;
+}
+bool SurvivalRuntime::beginSoloQueueFreePlay() {return canSoloQueueFreePlay() && startQueueFreePlay(true);}
+int SurvivalRuntime::soloQueueWaitingSeconds() const {
+    if(!m_soloQueueSince)return 0;
+    return static_cast<int>(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now()-*m_soloQueueSince).count());
+}
+bool SurvivalRuntime::startQueueFreePlay(bool solo) {
     auto* director=CCDirector::sharedDirector();auto* scene=director->getRunningScene();
-    if(!canQueueFreePlay() || !scene || director->getNextScene())return false;
+    if(!scene || director->getNextScene())return false;
     // The empty match identity stays equal until a match is observed, so the
     // shared Free Play return fires exactly when the queue produces a match.
-    m_freePlay.begin({},"");m_queueFreePlay=true;
+    m_freePlay.begin({},"");m_queueFreePlay=true;m_soloQueueFreePlay=solo;
     m_freePlayOrigin.emplace(scene);m_freePlayNativeQuitFinished=false;m_freePlayQuitLevel=nullptr;m_freePlayQuitScene.reset();
-    log::info("[SurvivalQueue] free play while queued players={}/{}",m_queue.players,m_queue.maximumPlayers);
+    log::info("[RankedQueue] free play while queued mode={} survivalPlayers={}/{}",solo?"SOLO":"SURVIVAL",m_queue.players,m_queue.maximumPlayers);
     queueInMainThread([this,weak=WeakRef(scene)]{
         auto origin=weak.lock();auto* director=CCDirector::sharedDirector();
         if(!origin || director->getRunningScene()!=origin.data() || director->getNextScene() || !queueFreePlaying() || freePlayReturnPending()){
-            if(queueFreePlaying() && !freePlayReturnPending()){m_freePlay.finish();m_freePlayOrigin.reset();m_queueFreePlay=false;}return;
+            if(queueFreePlaying() && !freePlayReturnPending()){m_freePlay.finish();m_freePlayOrigin.reset();m_queueFreePlay=m_soloQueueFreePlay=false;}return;
         }
         RankedAudioManager::get().restoreMenuMusic();
         director->pushScene(MenuLayer::scene(false));
@@ -770,8 +785,22 @@ void SurvivalRuntime::requestQueueFreePlayReturn() {
     m_freePlay.returnRequested=true;pumpFreePlayReturn();
 }
 void SurvivalRuntime::pumpQueueFreePlay() {
+    auto const soloStage=RankedRuntime::get().view().stage;
+    auto const soloQueued=soloStage==RuntimeStage::Queued || soloStage==RuntimeStage::JoiningQueue;
+    if(soloQueued && !m_soloQueueSince)m_soloQueueSince=std::chrono::steady_clock::now();
+    if(!soloQueued)m_soloQueueSince.reset();
     if(!m_queueFreePlay)return;
-    if(!m_freePlay.active){m_queueFreePlay=false;return;}
+    if(!m_freePlay.active){m_queueFreePlay=m_soloQueueFreePlay=false;return;}
+    if(m_soloQueueFreePlay){
+        // No Ranked layer ticks the Solo queue while the player is in GD.
+        m_soloTick-=0.1f;if(m_soloTick<=0){m_soloTick=0.25f;RankedRuntime::get().tick();}
+        auto const stage=RankedRuntime::get().view().stage;
+        if(stage!=RuntimeStage::Queued && stage!=RuntimeStage::JoiningQueue && stage!=RuntimeStage::Matched){
+            log::info("[RankedQueue] solo free play detached stage={}",static_cast<int>(stage));
+            m_freePlay.finish();m_freePlayOrigin.reset();m_queueFreePlay=m_soloQueueFreePlay=false;
+        }
+        return;
+    }
     // The queue ended without a match (left, rejected, session lost): the
     // player simply keeps playing GD; nothing is forced back.
     if(!queueing() && !active() && m_queue.status!="MATCHED" && !m_creating){

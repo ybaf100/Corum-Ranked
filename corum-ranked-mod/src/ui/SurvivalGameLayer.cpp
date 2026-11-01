@@ -56,6 +56,7 @@ class SurvivalGameLayer final : public CCLayerColor {
     CCLabelBMFont *m_heading=nullptr,*m_status=nullptr,*m_map=nullptr,*m_surrenderText=nullptr;
     CCMenuItemSpriteExtra *m_resume=nullptr,*m_continue=nullptr,*m_surrender=nullptr;
     CCMenuItemSpriteExtra* m_force=nullptr;
+    CCMenuItemSpriteExtra* m_endRound=nullptr;
     CCMenuItemSpriteExtra* m_freePlay=nullptr;
     CCMenuItemSpriteExtra* m_liveWatch=nullptr;
     std::optional<WeakRef<ui::RankedConfirmPopup>> m_confirmation;
@@ -108,6 +109,8 @@ class SurvivalGameLayer final : public CCLayerColor {
         m_viewBoard=button(menu,text("survival-view-board","VIEW STATUS"),{68,22},116,9,ui::Blue);
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
         m_force=button(menu,"Force n",{68,22},116,3,ui::Red);
+        // Debug builds: end the live round from the standings board.
+        m_endRound=button(menu,text("survival-end-round","END ROUND"),{68,size.height-22},116,21,ui::Red);m_endRound->setVisible(false);
 #endif
         m_selection=ui::SurvivalMapSelectionLayer::create([weak=WeakRef(this)](int tag){if(auto owner=weak.lock())owner->handleAction(tag);});
         if(!m_selection)return false;m_selection->setVisible(false);addChild(m_selection,15);
@@ -115,6 +118,18 @@ class SurvivalGameLayer final : public CCLayerColor {
         if(!m_outcome)return false;m_outcome->setVisible(false);addChild(m_outcome,50);
         scheduleUpdate();return true;
     }
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+    void confirmEndRound() {
+        auto& runtime=SurvivalRuntime::get();if(m_confirmation || !runtime.canEndRound())return;
+        auto const id=runtime.view().id,key=runtime.view().roundKey;auto const generation=runtime.view().mapGeneration;
+        auto* popup=ui::RankedConfirmPopup::create(text("survival-end-round","END ROUND"),text("survival-end-round-question","End this round now using its current records?"),
+            [weak=WeakRef(this),id,key,generation](bool accepted){auto owner=weak.lock();if(!owner)return;owner->m_confirmation.reset();
+                auto& current=SurvivalRuntime::get();
+                if(accepted && current.canEndRound() && current.view().id==id && current.view().roundKey==key && current.view().mapGeneration==generation)current.endRound();
+            },text("survival-end-round","END ROUND"));
+        if(popup){m_confirmation.emplace(popup);m_confirmationContext=id+":"+key+":"+std::to_string(generation);popup->show();}
+    }
+#endif
     void confirmSurrender() {
         if(m_confirmation || !SurvivalRuntime::get().canSurrender())return;
         auto const& view=SurvivalRuntime::get().view();m_confirmationContext=view.id+":"+view.roundKey+":"+std::to_string(view.mapGeneration);auto const id=view.id,round=view.roundKey;auto const generation=view.mapGeneration;
@@ -148,6 +163,9 @@ class SurvivalGameLayer final : public CCLayerColor {
         if(tag==21){runtime.chooseOutcome(SurvivalOutcomeChoice::PersonalResult);return;}
         if(tag==20){runtime.completeResultScreen(false);return;}
         if(tag==12){beginResultMotion();return;}
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+        if(tag==21){confirmEndRound();return;}
+#endif
         if(tag==11){ui::showSurvivalStandings();return;}
         if(tag==10)RankedRoundPreparation::get().retry();
         if(tag==0){m_manualMap=true;queueNativeLaunch();}
@@ -468,6 +486,9 @@ public:
         m_viewBoard->setVisible(selectionWindow);m_viewBoard->setEnabled(!m_motion && !elimination);
         m_freePlay->setVisible(watching || (liveBoard && runtime.canFreePlay()));m_freePlay->setEnabled(!m_motion && !m_confirmation);
         if(m_force){m_force->setVisible(view.debug && !view.online && nextRound && !selectionWindow && !liveBoard);m_force->setEnabled(!m_motion && now>=m_eliminationUntil && !runtime.creating());}
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+        if(m_endRound){m_endRound->setVisible(liveBoard && !elimination && runtime.canEndRound());m_endRound->setEnabled(!m_motion && !m_confirmation);}
+#endif
         if(!elimination)m_heading->setString(result?fmt::format("SURVIVAL · {}",i18n::isKorean()?fmt::format(fmt::runtime(i18n::text("player-rank","{}")),view.result["rank"].asInt().unwrapOr(0)):survivalOrdinal(static_cast<int>(view.result["rank"].asInt().unwrapOr(0)))).c_str():
             (intro?fmt::format("SURVIVAL · {} {}",view.playerCount,corum::ranked::i18n::literal("inline.players")):
             fmt::format("SURVIVAL · {}",view.phase=="TIEBREAK"?"DEATH MATCH":view.phase=="FINAL"?"FINAL":("ROUND "+std::to_string(view.roundNumber)))).c_str());

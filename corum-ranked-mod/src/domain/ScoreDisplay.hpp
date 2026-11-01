@@ -13,7 +13,9 @@ inline std::string soloScoreText(double value,bool signedValue=false) {
     if(normalized==0)normalized=0;
     std::ostringstream output;
     if(signedValue&&normalized>0)output<<'+';
-    output<<std::fixed<<std::setprecision(1)<<normalized;
+    // Whole values drop the ".0" (12.0 -> 12, 12.5 stays 12.5).
+    if(normalized==std::trunc(normalized))output<<static_cast<long long>(normalized);
+    else output<<std::fixed<<std::setprecision(1)<<normalized;
     return output.str();
 }
 // Presentation only. Server records, ordering and cutoff comparisons keep

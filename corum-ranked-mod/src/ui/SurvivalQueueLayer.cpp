@@ -1,5 +1,6 @@
 #include "../SurvivalRuntime.hpp"
 #include "../RankedPopup.hpp"
+#include "../RankedRuntime.hpp"
 #include "RankedVisuals.hpp"
 #include <Geode/binding/PlayLayer.hpp>
 
@@ -53,11 +54,19 @@ void pumpSurvivalQueueOverlay(){
     if(!scene || typeinfo_cast<CCTransitionScene*>(scene))return;
     auto& runtime=SurvivalRuntime::get();
     auto* existing=typeinfo_cast<SurvivalQueueOverlay*>(scene->getChildByID("survival-queue-overlay"_spr));
-    auto const visible=runtime.queueing() && !runtime.active() && !rankedLobbyRunning(scene) &&
+    auto const soloStage=RankedRuntime::get().view().stage;
+    auto const solo=soloStage==RuntimeStage::Queued || soloStage==RuntimeStage::JoiningQueue;
+    auto const survival=runtime.queueing() && !runtime.active();
+    auto const visible=(survival || solo) && !rankedLobbyRunning(scene) &&
         !scene->getChildByID("survival-game-coordinator"_spr) && !director->getNextScene();
     if(!visible){if(existing)existing->removeFromParentAndCleanup(true);return;}
     if(!existing){existing=SurvivalQueueOverlay::create();if(!existing)return;scene->addChild(existing,10000);}
-    auto const& queue=runtime.queue();auto const waiting=runtime.queueWaitingSeconds();
-    existing->present(fmt::format("{}/{} - {:02}:{:02}",queue.players,queue.maximumPlayers,waiting/60,waiting%60));
+    if(survival){
+        auto const& queue=runtime.queue();auto const waiting=runtime.queueWaitingSeconds();
+        existing->present(fmt::format("{}/{} - {:02}:{:02}",queue.players,queue.maximumPlayers,waiting/60,waiting%60));
+    }else{
+        auto const waiting=runtime.soloQueueWaitingSeconds();
+        existing->present(fmt::format("SOLO - {:02}:{:02}",waiting/60,waiting%60));
+    }
 }
 }
