@@ -21,6 +21,8 @@ export interface SurvivalMapProvider {
   confirm?(tx:SqlExecutor,request:SurvivalMapRequest,map:SurvivalVerifiedMap):Promise<void>;
   release?(request:SurvivalMapRequest):Promise<void>;
   discardPrefetch?(tx:SqlExecutor,matchId:string,roundKey:string,generation:number,levelId:number):Promise<void>;
+  /** Hint: a running match will likely request this bucket next. */
+  anticipate?(request:Omit<SurvivalMapRequest,"reservation"|"excludedLevelIds">):Promise<void>;
 }
 export type SurvivalMapErrorCode = "API_ERROR" | "EMPTY_SEARCH" | "INVALID_METADATA" |
   "DOWNLOAD_FAILED" | "INVALID_DATA" | "DUPLICATE_CANDIDATES" | "NO_ELIGIBLE_MAP";
@@ -299,13 +301,20 @@ export class GdSurvivalMapProvider implements SurvivalMapProvider {
         }
       }catch(e){failed(e);}
     }
-    // Round-robin independently shuffled source/ID strata, then deduplicate IDs.
-    const strata=new Map<string,typeof candidates>();
-    for(const candidate of candidates){const key=`${candidate.type}:${survivalIdBand(candidate.level.levelId)}`;
-      const bucket=strata.get(key)??[];bucket.push(candidate);strata.set(key,bucket);}
-    const groups=shuffle([...strata.values()].map(items=>shuffle(items,this.random)),this.random);
-    while(groups.some(items=>items.length) && !signal.aborted && downloads<12)for(const items of groups){
-      const candidate=items.pop();if(!candidate || downloads>=12 || signal.aborted)continue;
+    // ID band first, then source: every band that actually has eligible
+    // candidates gets an equal share of download attempts, and inside a band
+    // each search source (Recent/Most liked/Awarded) alternates. Page 0 of
+    // Recent/Awarded is almost all 100m+, so a flat source:band round-robin
+    // gave the newest IDs several times the weight. A band with no eligible
+    // candidate is simply absent (never force-filled).
+    const bands=new Map<string,Map<string,typeof candidates>>();
+    for(const candidate of candidates){const band=survivalIdBand(candidate.level.levelId),types=bands.get(band)??new Map<string,typeof candidates>();
+      const items=types.get(candidate.type)??[];items.push(candidate);types.set(candidate.type,items);bands.set(band,types);}
+    survivalCatalogSkew.observe(candidates.map(c=>({type:c.type,band:survivalIdBand(c.level.levelId)})));
+    const groups=shuffle([...bands.values()].map(types=>shuffle([...types.values()].map(items=>shuffle(items,this.random)),this.random)),this.random);
+    const nextFromBand=(types:typeof candidates[])=>{for(let i=0;i<types.length;i++){const items=types.shift()!;types.push(items);const c=items.pop();if(c)return c;}return undefined;};
+    while(groups.some(types=>types.some(items=>items.length)) && !signal.aborted && downloads<12)for(const types of groups){
+      const candidate=nextFromBand(types);if(!candidate || downloads>=12 || signal.aborted)continue;
       const {level,type,page,catalog}=candidate;if(seen.has(level.levelId))continue;
       seen.add(level.levelId);downloads++;
       try {
@@ -323,3 +332,12 @@ export class GdSurvivalMapProvider implements SurvivalMapProvider {
 
 /** A bounded ID stratum, not an asserted upload date. */
 export function survivalIdBand(levelId:number):string {return levelId<70_000_000?"40m-70m":levelId<100_000_000?"70m-100m":"100m+";}
+/** Process-wide measurement of where eligible catalog candidates come from
+ * (source x ID band). Diagnostics only; selection never uses it as a quota. */
+export const survivalCatalogSkew={
+  counts:new Map<string,number>(),
+  observe(items:readonly {type:string;band:string}[]):void{
+    for(const item of items){const key=`${item.type}:${item.band}`;this.counts.set(key,(this.counts.get(key)??0)+1);}
+  },
+  snapshot():Record<string,number>{return Object.fromEntries([...this.counts].sort(([a],[b])=>a.localeCompare(b)));},
+};

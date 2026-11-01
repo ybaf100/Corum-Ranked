@@ -18,7 +18,7 @@ const source={select:vi.fn(async(r:SurvivalMapRequest):Promise<SurvivalVerifiedM
  geometrySha256:"a".repeat(64),geometryBytes:32,verifiedAt:clock.now().toISOString(),songIds:[123],sfxIds:[],sourceSearchType:"2",sourcePage:123};
 })};
 const defaultSelect=source.select.getMockImplementation()!;
-const pool=()=>{const p=new SurvivalMapPool(db,source,clock);pools.push(p);return p;};
+const pool=(pick?:(count:number)=>number)=>{const p=new SurvivalMapPool(db,source,clock,40_000_000,pick);pools.push(p);return p;};
 async function idle(p:SurvivalMapPool){await Promise.all((p as unknown as {jobs:Map<string,Promise<void>>}).jobs.values());}
 async function count(status:string){return Number((await db.query<{count:string}>("SELECT count(*)::text AS count FROM sur_map_candidates WHERE status=$1",[status])).rows[0]!.count);}
 beforeAll(async()=>{pg=new PGlite();db=new PgliteDatabase(pg);const directory=fileURLToPath(new URL("../../../migrations/",import.meta.url));
@@ -56,7 +56,7 @@ describe("durable verified Survival candidate pool",()=>{
    }
  });
  it("rejects a corrupt persisted certificate and continues with verified candidates",async()=>{
-   const p=pool();await p.onApplicationBootstrap();await idle(p);const key=survivalCandidateBucket(request);
+   const p=pool(()=>0);/* the corrupt lowest-ID row is drawn first */await p.onApplicationBootstrap();await idle(p);const key=survivalCandidateBucket(request);
    const row=(await db.query<{level_id:string}>("SELECT level_id FROM sur_map_candidates WHERE bucket_key=$1 ORDER BY level_id LIMIT 1",[key])).rows[0]!;
    await db.query("UPDATE sur_map_candidates SET metadata=jsonb_set(metadata,'{geometrySha256}','\"broken\"') WHERE bucket_key=$1 AND level_id=$2",[key,row.level_id]);
    const map=await p.select(request);expect(map.levelId).not.toBe(Number(row.level_id));expect(map.geometrySha256).toMatch(/^[a-f0-9]{64}$/);
@@ -78,7 +78,7 @@ describe("durable verified Survival candidate pool",()=>{
    now+=7*3600000;await expect(p.select(request)).rejects.toMatchObject({code:"API_ERROR"});
  });
  it("releases only expired leases and blocks duplicate confirmation",async()=>{
-   const p=pool();await p.onApplicationBootstrap();await idle(p);
+   const p=pool(()=>0);await p.onApplicationBootstrap();await idle(p); // deterministic draw: lowest level ID
    const a=await p.select(request);await db.transaction(tx=>p.confirm(tx,request,a));
    await expect(db.transaction(tx=>p.confirm(tx,request,a))).rejects.toThrow();
    const b=await p.select(request);now+=120001;
@@ -126,4 +126,47 @@ describe("durable verified Survival candidate pool",()=>{
    const map=await p.select(fresh);expect(map.levelId).toBeGreaterThanOrEqual(70000000);
  });
 
+ it("draws uniformly among the eligible READY candidates and re-draws only among the remaining ones",async()=>{
+   const picks:number[]=[];let next=0;const p=pool(count=>{picks.push(count);return next%count;});await p.onApplicationBootstrap();await idle(p);
+   const key=survivalCandidateBucket(request);
+   const ids=(await db.query<{level_id:string}>("SELECT level_id FROM sur_map_candidates WHERE bucket_key=$1 AND status='READY' ORDER BY level_id",[key])).rows.map(r=>Number(r.level_id));
+   expect(ids).toHaveLength(3);
+   // Every index reaches a distinct candidate: N eligible -> picker(N), each with probability 1/N.
+   for(let i=0;i<3;i++){next=i;picks.length=0;const map=await p.select(request);expect(picks[0]).toBe(3);expect(map.levelId).toBe(ids[i]);await p.release(request);}
+   // A corrupt drawn certificate is invalidated; the re-draw spans only the remaining two.
+   await db.query("UPDATE sur_map_candidates SET metadata=jsonb_set(metadata,'{geometrySha256}','\"broken\"') WHERE bucket_key=$1 AND level_id=$2",[key,ids[0]]);
+   next=0;picks.length=0;const map=await p.select(request);expect(picks).toEqual([3,2]);expect(map.levelId).toBe(ids[1]);
+   expect(await count("INVALID")).toBe(1);await p.release(request);
+ });
+ it("default crypto draw reaches every eligible candidate (no fixed-order bias)",async()=>{
+   const p=pool();await p.onApplicationBootstrap();await idle(p);const seen=new Set<number>();
+   for(let i=0;i<60 && seen.size<3;i++){const map=await p.select(request);seen.add(map.levelId);await p.release(request);}
+   expect(seen.size).toBe(3);
+ });
+ it("excludes a map only while it is held or inside the recent-30 window",async()=>{
+   const p=pool(()=>0);await p.onApplicationBootstrap();await idle(p);
+   const first=await p.select(request);
+   const exclusions=()=>(p as unknown as {exclusions():number[]}).exclusions();
+   expect(exclusions()).toContain(first.levelId); // RESERVED
+   await db.transaction(tx=>p.confirm(tx,request,first));
+   expect(exclusions()).toContain(first.levelId); // newest entry of the recent window
+   const internal=p as unknown as {recent:number[]};
+   for(let i=0;i<30;i++)internal.recent=[...internal.recent,90000000+i].slice(-30); // thirty later selections
+   // Outside the recent window and no longer READY/RESERVED: eligible for verification again.
+   expect(exclusions()).not.toContain(first.levelId);
+   const restarted=pool(()=>0);await restarted.onApplicationBootstrap();await idle(restarted);
+   expect((restarted as unknown as {exclusions():number[]}).exclusions()).not.toContain(first.levelId);
+ });
+ it("keeps five READY candidates for an anticipated bucket and three elsewhere",async()=>{
+   const p=pool(()=>0);await p.onApplicationBootstrap();await idle(p);
+   const next={group:"RED_BRONZE" as const,phase:"ROUND_2" as const,minimumLevelId:40000000};
+   await p.anticipate(next);await idle(p);
+   const ready=async(key:string)=>Number((await db.query<{count:string}>("SELECT count(*)::text AS count FROM sur_map_candidates WHERE bucket_key=$1 AND status='READY'",[key])).rows[0]!.count);
+   expect(await ready(survivalCandidateBucket({...next,excludedLevelIds:[]}))).toBe(5);
+   expect(await ready(survivalCandidateBucket(request))).toBe(3);
+   now+=21*60_000;const other={...request,reservation:{...request.reservation!,token:"00000000-0000-4000-8000-000000000011"}};
+   // Expired anticipation: the capacity trim returns the bucket to the default three.
+   await p.select({...other,...next});await p.release({...other,...next});
+   expect(await ready(survivalCandidateBucket({...next,excludedLevelIds:[]}))).toBeLessThanOrEqual(3);
+ });
 });

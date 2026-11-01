@@ -103,7 +103,7 @@ describe("Survival round engine",()=>{
     r.now=r.round.endsAt!;r.next();expect(r.match.presentationGate).toBe("ROUND_RESULT");
     expect(r.round.endsAt!-r.round.startsAt!).toBe(180000);
     const completed=survivalLiveView(r.match,r.now).completedRound;
-    const old=acknowledge();r.now+=4999;r.next();expect(r.match.rounds).toHaveLength(1);
+    const old=acknowledge();r.now+=5499;r.next();expect(r.match.rounds).toHaveLength(1); // 5.5 s result presentation
     expect(()=>r.send(old)).toThrow("not complete");
     r.now++;r.next();expect(r.match.rounds).toHaveLength(2);
     expect(r.round.players).toHaveLength(10);expect(r.round.startsAt).toBeNull();

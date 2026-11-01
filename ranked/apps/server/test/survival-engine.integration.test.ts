@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll,beforeAll,beforeEach,describe,expect,it,vi } from "vitest";
-import { DEFAULT_SURVIVAL_CONFIG,SeededRandom,survivalCurrentRound,survivalMapRange,survivalSettlementInputs,
+import { SURVIVAL_RESULT_MS, DEFAULT_SURVIVAL_CONFIG,SeededRandom,survivalCurrentRound,survivalMapRange,survivalSettlementInputs,
   type SurvivalCommand,type SurvivalMatch,type SurvivalVerifiedMap } from "@corum-ranked/rules";
 import { SurvivalConfigService,type SurvivalConfigDocument } from "../src/config/survival-config.service.js";
 import { SurvivalEngineService,type SurvivalAdmissionPlayer } from "../src/survival/survival-engine.service.js";
@@ -371,7 +371,7 @@ it("durably preselects the next official map during results and adopts it after 
  await engine.selectMap(m.id);expect((await database.query("SELECT * FROM sur_map_selection_history WHERE match_id=$1",[m.id])).rows).toEqual(history);
  const select=vi.fn(async()=>{throw new Error("must reuse the durable next map");});
  const restarted=new SurvivalEngineService(database,clock,ids,config,{select});
- now+=5000;m=await restarted.tick(m.id);expect(m.state).toBe("PREPARING");expect(survivalCurrentRound(m).map).toEqual(next!.map);
+ now+=SURVIVAL_RESULT_MS;m=await restarted.tick(m.id);expect(m.state).toBe("PREPARING");expect(survivalCurrentRound(m).map).toEqual(next!.map);
  await restarted.selectMap(m.id);expect(select).not.toHaveBeenCalled();
 });
 

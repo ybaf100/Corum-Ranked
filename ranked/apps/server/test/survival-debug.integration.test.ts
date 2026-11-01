@@ -7,7 +7,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { Test } from "@nestjs/testing";
 import { ForbiddenException, ValidationPipe, type INestApplication } from "@nestjs/common";
 import { beforeAll,beforeEach,afterAll,describe,it,expect,vi } from "vitest";
-import { DEFAULT_SURVIVAL_CONFIG,survivalInitialPhase,survivalCurrentRound,survivalMapRange,type SurvivalMatch } from "@corum-ranked/rules";
+import { DEFAULT_SURVIVAL_CONFIG,SURVIVAL_RESULT_MS,survivalInitialPhase,survivalCurrentRound,survivalMapRange,type SurvivalMatch } from "@corum-ranked/rules";
 import { PgliteDatabase } from "./pglite-database.js";
 import { environmentFixture,configDocumentFixture } from "./fixtures.js";
 import { SurvivalConfigService,type SurvivalConfigDocument } from "../src/config/survival-config.service.js";
@@ -90,7 +90,7 @@ async function send(m:SurvivalMatch,type:SurvivalDebugEventDto["type"],fields:Pa
 }
 async function prepare(m:SurvivalMatch) {
   if(m.presentationGate==="ROUND_RESULT") {
-    now=Math.max(now,survivalCurrentRound(m).finishedAt!+5000);
+    now=Math.max(now,survivalCurrentRound(m).finishedAt!+SURVIVAL_RESULT_MS);
     await send(m,"PRESENTATION_COMPLETE");m=await engine.get(m.id);
   }
   await engine.selectMap(m.id);m=await engine.get(m.id);
@@ -136,7 +136,7 @@ describe("Survival M4 persistent debug game",()=>{
       const stale=await event({eventId:ids.next(),type:"PROGRESS",...context,mapGeneration:2,attemptId:ids.next(),progress:99});
       expect(stale.status).toBe(409);expect(await stale.json()).toMatchObject({message:"SURVIVAL_CONTEXT_CHANGED"});
       expect(survivalCurrentRound(await engine.get(m.id)).players[0]!.highestProgress).toBe(100);
-      now+=5000;
+      now+=SURVIVAL_RESULT_MS;
       const ack={eventId:ids.next(),type:"PRESENTATION_COMPLETE",...context};
       expect((await event(ack)).status).toBe(201);expect((await event(ack)).status).toBe(201);
       expect((await engine.get(m.id)).rounds).toHaveLength(2);
@@ -227,7 +227,7 @@ describe("Survival M4 persistent debug game",()=>{
     expect(m.state).toBe("ROUND_RESULT");expect(m.presentationGate).toBe("ROUND_RESULT");
     const completed=(await debug.view(m.id,session)).completedRound!;
     expect(completed.players).toHaveLength(16);
-    now+=4999;await expect(send(m,"PRESENTATION_COMPLETE")).rejects.toThrow("not complete");
+    now+=SURVIVAL_RESULT_MS-1;await expect(send(m,"PRESENTATION_COMPLETE")).rejects.toThrow("not complete");
     now+=1;
     // A new process reads the same SQL snapshot; background ticks alone cannot
     // consume the roster/animation barrier even after its minimum duration.
@@ -367,7 +367,7 @@ describe("Survival M4 persistent debug game",()=>{
         await engine.dispatch(m.id,"tie-end",{type:"ATTEMPT_END",...context,progress:100});
       }
       now=survivalCurrentRound(m).endsAt!;await debug.tickOnce();m=await engine.get(m.id);
-      expect(m.state).toBe("ROUND_RESULT");now+=5000;await send(m,"PRESENTATION_COMPLETE");m=await engine.get(m.id);
+      expect(m.state).toBe("ROUND_RESULT");now+=SURVIVAL_RESULT_MS;await send(m,"PRESENTATION_COMPLETE");m=await engine.get(m.id);
     }
     expect(survivalCurrentRound(m).phase).toBe("TIEBREAK");m=await prepare(m);
     expect(survivalCurrentRound(m).players.filter(p=>p.participantId!=="human").every(p=>p.attempts.length===0)).toBe(true);

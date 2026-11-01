@@ -11,7 +11,9 @@ inline constexpr std::size_t SurvivalThumbnailMaxBytes=2*1024*1024;
 // Map-selection reel: 8 slots. A match keeps a warm pool of distinct small
 // thumbnails (disk-seeded first, then random downloads) so the spinning reel
 // shows 8 different images instead of repeating the first arrival.
-inline constexpr std::size_t SurvivalThumbnailReelImages=8,SurvivalThumbnailSeedSize=8,SurvivalThumbnailPoolSize=12;
+inline constexpr std::size_t SurvivalThumbnailReelImages=8,SurvivalThumbnailSeedSize=12,SurvivalThumbnailPoolSize=16;
+// Bounded disk cache of small/medium WebP thumbnails reused across matches.
+inline constexpr std::size_t SurvivalThumbnailDiskFiles=48,SurvivalThumbnailDiskBytes=48*1024*1024;
 inline std::optional<std::uint64_t> survivalThumbnailRedirect(std::string_view location) {
     if(location.starts_with(SurvivalThumbnailOrigin))location.remove_prefix(SurvivalThumbnailOrigin.size());
     constexpr std::string_view prefix="/thumbnail/",suffix="/small";

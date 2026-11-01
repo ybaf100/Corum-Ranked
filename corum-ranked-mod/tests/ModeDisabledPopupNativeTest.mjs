@@ -43,6 +43,7 @@ namespace corum::ranked::ui{
 ${strip(read('src/ui/RankedModeDisabledPopup.hpp')).replace('class RankedModeDisabledPopup final : public Popup {','class RankedModeDisabledPopup final : public Popup { public:')}
 enum class RuntimeStage{Ready,Matched,Loading};struct RuntimeView{RuntimeStage stage=RuntimeStage::Ready;bool survivalEnabled=false,soloEnabled=false;struct{bool loaded=false;}survival;};
 struct RankedRuntime{RuntimeView v;int fetches=0;static RankedRuntime&get(){static RankedRuntime r;return r;}RuntimeView const&view()const{return v;}void fetchSurvivalProfile(){++fetches;}};
+namespace corum::ranked{struct SurvivalThumbnailProvider{int prewarms=0;static SurvivalThumbnailProvider&get(){static SurvivalThumbnailProvider p;return p;}void prewarm(){++prewarms;}};}
 struct Owner:CCNode{
  struct Hover{void press(CCMenuItemSpriteExtra*){}};Hover*m_lobbyHover=nullptr;
  enum class Page{Live,History};Page m_page=Page::Live;bool m_uiFadingOut=false,m_modeNoticeOpen=false;unsigned m_modeNoticeGeneration=0;

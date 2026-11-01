@@ -2592,6 +2592,7 @@ class CorumRankedLayer final : public CCLayerColor {
         if (!m_modeTransition.select(mode)) return;
         renderModePanel(RankedRuntime::get().view(),mode);
         if (mode == corum::ranked::RankedMode::Survival && !RankedRuntime::get().view().survival.loaded) RankedRuntime::get().fetchSurvivalProfile();
+        if (mode == corum::ranked::RankedMode::Survival) corum::ranked::SurvivalThumbnailProvider::get().prewarm();
         animateModeLobby(mode,true);
     }
 

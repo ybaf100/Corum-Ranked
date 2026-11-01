@@ -31,6 +31,7 @@ public:
         SpectatorSnapEvidence snap{type, before.x, before.y, after.x, after.y};
         if (before.camera && validSpectatorCamera(*before.camera)) snap.fromCamera = before.camera;
         if (!finiteSpectatorSnap(snap)) return "INVALID_EVENT_OR_CHAIN_LIMIT";
+        if (!m_snap && m_lastSampled && unobservedRoundTrip(*m_lastSampled, before, after)) return "UNOBSERVED_ROUNDTRIP";
         if (m_snap) {
             // Coalesce only an observed native event chain. Never bridge an
             // arbitrary correction or an unrelated callback's coordinates.
@@ -49,6 +50,7 @@ public:
         if(type==SpectatorDiscontinuity::SpiderSnap&&(after.mode!=SpectatorGameMode::Spider||(before.mode==after.mode&&before.upsideDown==after.upsideDown)))return "SPIDER_MODE_OR_GRAVITY";
         SpectatorSnapEvidence snap{type,before.x,before.y,after.x,after.y};
         if(!finiteSpectatorSnap(snap))return "INVALID_EVENT_OR_CHAIN_LIMIT";
+        if(!m_secondarySnap&&m_lastSampled&&m_lastSampled->player2&&unobservedRoundTrip(*m_lastSampled->player2,before,after))return "UNOBSERVED_ROUNDTRIP";
         if(m_secondarySnap){if(std::hypot(before.x-m_secondarySnap->toX,before.y-m_secondarySnap->toY)>400)return "CHAIN_GAP";
             snap.fromX=m_secondarySnap->fromX;snap.fromY=m_secondarySnap->fromY;
             if(m_secondarySnap->type==SpectatorDiscontinuity::Teleport)snap.type=SpectatorDiscontinuity::Teleport;
@@ -76,9 +78,22 @@ public:
         if(pose.player2){pose.player2->discontinuity=m_secondarySnap;pose.player2->effects|=m_secondaryEffects;}
         return pose;
     }
-    void sampled() { m_snap.reset();m_secondarySnap.reset();m_effects=m_secondaryEffects=0; m_cameraSnap = false; }
-    void reset() { m_latest.reset(); sampled(); m_nativeTime = 0; m_seeded = false; }
+    void sampled() { if (m_latest) m_lastSampled = m_latest; m_snap.reset();m_secondarySnap.reset();m_effects=m_secondaryEffects=0; m_cameraSnap = false; }
+    void reset() { m_latest.reset(); sampled(); m_lastSampled.reset(); m_nativeTime = 0; m_seeded = false; }
+    /** A native relocation whose source the published stream never showed but
+     * whose destination is where the last published sample already is (e.g.
+     * Entropie's start trigger re-firing after GD stepped the player from its
+     * start position within one frame). The visible motion stays continuous;
+     * evidence from an unpublished source could never be verified by a viewer,
+     * so it is not attached. A relocation that does move away from the last
+     * sample is still captured and verified (or rejected) normally. */
+    template<class Sampled>
+    static bool unobservedRoundTrip(Sampled const& sampled, SpectatorGhostPose const& before, SpectatorGhostPose const& after) {
+        return std::hypot(before.x - sampled.x, before.y - sampled.y) > 400.0f &&
+               std::hypot(after.x - sampled.x, after.y - sampled.y) <= 400.0f;
+    }
 private:
+    std::optional<SpectatorGhostPose> m_lastSampled;
     std::optional<SpectatorGhostPose> m_latest;
     std::optional<SpectatorSnapEvidence> m_snap;
     std::optional<SpectatorSnapEvidence> m_secondarySnap;

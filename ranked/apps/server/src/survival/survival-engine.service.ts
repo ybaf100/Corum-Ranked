@@ -6,7 +6,7 @@ import { lockSurvivalAdmission,assertSurvivalAdmission } from "./survival-admiss
 import { createHash } from "node:crypto";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger,
   NotFoundException, type OnApplicationBootstrap, type OnApplicationShutdown } from "@nestjs/common";
-import { observeSurvivalAchievementCheckpoint, recoverSurvivalAchievementCheckpoint, createSurvivalMatch, reduceSurvivalMatch, survivalMapSelectionTarget, survivalCurrentRound, survivalLiveView, survivalMilliPercent,
+import { observeSurvivalAchievementCheckpoint, recoverSurvivalAchievementCheckpoint, createSurvivalMatch, reduceSurvivalMatch, survivalMapSelectionTarget, survivalCurrentRound, survivalNextPhase, survivalLiveView, survivalMilliPercent,
   type SurvivalVerifiedMap, type SurvivalCommand, type SurvivalEntrant, type SurvivalMatch } from "@corum-ranked/rules";
 import { ID_GENERATOR, SERVER_CLOCK, type IdGenerator, type ServerClock } from "../common/runtime.module.js";
 import { SurvivalConfigService, type SurvivalConfigDocument } from "../config/survival-config.service.js";
@@ -170,7 +170,7 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
         (row.map_job_token && row.map_job_deadline_at && new Date(row.map_job_deadline_at).getTime()>now))return null;
       const token=this.ids.next();
       await tx.query("UPDATE sur_matches SET map_job_token=$2,map_job_deadline_at=$3 WHERE id=$1",[matchId,token,iso(now+180_000)]);
-      return {token,roundKey:target.roundKey,mapGeneration:target.mapGeneration,request:{group:row.snapshot.difficultyGroup,
+      return {token,roundKey:target.roundKey,mapGeneration:target.mapGeneration,matchPlayerCount:row.snapshot.config.matchPlayerCount,request:{group:row.snapshot.difficultyGroup,
         phase:target.phase,minimumLevelId:row.snapshot.config.minimumLevelId,
         reservation:{matchId,roundKey:target.roundKey,mapGeneration:target.mapGeneration,token},
         excludedLevelIds:row.snapshot.rounds.flatMap(r=>r.selectedMaps.map(m=>m.levelId))}};
@@ -199,7 +199,13 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
           await tx.query("UPDATE sur_matches SET map_job_token=NULL,map_job_deadline_at=NULL,map_retry_at=NULL,map_error=NULL,map_failure_count=0 WHERE id=$1",[matchId]);
           return true;
         });
-        if(accepted){await this.maps.release?.(job.request);return;}
+        if(accepted){await this.maps.release?.(job.request);
+          // The bucket this match will most likely need after this round keeps a
+          // deeper READY pool (bounded, refilled ahead of idle warming).
+          try{const after=survivalNextPhase(job.request.phase,job.matchPlayerCount);
+            if(after!==job.request.phase)await this.maps.anticipate?.({group:job.request.group,phase:after,minimumLevelId:job.request.minimumLevelId});
+          }catch(e){this.logger.warn(`Survival map anticipation ${matchId}: ${String(e)}`);}
+          return;}
         await this.maps.release?.(job.request);
       }
       throw new SurvivalMapError("DUPLICATE_CANDIDATES","Concurrent Survival selections exhausted candidate retries");

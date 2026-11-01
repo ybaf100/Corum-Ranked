@@ -74,6 +74,16 @@ void SurvivalThumbnailProvider::activate(SurvivalSelectionContext const& context
     if(m_selected){enqueue({m_selected,false});enqueue({m_selected,true},true);}
     for(auto id:m_candidates)enqueue({id,false});
 }
+void SurvivalThumbnailProvider::prewarm(){
+    // Entering the Survival lobby: decode the disk pool and top it up with
+    // random small thumbnails before any match exists. Never displaces a live
+    // match reveal; a real match context replaces this one (its pool is then
+    // seeded from the same disk cache, textures already in memory).
+    if(m_history || !supported())return;
+    if(!m_context.empty())return;
+    SurvivalSelectionContext context{"prewarm:"+std::to_string(appEpoch)+":"+std::to_string(now()),"R1",1,0,0};
+    activate(context);
+}
 void SurvivalThumbnailProvider::candidate(std::uint64_t id){
     if(!id || id==m_selected || m_candidates.size()>=SurvivalThumbnailPoolSize || std::find(m_candidates.begin(),m_candidates.end(),id)!=m_candidates.end())return;
     m_candidates.push_back(id);
@@ -217,7 +227,7 @@ void SurvivalThumbnailProvider::trimDisk(){
     }
     std::sort(files.begin(),files.end(),[&](auto const& a,auto const& b){return a.last_write_time(ec)<b.last_write_time(ec);});
     auto remaining=files.size();
-    for(auto const& file:files){if(remaining<=32 && total<=32*1024*1024)break;
+    for(auto const& file:files){if(remaining<=SurvivalThumbnailDiskFiles && total<=SurvivalThumbnailDiskBytes)break;
         auto size=file.file_size(ec);if(std::filesystem::remove(file.path(),ec)){total-=std::min(total,size);--remaining;}
     }
 }

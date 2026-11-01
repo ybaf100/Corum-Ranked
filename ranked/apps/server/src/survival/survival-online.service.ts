@@ -6,7 +6,7 @@ import {survivalResultRoster} from "./survival-result-roster.js";
 import { SurvivalConfigService } from "../config/survival-config.service.js";
 import { survivalQueueView } from "./survival-queue.view.js";
 import { BadRequestException,ConflictException,ForbiddenException,Inject,Injectable,Logger,type OnApplicationBootstrap,type OnApplicationShutdown } from "@nestjs/common";
-import { reduceSurvivalMatch,survivalCurrentRound,survivalLiveView,survivalMarkAbsent,survivalSettlementInputs,survivalEntryDeadlineAt,
+import { SURVIVAL_RESULT_MS, reduceSurvivalMatch,survivalCurrentRound,survivalLiveView,survivalMarkAbsent,survivalSettlementInputs,survivalEntryDeadlineAt,
   RankedDomainError,type SurvivalBotDriverState,type SurvivalMatch,type SurvivalCommand,type SurvivalRatingProfile } from "@corum-ranked/rules";
 import { DATABASE,type DatabasePort,type SqlExecutor } from "../database/database.port.js";
 import { SERVER_CLOCK,type ServerClock } from "../common/runtime.module.js";
@@ -58,10 +58,12 @@ export class SurvivalOnlineService implements OnApplicationBootstrap,OnApplicati
     if(!before.online||terminal(before))return before;
     const row=(await tx.query<OnlineRow>("SELECT * FROM sur_online_matches WHERE match_id=$1",[before.id])).rows[0];
     if(!row)return before;let match=before;let round=survivalCurrentRound(match);
-    // Five-second rosters belong to the shared server clock; a disconnected or
-    // eliminated client cannot hold all other players at a presentation barrier.
+    // Roster/result presentations belong to the shared server clock; a
+    // disconnected or eliminated client cannot hold all other players at a
+    // presentation barrier. The 5.5 s result window is also the window in
+    // which the prefetched next map (nextMap) is already downloading.
     const barrierStart=match.presentationGate==="INTRO"?match.createdAt:round.finishedAt;
-    if(match.presentationGate && barrierStart!==null && now>=barrierStart+(match.presentationGate==="INTRO"?6000:5000)){
+    if(match.presentationGate && barrierStart!==null && now>=barrierStart+(match.presentationGate==="INTRO"?6000:SURVIVAL_RESULT_MS)){
       const owner=match.players.find(p=>p.kind==="HUMAN"&&p.eliminationStage===null);
       if(owner)match=reduceSurvivalMatch(match,{type:"PRESENTATION_COMPLETE",roundKey:round.key,mapGeneration:round.mapGeneration,participantId:owner.participantId},now);
     }

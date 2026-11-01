@@ -16,7 +16,28 @@ int main() {
     }
     assert(competitiveClockPair(284,10,10).clockX==250);
     assert(std::abs(CompetitiveClockScale-1.02f)<.0001f);
-    assert(SurvivalBeforeEliminationMilliseconds+SurvivalEliminationMilliseconds+SurvivalAfterEliminationMilliseconds==5000);
+    assert(SurvivalBeforeEliminationMilliseconds+SurvivalEliminationMilliseconds+SurvivalAfterEliminationMilliseconds==5500);
+    assert(SurvivalRosterMilliseconds==5500 && SurvivalBeforeEliminationMilliseconds==1950 && SurvivalEliminationMilliseconds==1550 && SurvivalAfterEliminationMilliseconds==2000);
+    // Sequential eliminations: strictly increasing starts, last fall ends inside 1.55 s, 0/1/16/64 players.
+    assert(survivalEliminationStarts(0).empty() && survivalEliminationStarts(1)==std::vector<int>{0});
+    for(std::size_t n:{2u,6u,15u,48u,63u}){
+        auto starts=survivalEliminationStarts(n);assert(starts.size()==n && starts.front()==0);
+        for(std::size_t i=1;i<n;i++)assert(starts[i]>starts[i-1]);
+        assert(starts.back()+SurvivalEliminationFallMilliseconds<=SurvivalEliminationMilliseconds);
+    }
+    {   // 16 players, ranks 11..16 eliminated: 16,15,...,11; ties by participant ID; survivors excluded.
+        std::vector<SurvivalStanding> round;
+        for(int i=1;i<=16;i++)round.push_back({"p"+std::to_string(100+i),"P",i,0,0,0,i<=10,false,false});
+        round[12].rank=14;round[13].rank=14; // p113/p114 tie at 14
+        auto order=survivalEliminationOrder(round);
+        assert((order==std::vector<std::string>{"p116","p115","p113","p114","p112","p111"}));
+        std::vector<SurvivalStanding> big;
+        for(int i=1;i<=64;i++)big.push_back({"b"+std::to_string(1000+i),"B",i,0,0,0,i<=16,true,false});
+        auto bigOrder=survivalEliminationOrder(big);assert(bigOrder.size()==48 && bigOrder.front()=="b1064" && bigOrder.back()=="b1017");
+        std::vector<SurvivalStanding> none{{"a","A",1,0,0,0,true,false,false}};assert(survivalEliminationOrder(none).empty());
+        std::vector<SurvivalStanding> unranked{{"z","Z",0,0,0,0,false,false,false},{"y","Y",2,0,0,0,false,false,false}};
+        assert((survivalEliminationOrder(unranked)==std::vector<std::string>{"z","y"}));
+    }
     std::vector<SurvivalStanding> players;
     for(int i=1;i<=16;i++)players.push_back({std::to_string(i),"Bot "+std::to_string(i),i,0,0,100.0-i,i<=10,true,false});
     auto own=survivalHudRows(players,"15",10);assert(own.size()==11&&own.back().id=="15"&&own.back().rank==15);

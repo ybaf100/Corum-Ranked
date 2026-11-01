@@ -110,6 +110,23 @@ describe("actual GD Survival search/download protocol",()=>{
     await expect(new GdSurvivalMapProvider(new SeededRandom(1),fetcher).select(request)).rejects.toMatchObject({code:"NO_ELIGIBLE_MAP"});
     expect([...types].sort()).toEqual(["11","2","4"]);expect(downloads).toBe(0);
   });
+  it("gives each eligible ID band an equal share before source type (no recent-ID weighting)",async()=>{
+    // Recent and Awarded page 0 are all 100m+; Most liked is 40m-70m. A flat
+    // source:band round-robin gave 100m+ two of three strata.
+    const old=[...Array(9).keys()].map(i=>41_000_000+i),fresh=[...Array(9).keys()].map(i=>120_000_000+i),awarded=[...Array(9).keys()].map(i=>130_000_000+i);
+    let oldBand=0;const trials=80;
+    for(let seed=1;seed<=trials;seed++){
+      const fetcher=vi.fn(async(url:string|URL|Request,init?:RequestInit)=>{
+        const form=new URLSearchParams(String(init?.body));
+        if(String(url).endsWith("getGJLevels21.php")){const type=form.get("type");return new Response(page(type==="2"?old:type==="4"?fresh:awarded,9,0,10));}
+        return new Response(download(Number(form.get("levelID"))));
+      }) as unknown as typeof fetch;
+      const map=await new GdSurvivalMapProvider(new SeededRandom(seed),fetcher).select(request);
+      if(map.levelId<70_000_000)oldBand++;
+      expect(map.sourceIdBand).toBe(map.levelId<70_000_000?"40m-70m":"100m+");
+    }
+    expect(oldBand/trials).toBeGreaterThan(.35);expect(oldBand/trials).toBeLessThan(.65);
+  });
   it("retains API status in diagnostic errors and leaves timers to the engine",async()=>{
     const fetcher=vi.fn(async()=>new Response("unavailable",{status:403})) as unknown as typeof fetch;
     await expect(new GdSurvivalMapProvider(new SeededRandom(1),fetcher).select(request))

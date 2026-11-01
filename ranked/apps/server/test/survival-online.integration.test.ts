@@ -11,7 +11,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { Test } from "@nestjs/testing";
 import { ValidationPipe,type INestApplication } from "@nestjs/common";
 import { beforeAll,beforeEach,afterEach,afterAll,describe,it,expect,vi } from "vitest";
-import { DEFAULT_SURVIVAL_CONFIG,survivalInitialPhase,survivalCurrentRound,survivalMapRange,type SurvivalMatch } from "@corum-ranked/rules";
+import { DEFAULT_SURVIVAL_CONFIG,SURVIVAL_RESULT_MS,survivalInitialPhase,survivalCurrentRound,survivalMapRange,type SurvivalMatch } from "@corum-ranked/rules";
 import { PgliteDatabase } from "./pglite-database.js";
 import { configDocumentFixture,environmentFixture } from "./fixtures.js";
 import { SurvivalConfigService,type SurvivalConfigDocument } from "../src/config/survival-config.service.js";
@@ -103,7 +103,7 @@ async function game(count:number,fill=false){const group:Client[]=[];for(let i=0
  if(count<16){now+=180000;await touch(group);await queue.tickOnce();}
  const state=await api(group[0]!,"/queue/status");expect(state.body.status).toBe("MATCHED");return {group,id:state.body.matchId as string};}
 async function event(c:Client,m:SurvivalMatch,type:string,fields:Record<string,unknown>={}){const r=survivalCurrentRound(m);const response=await api(c,`/online/matches/${m.id}/events`,{eventId:ids.next(),type,roundKey:r.key,mapGeneration:r.mapGeneration,levelId:r.map?.levelId??0,...(["ASSETS_READY","ENTERED","ATTEMPT_START"].includes(type)?{installedMods:mods}:{}),...fields});expect(response.status, `Survival ${type} rejected: ${JSON.stringify(response.body)}`).toBe(201);return response.body;}
-async function prepare(id:string,group:Client[]){let m=await engine.get(id);now+=(await engine.get(id)).presentationGate==="INTRO"?6000:5000;await touch(group);await online.tickOnce();await engine.selectMap(id);m=await engine.get(id);
+async function prepare(id:string,group:Client[]){let m=await engine.get(id);now+=(await engine.get(id)).presentationGate==="INTRO"?6000:SURVIVAL_RESULT_MS;await touch(group);await online.tickOnce();await engine.selectMap(id);m=await engine.get(id);
  for(const c of group)await event(c,m,"ASSETS_READY",{certificate:survivalCurrentRound(m).map});await online.tickOnce();m=await engine.get(id);
  now=survivalCurrentRound(m).entryRequestedAt!+5000;await touch(group);
  for(const c of group)await event(c,m,"ENTERED");m=await engine.get(id);
@@ -138,7 +138,7 @@ describe("Survival M5 public HTTP and persistent online game",()=>{
 
  it("holds the ready room for exactly 5s, accepts surrender during the wait and preserves its deadline",async()=>{
   const {group,id}=await game(8),owner=group[0]!,peers=group.slice(1);
-  now+=(await engine.get(id)).presentationGate==="INTRO"?6000:5000;await touch(group);await online.tickOnce();await engine.selectMap(id);let m=await engine.get(id);
+  now+=(await engine.get(id)).presentationGate==="INTRO"?6000:SURVIVAL_RESULT_MS;await touch(group);await online.tickOnce();await engine.selectMap(id);let m=await engine.get(id);
   for(const c of group)await event(c,m,"ASSETS_READY",{certificate:survivalCurrentRound(m).map});
   m=await engine.get(id);const readyAt=now,round=survivalCurrentRound(m);
   const view=(await api(owner,`/online/matches/${id}`)).body;
@@ -193,7 +193,7 @@ describe("Survival M5 public HTTP and persistent online game",()=>{
    expect(response.status).toBe(409);expect(response.body.code).toBe("INVALID_MATCH_TRANSITION");
   }
   expect(survivalCurrentRound(await engine.get(id)).players.find(p=>p.participantId===owner.session.playerId)!.attempts.find(a=>a.id===open)!.highestProgress).toBe(37);
-  now+=5000;await touch(group);await online.tickOnce();m=await engine.get(id);expect(m.state).toBe("MAP_SELECTION");
+  now+=SURVIVAL_RESULT_MS;await touch(group);await online.tickOnce();m=await engine.get(id);expect(m.state).toBe("MAP_SELECTION");
   expect(m.rounds).toHaveLength(2);expect(m.rounds[0]!.players.find(p=>p.participantId===owner.session.playerId)!.highestProgress).toBe(100);
  });
  it("Common Admin reset clears a finished online match, every mode profile/session and allows a genuinely fresh login",async()=>{
@@ -322,7 +322,7 @@ describe("Survival M5 public HTTP and persistent online game",()=>{
  });
  it("excludes an absent download from readiness, then accepts certified mid-round native re-entry and progress",async()=>{
    const {group,id}=await game(8),offline=group[0]!,peers=group.slice(1);
-   now+=(await engine.get(id)).presentationGate==="INTRO"?6000:5000;await touch(peers);await online.tickOnce();await engine.selectMap(id);let m=await engine.get(id);
+   now+=(await engine.get(id)).presentationGate==="INTRO"?6000:SURVIVAL_RESULT_MS;await touch(peers);await online.tickOnce();await engine.selectMap(id);let m=await engine.get(id);
    for(const c of peers)await event(c,m,"ASSETS_READY",{certificate:survivalCurrentRound(m).map});
    now=survivalCurrentRound(m).preparationStartedAt!+15000;await touch(peers);await online.tickOnce();m=await engine.get(id);
    expect(m.state).toBe("ENTERING");expect(survivalCurrentRound(m).players.find(p=>p.participantId===offline.session.playerId)).toMatchObject({absent:true,assetsReadyAt:null,enteredAt:null});
@@ -337,14 +337,14 @@ describe("Survival M5 public HTTP and persistent online game",()=>{
  it("keeps all-disconnected 0% rounds and repeated finals running, without false native readiness or cancellation",async()=>{
    const {group,id}=await game(8);
    for(let stage=0;stage<5;stage++){
-     now+=(await engine.get(id)).presentationGate==="INTRO"?6000:5000;await online.tickOnce();await engine.selectMap(id);let m=await engine.get(id);
+     now+=(await engine.get(id)).presentationGate==="INTRO"?6000:SURVIVAL_RESULT_MS;await online.tickOnce();await engine.selectMap(id);let m=await engine.get(id);
      now=survivalCurrentRound(m).preparationStartedAt!+15000;await online.tickOnce();m=await engine.get(id);
      expect(m.state).toBe("COUNTDOWN");expect(survivalCurrentRound(m).players.every(p=>p.assetsReadyAt===null&&p.enteredAt===null)).toBe(true);
      now=survivalCurrentRound(m).endsAt!;await online.tickOnce();m=await engine.get(id);
      expect(m.state).toBe("ROUND_RESULT");expect(m.cancellationReason).toBeNull();expect(m.winnerId).toBeNull();
    }
    expect((await db.query("SELECT * FROM sur_lp_ledger")).rows).toHaveLength(0);
-   now+=(await engine.get(id)).presentationGate==="INTRO"?6000:5000;await online.tickOnce();await engine.selectMap(id);let m=await engine.get(id);expect(survivalCurrentRound(m).phase).toBe("TIEBREAK");
+   now+=(await engine.get(id)).presentationGate==="INTRO"?6000:SURVIVAL_RESULT_MS;await online.tickOnce();await engine.selectMap(id);let m=await engine.get(id);expect(survivalCurrentRound(m).phase).toBe("TIEBREAK");
    now=survivalCurrentRound(m).preparationStartedAt!+15000;await online.tickOnce();m=await engine.get(id);now=survivalCurrentRound(m).startsAt!;await online.tickOnce();m=await engine.get(id);
    const fresh=await client(group[0]!.channel,group[0]!.account,true);await event(fresh,m,"ASSETS_READY",{certificate:survivalCurrentRound(m).map});await event(fresh,m,"ENTERED");
    await record(fresh,m,94.371);now=survivalCurrentRound(m).endsAt!;await online.tickOnce();m=await engine.get(id);
@@ -385,7 +385,7 @@ describe("Survival M5 public HTTP and persistent online game",()=>{
    await event(c,m,"FORFEIT");expect((await api(c,`/online/matches/${id}/events`,score)).status).toBe(409);
  });
  it("catches preparation failure without blaming successful peers and rejects a mismatched native certificate",async()=>{
-   const {group,id}=await game(8);now+=(await engine.get(id)).presentationGate==="INTRO"?6000:5000;await touch();await online.tickOnce();await engine.selectMap(id);let m=await engine.get(id);
+   const {group,id}=await game(8);now+=(await engine.get(id)).presentationGate==="INTRO"?6000:SURVIVAL_RESULT_MS;await touch();await online.tickOnce();await engine.selectMap(id);let m=await engine.get(id);
    const bad=await api(group[0]!,`/online/matches/${id}/events`,{eventId:ids.next(),type:"ASSETS_READY",roundKey:survivalCurrentRound(m).key,mapGeneration:1,levelId:survivalCurrentRound(m).map!.levelId,installedMods:mods,certificate:{...survivalCurrentRound(m).map,geometrySha256:"b".repeat(64)}});
    expect(bad.status).toBe(409);
    for(const c of group)await event(c,m,"PREPARATION_FAILED");m=await engine.get(id);expect(m.state).toBe("MAP_SELECTION");expect(m.players.every(p=>p.eliminationStage===null)).toBe(true);
@@ -466,7 +466,7 @@ describe("Survival M5 public HTTP and persistent online game",()=>{
  });
 
  it("accepts an app restart just before preparation closes, even when the first fresh poll renews presence",async()=>{
-   const {group,id}=await game(8),old=group[0]!,peers=group.slice(1);now+=(await engine.get(id)).presentationGate==="INTRO"?6000:5000;await touch();await online.tickOnce();await engine.selectMap(id);let m=await engine.get(id);
+   const {group,id}=await game(8),old=group[0]!,peers=group.slice(1);now+=(await engine.get(id)).presentationGate==="INTRO"?6000:SURVIVAL_RESULT_MS;await touch();await online.tickOnce();await engine.selectMap(id);let m=await engine.get(id);
    for(const c of peers)await event(c,m,"ASSETS_READY",{certificate:survivalCurrentRound(m).map});
    now=survivalCurrentRound(m).preparationStartedAt!+13000;await touch(peers);const fresh=await client(old.channel,old.account,true);
    const view=(await api(fresh,"/online/active")).body.match;expect(view.state).toBe("ENTERING");m=await engine.get(id);

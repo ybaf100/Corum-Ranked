@@ -24,7 +24,10 @@ describe("Survival integrated preparation and eliminated viewing",()=>{
   const command={type:"NEXT_MAP_SELECTED",roundKey:r.key,mapGeneration:1,map:verified("ROUND_2",40000002)} as unknown as SurvivalCommand;
   m=reduceSurvivalMatch(m,command,2100);expect(m.state).toBe("ROUND_RESULT");
   expect((survivalLiveView(m,2100) as unknown as {nextMap:{map:SurvivalVerifiedMap}}).nextMap.map.levelId).toBe(40000002);
-  const restored=JSON.parse(JSON.stringify(m));m=reduceSurvivalMatch(restored,{type:"TICK"},7000);
+  const restored=JSON.parse(JSON.stringify(m));
+  // The 5.5 s presentation gate holds the prefetched map in ROUND_RESULT.
+  expect(reduceSurvivalMatch(JSON.parse(JSON.stringify(m)),{type:"TICK"},7499).state).toBe("ROUND_RESULT");
+  m=reduceSurvivalMatch(restored,{type:"TICK"},7500);
   expect(m.state).toBe("PREPARING");expect(survivalCurrentRound(m).map?.levelId).toBe(40000002);
   expect(survivalCurrentRound(m).players).toHaveLength(12);
  });

@@ -185,6 +185,23 @@ int main(){
  world.teleportPlayer(&portal,nullptr);
  {auto captured=world.fields.spectatorCapture.snapshot();assert(captured&&captured->discontinuity&&captured->discontinuity->type==SpectatorDiscontinuity::Teleport);
   assert(captured->discontinuity->fromY==3924&&captured->discontinuity->toY==5317.5f&&world.fields.portalTeleportDepth==0);}
+ // beta.127 log (Entropie start): sample 0 already at Y 3855; GD then steps the player from
+ // its start position (Y 104.95) and the start trigger re-fires to 3855 within one frame.
+ // That unpublished source is a hidden round trip, not viewer evidence; the following portal is.
+ {SpectatorCapturePolicy c;SpectatorGhostPose s;s.x=0;s.y=3855;c.observe(s);c.sampled();
+  auto hidden=s;hidden.x=1.298f;hidden.y=104.95f;auto back=s;back.x=1.298f;
+  assert(std::string(c.nativeSnap(SpectatorDiscontinuity::Teleport,hidden,back))=="UNOBSERVED_ROUNDTRIP");
+  assert(!c.snapshot()->discontinuity);
+  auto portalFrom=back;portalFrom.y=3854.3f;auto portalTo=back;portalTo.y=3765;
+  assert(std::string(c.nativeSnap(SpectatorDiscontinuity::Teleport,portalFrom,portalTo))=="CAPTURED");
+  auto snap=c.snapshot();assert(snap->discontinuity&&snap->discontinuity->fromY==3854.3f&&snap->discontinuity->nativeEvents.size()==1);
+  // A relocation that leaves the last sample is still recorded (a viewer verifies or rejects it).
+  SpectatorCapturePolicy d;d.observe(s);d.sampled();auto away=s;away.y=9000;
+  assert(std::string(d.nativeSnap(SpectatorDiscontinuity::Teleport,hidden,away))=="CAPTURED");
+  // Inside an observed chain the existing CHAIN_GAP rule is unchanged.
+  SpectatorCapturePolicy e;e.observe(s);e.sampled();auto mid=s;mid.y=3700;
+  assert(std::string(e.nativeSnap(SpectatorDiscontinuity::Teleport,s,mid))=="CAPTURED");
+  assert(std::string(e.nativeSnap(SpectatorDiscontinuity::Teleport,hidden,back))=="CHAIN_GAP");}
  player.m_wasTeleported=false;
  world.fields.levelId=123;
  auto dummyUpdates=player.updates;world.fields.spectatorMode=true;

@@ -28,13 +28,16 @@
 #include <Geode/binding/PlayLayer.hpp>
 #include <Geode/ui/LoadingSpinner.hpp>
 #include <Geode/cocos/actions/CCActionEase.h>
+#include <set>
 #include <unordered_map>
 
 using namespace geode::prelude;
 namespace corum::ranked {
 namespace {
+// Tag of the per-reveal red fade layer on a result card.
+constexpr int SurvivalEliminationWrapTag=7466;
 class SurvivalGameLayer final : public CCLayerColor {
-    struct Tile {CCNode* root=nullptr;CCLabelBMFont* name=nullptr;CCLabelBMFont* record=nullptr;CCPoint destination;CCNode* icon=nullptr;CCNode* tierBadge=nullptr;std::string tier="";CCNode* eliminatedBackground=nullptr;std::string titleText,recordText;std::array<CCNode*,3> medals{};int infoTag=0;SurvivalProgressTween progress{};SurvivalHudColor accent{};bool hasAccent=false;};
+    struct Tile {CCNode* root=nullptr;CCLabelBMFont* name=nullptr;CCLabelBMFont* record=nullptr;CCPoint destination;CCNode* icon=nullptr;CCNode* tierBadge=nullptr;std::string tier="";CCNode* eliminatedBackground=nullptr;std::string titleText,recordText;std::array<CCNode*,3> medals{};int infoTag=0;SurvivalProgressTween progress{};SurvivalHudColor accent{};bool hasAccent=false;bool eliminationShown=false;};
     std::unordered_map<std::string,Tile> m_tiles;
     std::unordered_map<int,SurvivalStanding> m_infoByTag;
     int m_nextInfoTag=1000;
@@ -59,6 +62,14 @@ class SurvivalGameLayer final : public CCLayerColor {
     std::optional<WeakRef<ui::RankedJukeboxPopup>> m_jukebox;
     std::string m_launchedContext,m_resultMotion,m_gridContext,m_confirmationContext;
     std::string m_eliminationKey,m_pendingLaunch;
+    // Round-result snapshot: fixed for the whole 5.5 s presentation even if a
+    // poll replaces the standings. Reveal state is per participant ID, so a
+    // recreated or paged card restores its colour instead of replaying.
+    SurvivalMatchView m_eliminationPreview;
+    std::vector<std::string> m_eliminationOrder;
+    std::vector<int> m_eliminationStarts;
+    std::set<std::string> m_eliminationRevealed;
+    std::chrono::steady_clock::time_point m_eliminationStart{};
     std::string m_jukeboxContext;
     std::chrono::steady_clock::time_point m_eliminationUntil{};
     std::chrono::steady_clock::time_point m_nextMapAt{},m_introUntil{},m_returnAt{};
@@ -245,9 +256,12 @@ class SurvivalGameLayer final : public CCLayerColor {
             if(tile.destination!=destination){tile.destination=destination;tile.root->stopActionByTag(7465);auto* move=CCEaseSineOut::create(CCMoveTo::create(.25f,destination));move->setTag(7465);tile.root->runAction(move);}
             auto rank=value.rank>0?(i18n::isKorean()?fmt::format(fmt::runtime(i18n::text("player-rank","{}")),value.rank):survivalOrdinal(value.rank)):std::string("-");
             std::string record;auto color=survivalRankColor(value.rank,value.passing);
+            // Result preview: identical cards until each player's own reveal.
+            auto const revealed=completed && m_eliminationRevealed.contains(value.id);
+            if(completed)color=revealed?survivalRankColor(value.rank,false):SurvivalHudColor{164,181,205};
             if(compact){
                 if(tile.titleText!=value.name){tile.titleText=value.name;tile.name->setString(value.name.c_str());ui::fitSingleLineMenuLabel(tile.name,card.titleWidth,card.titleHeight,.25f);}
-                tile.name->setColor(value.eliminated?ui::Red:value.id==view.ownId?ui::Cyan:ui::Text);
+                tile.name->setColor(value.eliminated||revealed?ui::Red:value.id==view.ownId?ui::Cyan:ui::Text);
             }else if(result){int delta=0;for(auto const& p:view.result["standings"].asArray().unwrapOr(std::vector<matjson::Value>{}))if(p["participantId"].asString().unwrapOr("")==value.id)delta=static_cast<int>(p["delta"].asInt().unwrapOr(0));
                 if(value.id==view.ownId)delta=static_cast<int>(view.result["actualDelta"].asInt().unwrapOr(delta));
                 record=value.rank>0?fmt::format("{} · {:+} LP",rank,delta):text("waiting","WAITING");color=value.rank>0?survivalResultRankColor(value.rank,delta):survivalRankColor(10,true);
@@ -258,12 +272,18 @@ class SurvivalGameLayer final : public CCLayerColor {
                     fmt::format("BEST {}% · {}",rankedScoreText(tile.progress.best.displayed,view.phase=="TIEBREAK"),status);
                 auto const title=compact?value.name:fmt::format("{} {}",rank,value.name);
                 if(tile.titleText!=title){tile.titleText=title;tile.name->setString(title.c_str());ui::fitSingleLineMenuLabel(tile.name,card.titleWidth,card.titleHeight,.25f);}
-                tile.name->setColor(value.eliminated?ui::Red:value.id==view.ownId?ui::Cyan:ui::Text);
+                tile.name->setColor(value.eliminated||revealed?ui::Red:value.id==view.ownId?ui::Cyan:ui::Text);
             }
-            auto const tint=value.eliminated?survivalRankColor(value.rank,false):
-                (result||completed||view.state=="PLAYING")&&value.rank>0?survivalRankColor(value.rank,result||value.passing):SurvivalHudColor{77,135,255};
+            auto const tint=completed?(revealed?survivalRankColor(value.rank,false):SurvivalHudColor{77,135,255}):value.eliminated?survivalRankColor(value.rank,false):
+                (result||view.state=="PLAYING")&&value.rank>0?survivalRankColor(value.rank,result||value.passing):SurvivalHudColor{77,135,255};
             if(!tile.hasAccent||tile.accent!=tint){tile.hasAccent=true;tile.accent=tint;ui::setSurfaceAccent(tile.root,{tint.r,tint.g,tint.b});}
-            tile.eliminatedBackground->setVisible(value.eliminated || (!result && value.rank>0 && !value.passing));
+            if(completed){
+                // A card first shown (or recreated) after its reveal takes the
+                // final state without replaying the fall.
+                if(revealed && !tile.eliminationShown){tile.eliminationShown=true;if(tile.icon)tile.icon->setVisible(false);}
+                if(!tile.eliminationShown)tile.eliminatedBackground->setVisible(false);
+                else if(!tile.eliminatedBackground->isVisible()&&!tile.root->getChildByTag(SurvivalEliminationWrapTag))tile.eliminatedBackground->setVisible(true);
+            }else tile.eliminatedBackground->setVisible(value.eliminated || (!result && value.rank>0 && !value.passing));
             if(tile.record && tile.recordText!=record){tile.recordText=record;tile.record->setString(record.c_str());
                 if(reduced)ui::fitSingleLineMenuLabel(tile.record,card.width-10,card.recordHeight,.21f);
                 else ui::fitFullMenuLabel(tile.record,card.width-10,card.recordHeight,.21f);}
@@ -289,12 +309,39 @@ class SurvivalGameLayer final : public CCLayerColor {
         if(m_audioMode!=desired){m_audioMode=desired;audio.setMode(desired);}
         audio.tick();
     }
+    void revealElimination(std::string const& id,bool animate,std::size_t order) {
+        m_eliminationRevealed.insert(id);
+        auto found=m_tiles.find(id);if(found==m_tiles.end() || !found->second.root->isVisible())return; // applied when shown
+        auto& tile=found->second;if(tile.eliminationShown)return;tile.eliminationShown=true;
+        tile.name->setColor(ui::Red);
+        auto const red=survivalRankColor(0,false);
+        tile.hasAccent=true;tile.accent=red;ui::setSurfaceAccent(tile.root,{red.r,red.g,red.b});
+        if(!animate){tile.eliminatedBackground->setVisible(true);if(tile.icon)tile.icon->setVisible(false);return;}
+        // The card turns red (short fade) exactly when this player's fall starts.
+        auto const size=tile.root->getContentSize();
+        auto* wrap=CCLayerColor::create({0,0,0,255},0,0);wrap->setCascadeOpacityEnabled(true);wrap->setTag(SurvivalEliminationWrapTag);
+        wrap->addChild(ui::surface(size,{size.width/2,size.height/2},ui::Red,{42,13,28},250,true));tile.root->addChild(wrap,4);
+        ui::setModeLobbyOpacity(wrap,0);ui::fadeModeLobbySurfaces(wrap,.18f,true);
+        wrap->runAction(CCEaseSineOut::create(ui::ModeLobbyFade::create(.18f,255)));
+        if(tile.icon){auto const fall=SurvivalEliminationFallMilliseconds/1000.0f;
+            tile.icon->runAction(CCSequence::create(CCSpawn::create(
+                CCEaseSineIn::create(CCMoveBy::create(fall,{order%4<2?-90.0f:90.0f,-getContentSize().height})),
+                CCRotateBy::create(fall,order%2?270.0f:-270.0f),CCScaleTo::create(fall,.18f),nullptr),CCHide::create(),nullptr));}
+    }
+    void stepEliminations(std::chrono::steady_clock::time_point now) {
+        auto const elapsed=std::chrono::duration_cast<std::chrono::milliseconds>(now-m_eliminationStart).count()-SurvivalBeforeEliminationMilliseconds;
+        for(std::size_t i=0;i<m_eliminationOrder.size()&&i<m_eliminationStarts.size();++i)
+            if(elapsed>=m_eliminationStarts[i] && !m_eliminationRevealed.contains(m_eliminationOrder[i]))revealElimination(m_eliminationOrder[i],true,i);
+    }
     bool presentEliminations(SurvivalMatchView const& view) {
         auto const now=std::chrono::steady_clock::now();
         auto const& completed=view.completedRound;
         if(!completed.isObject())return false;
-        auto const key=view.id+":"+completed["key"].asString().unwrapOr("");
+        // One presentation per match + completed round + map generation.
+        auto const key=view.id+":"+completed["key"].asString().unwrapOr("")+":"+std::to_string(completed["mapGeneration"].asInt().unwrapOr(0));
         if(key==m_eliminationKey){
+            // The snapshot (not the latest poll) stays on screen; pages work.
+            showParticipants(m_eliminationPreview,false);stepEliminations(now);
             if(now<m_eliminationUntil)return true;
             Mod::get()->setSavedValue("survival-elimination-animation",key);
             if(now<m_nextMapAt)return true;
@@ -317,24 +364,11 @@ class SurvivalGameLayer final : public CCLayerColor {
         }
         for(auto& row:preview.standings)row.bestProgress=row.score;
         std::stable_sort(preview.standings.begin(),preview.standings.end(),[](auto const& a,auto const& b){return a.rank<b.rank;});
+        m_eliminationPreview=preview;m_eliminationOrder=survivalEliminationOrder(preview.standings);
+        m_eliminationStarts=survivalEliminationStarts(m_eliminationOrder.size());m_eliminationRevealed.clear();m_eliminationStart=now;
         showParticipants(preview,false);
         auto const alreadyPresented=key==Mod::get()->getSavedValue<std::string>("survival-elimination-animation");
-        for(std::size_t i=0;i<preview.standings.size();i++) {
-            auto const& value=preview.standings[i];if(value.passing)continue;
-            auto found=m_tiles.find(value.id);if(found==m_tiles.end())continue;auto& tile=found->second;
-            auto const size=tile.root->getContentSize();
-            auto* wrap=CCLayerColor::create({0,0,0,255},0,0);wrap->setCascadeOpacityEnabled(true);
-            wrap->addChild(ui::surface(size,{size.width/2,size.height/2},ui::Red,{42,13,28},250,true));tile.root->addChild(wrap,4);
-            ui::setModeLobbyOpacity(wrap,0);
-            auto const lead=alreadyPresented?0.0f:SurvivalBeforeEliminationMilliseconds/1000.0f;
-            wrap->runAction(CCSequence::create(CCDelayTime::create(lead),CallFuncExt::create([weak=WeakRef(wrap)]{
-                if(auto layer=weak.lock())ui::fadeModeLobbySurfaces(layer.data(),.24f,true);
-            }),CCEaseSineOut::create(ui::ModeLobbyFade::create(.24f,255)),nullptr));tile.name->setColor(ui::Red);
-            if(alreadyPresented){if(tile.icon)tile.icon->setVisible(false);continue;}
-            if(tile.icon)tile.icon->runAction(CCSequence::create(CCDelayTime::create(lead+.18f),CCSpawn::create(
-                CCEaseSineIn::create(CCMoveBy::create(.66f,{i%4<2?-90.0f:90.0f,-getContentSize().height})),
-                CCRotateBy::create(.66f,i%2?270.0f:-270.0f),CCScaleTo::create(.66f,.18f),nullptr),CCHide::create(),nullptr));
-        }
+        if(alreadyPresented)for(std::size_t i=0;i<m_eliminationOrder.size();++i)revealElimination(m_eliminationOrder[i],false,i);
         auto const phase=preview.phase=="TIEBREAK"?std::string("DEATH MATCH"):preview.phase=="FINAL"?std::string("FINAL"):
             "ROUND "+std::to_string(completed["ordinal"].asInt().unwrapOr(1));
         m_heading->setString(fmt::format("SURVIVAL · {} · {}",phase,text("result","RESULT")).c_str());
@@ -410,6 +444,9 @@ public:
         if(selectionWindow)m_boardClock->setVisible(false);
         else if(view.nextMap["map"].isObject())m_selection->prepareServerMap(runtime.preparationView());
         else if(intro && nextRound && !elimination)m_selection->prepareServerMap(view);
+        // During the 5.5 s result presentation the next map (already pumped by
+        // the runtime heartbeat) also prefetches its reel/selected thumbnails.
+        else if(elimination && nextRound && runtime.acquiring())m_selection->prepareServerMap(runtime.preparationView());
         else m_selection->hideSelection();
         m_spinner->setVisible(false);m_spinner->setPosition({getContentSize().width/2,getContentSize().height/2});m_spinner->setScale(2);
         auto const context=preparationContextText(runtime.preparationContext());auto* level=RankedLevelPreparation::get().level();

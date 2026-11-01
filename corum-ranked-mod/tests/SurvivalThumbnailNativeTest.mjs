@@ -116,8 +116,8 @@ void pump(SurvivalThumbnailProvider& p,int count=40){for(int i=0;i<count;i++){p.
 void reply(std::size_t i,int code,std::vector<std::uint8_t> bytes={},std::map<std::string,std::string> headers={}){auto callback=flights.at(i).callback;flights[i].done=true;callback({code,std::move(bytes),std::move(headers)});}
 std::size_t active(){return std::count_if(flights.begin(),flights.end(),[](auto const& f){return !f.done&&!f.cancelled;});}
 int main(int argc,char**argv){assert(argc==2);saveRoot=argv[1];auto dir=saveRoot/"survival-thumbnails-v1";std::filesystem::create_directories(dir);
- for(int i=0;i<40;i++){std::ofstream out(dir/(std::to_string(i)+".webp"));out<<"x";}
- auto& p=SurvivalThumbnailProvider::get();assert(std::distance(std::filesystem::directory_iterator(dir),std::filesystem::directory_iterator{})<=32);
+ for(int i=0;i<60;i++){std::ofstream out(dir/(std::to_string(i)+".webp"));out<<"x";}
+ auto& p=SurvivalThumbnailProvider::get();assert(std::distance(std::filesystem::directory_iterator(dir),std::filesystem::directory_iterator{})<=static_cast<long>(SurvivalThumbnailDiskFiles));
  SurvivalSelectionContext a{"a","R1",1,100,1};p.activate(a);pump(p);assert(flights.empty());
  Loader::get()->thumbnails=true;p.activate(a);pump(p);assert(flights.empty()); // dependency absent/disabled
  Loader::get()->imageplus=true;p.activate(a);pump(p);assert(active()==2);
@@ -165,7 +165,7 @@ int main(int argc,char**argv){assert(argc==2);saveRoot=argv[1];auto dir=saveRoot
  for(int round=2;round<=4;round++){
   auto beforeRound=flights.size();pooled.roundKey="R"+std::to_string(round);pooled.mapGeneration=round;pooled.levelId=600+round;++pooled.sceneGeneration;
   p.activate(pooled);auto cached=p.previews();assert(cached.size()==8);
-  for(auto const& [id,texture]:cached)assert(id>=2000&&id<2012&&texture);
+  for(auto const& [id,texture]:cached)assert(id>=2000&&id<2016&&texture);
   for(int frame=0;frame<12;frame++){
    auto end=flights.size();for(std::size_t i=beforeRound;i<end;i++)if(!flights[i].done&&!flights[i].cancelled){
     assert(flights[i].ticket.url.find("/random/")==std::string::npos);
@@ -181,10 +181,19 @@ int main(int argc,char**argv){assert(argc==2);saveRoot=argv[1];auto dir=saveRoot
  auto beforeNext=flights.size();p.activate(next);
  for(int frame=0;frame<20;frame++){fakeNow+=50;pump(p,3);}
  auto warm=p.previews();assert(warm.size()==8);std::set<std::uint64_t> warmIds;
- for(auto const& [id,texture]:warm){assert(id>=2000&&id<2012&&texture);warmIds.insert(id);}assert(warmIds.size()==8);
+ for(auto const& [id,texture]:warm){assert(id>=2000&&id<2016&&texture);warmIds.insert(id);}assert(warmIds.size()==8);
  for(std::size_t i=beforeNext;i<flights.size();i++){auto const& url=flights[i].ticket.url;
   for(auto id:warmIds)assert(url.find("/"+std::to_string(id)+"/")==std::string::npos);}
  p.release(next);assert(active()==0);
+ // Survival lobby entry: prewarm decodes the disk pool and tops it up with random
+ // downloads before any match exists; a live match context is never displaced.
+ auto beforeWarm=flights.size();p.prewarm();
+ for(int frame=0;frame<20;frame++){fakeNow+=50;pump(p,3);}
+ auto lobby=p.previews();assert(lobby.size()==8);for(auto const& [id,texture]:lobby)assert(id>=2000&&id<2016&&texture);
+ bool randomRequested=false;for(std::size_t i=beforeWarm;i<flights.size();i++)randomRequested=randomRequested||flights[i].ticket.url.ends_with("/random/small");
+ assert(randomRequested);
+ auto liveMatch=next;liveMatch.matchId="after-lobby";++liveMatch.sceneGeneration;p.activate(liveMatch);auto liveFlights=flights.size();p.prewarm();assert(flights.size()==liveFlights);
+ p.release(liveMatch);assert(active()==0);
 }`);
 }
 test('actual provider bounds anonymous requests, cancels obsolete replies, handles 302/404/retry/cache and decodes away from GL thread',()=>runProvider());

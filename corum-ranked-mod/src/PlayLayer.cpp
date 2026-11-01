@@ -1086,6 +1086,8 @@ public:
     // jump; the publisher now reports the exact capture reason (bounded).
     void noteSpectatorCaptureResult(char const* result,bool player2){
         if(!result||std::string_view(result)=="CAPTURED"||std::string_view(result)=="SPIDER_MODE_OR_GRAVITY")return;
+        if(std::string_view(result)=="UNOBSERVED_ROUNDTRIP"){ // continuous for viewers; not evidence loss
+            log::info("[SpectatorEvidence] stage=UNOBSERVED_ROUNDTRIP player2={} levelTimeMs={:.1f}",player2,m_gameState.m_levelTime*1000);return;}
         if(++m_fields->spectatorCaptureDrops<=4)
             log::warn("[SpectatorEvidence] stage=CAPTURE_DROPPED reason={} player2={} level={} levelTimeMs={:.1f} drops={}",result,player2,m_fields->levelId,m_gameState.m_levelTime*1000,m_fields->spectatorCaptureDrops);
     }

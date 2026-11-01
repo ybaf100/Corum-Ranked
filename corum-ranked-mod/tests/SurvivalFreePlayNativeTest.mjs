@@ -20,6 +20,7 @@ const preamble=`
 #include <algorithm>
 #include "${join(root,'tests/helpers/InactiveReplayDouble.hpp')}"
 #include <cassert>
+#include <set>
 #include <chrono>
 #include <deque>
 #include <functional>
@@ -152,7 +153,7 @@ test('live cards retain identity, retarget from the current position and recolor
 struct CCPoint{float x=0,y=0;bool operator==(CCPoint const&)const=default;};struct CCSize{float width,height;};struct Color{unsigned char r,g,b;};using ccColor3B=Color;Color ccc3(unsigned char r,unsigned char g,unsigned char b){return {r,g,b};}
 struct CCAction{CCPoint from,to;int tag=0;void setTag(int n){tag=n;}};
 struct CCMoveTo{static CCAction* create(float,CCPoint point){auto* a=new CCAction;a->to=point;return a;}};struct CCEaseSineOut{static CCAction* create(CCAction* a){return a;}};
-struct CCNode{CCPoint pos;CCSize size{100,50};bool visible=true;CCAction* action=nullptr;int moves=0,stops=0;std::vector<CCNode*>children;virtual ~CCNode()=default;static CCNode* create(){return new CCNode;}void setPosition(CCPoint p){pos=p;}void setPositionY(float y){pos.y=y;}CCPoint getPosition()const{return pos;}void setScale(float){}void setContentSize(CCSize value){size=value;}void setVisible(bool b){visible=b;}bool isVisible()const{return visible;}void addChild(CCNode* c,int=0){children.push_back(c);}void removeFromParentAndCleanup(bool){}void removeAllChildrenWithCleanup(bool){children.clear();}void stopActionByTag(int){action=nullptr;++stops;}void runAction(CCAction* a){a->from=pos;action=a;++moves;}void advance(float t){assert(action);pos={action->from.x+(action->to.x-action->from.x)*t,action->from.y+(action->to.y-action->from.y)*t};}};
+struct CCNode{CCPoint pos;CCSize size{100,50};bool visible=true;CCAction* action=nullptr;int moves=0,stops=0,tag=0;std::vector<CCNode*>children;void setTag(int t){tag=t;}CCNode* getChildByTag(int t){for(auto* c:children)if(c->tag==t)return c;return nullptr;}virtual ~CCNode()=default;static CCNode* create(){return new CCNode;}void setPosition(CCPoint p){pos=p;}void setPositionY(float y){pos.y=y;}CCPoint getPosition()const{return pos;}void setScale(float){}void setContentSize(CCSize value){size=value;}void setVisible(bool b){visible=b;}bool isVisible()const{return visible;}void addChild(CCNode* c,int=0){children.push_back(c);}void removeFromParentAndCleanup(bool){}void removeAllChildrenWithCleanup(bool){children.clear();}void stopActionByTag(int){action=nullptr;++stops;}void runAction(CCAction* a){a->from=pos;action=a;++moves;}void advance(float t){assert(action);pos={action->from.x+(action->to.x-action->from.x)*t,action->from.y+(action->to.y-action->from.y)*t};}};
 using CCObject=CCNode;
 const CCPoint CCPointZero{0,0};
 struct CCMenu:CCNode{static CCMenu* create(){return new CCMenu;}};
@@ -172,10 +173,12 @@ void fitFullMenuLabel(CCLabelBMFont*,float,float,float){}
  inline int accentUpdates=0;void setSurfaceAccent(CCNode*,ccColor3B){++accentUpdates;}
  CCNode* createAnimatedRankBadge(std::string const&,CCSize,RankBadgeDisplay){return CCNode::create();}
 }
+constexpr int SurvivalEliminationWrapTag=7466;
 struct SurvivalMatchView{std::uint64_t revision=1;std::string id="m",roundKey="r1",ownId="a",phase="ROUND_1";std::string state="PLAYING";int mapGeneration=1,matchPlayerCount=16;std::vector<SurvivalStanding>standings,roundPlayers;matjson::Value result;};
 struct Coordinator:CCNode{
  CCLabelBMFont*m_status=new CCLabelBMFont;
- struct Tile{CCNode* root=nullptr;CCLabelBMFont* name=nullptr;CCLabelBMFont* record=nullptr;CCPoint destination;CCNode* icon=nullptr;CCNode* tierBadge=nullptr;std::string tier="";CCNode* eliminatedBackground=nullptr;std::string titleText={},recordText={};std::array<CCNode*,3>medals{};int infoTag=0;SurvivalProgressTween progress{};SurvivalHudColor accent{};bool hasAccent=false;};
+ struct Tile{CCNode* root=nullptr;CCLabelBMFont* name=nullptr;CCLabelBMFont* record=nullptr;CCPoint destination;CCNode* icon=nullptr;CCNode* tierBadge=nullptr;std::string tier="";CCNode* eliminatedBackground=nullptr;std::string titleText={},recordText={};std::array<CCNode*,3>medals{};int infoTag=0;SurvivalProgressTween progress{};SurvivalHudColor accent{};bool hasAccent=false;bool eliminationShown=false;};
+ std::set<std::string> m_eliminationRevealed;
  double m_frameDelta=1./60.;std::string m_gridContext;CCNode grid;CCNode* m_grid=&grid;CCNode pager;CCNode* m_pager=&pager;CCLabelBMFont pageLabel;CCLabelBMFont* m_pageLabel=&pageLabel;std::size_t m_cardPage=0,m_cardPages=1;std::unordered_map<std::string,Tile>m_tiles;std::unordered_map<int,SurvivalStanding>m_infoByTag;int m_nextInfoTag=1000;void onPlayerInfo(CCObject*){}CCSize getContentSize()const{return {568,320};}
  ${method(source,'void showParticipants(')}
 };
@@ -213,6 +216,13 @@ int main(){using namespace corum::ranked;SurvivalMatchView view;SurvivalStanding
  ui.m_cardPage=0;++view.revision;auto updates=ui::accentUpdates;ui.showParticipants(view,false);assert(ui::accentUpdates==updates&&ui.m_tiles.at("large-0").root==first&&first->visible&&ui.m_tiles.size()==64);
  assert(ui.m_tiles.at("large-0").accent==survivalRankColor(1,true)&&ui.m_tiles.at("large-1").accent==SurvivalSilver&&ui.m_tiles.at("large-2").accent==survivalRankColor(3,true));
  view.phase="ROUND_2";view.roundKey="r2:elimination";ui.showParticipants(view,false);assert(!ui.m_tiles.at("large-0").record);
+ // Result preview: before each reveal every card is the same blue, eliminated ones included.
+ for(auto const&[id,tile]:ui.m_tiles){assert((tile.accent==SurvivalHudColor{77,135,255}));assert(!tile.eliminatedBackground->visible);}
+ ui.m_eliminationRevealed.insert("large-63");ui.showParticipants(view,false);
+ assert(ui.m_tiles.at("large-63").accent==survivalRankColor(64,false)&&ui.m_tiles.at("large-63").eliminatedBackground->visible&&ui.m_tiles.at("large-63").eliminationShown);
+ assert((ui.m_tiles.at("large-62").accent==SurvivalHudColor{77,135,255})&&!ui.m_tiles.at("large-62").eliminatedBackground->visible);
+ assert((ui.m_tiles.at("large-0").accent==SurvivalHudColor{77,135,255}));
+ ui.m_eliminationRevealed.clear();
  view.phase="ROUND_3";view.standings.resize(30);ui.showParticipants(view,false);assert(ui.m_cardPages==1&&ui.m_tiles.size()==30);
  for(auto const&[id,tile]:ui.m_tiles){assert(tile.record&&!tile.tierBadge);assert(tile.record->text.find("BEST ")!=std::string::npos&&tile.record->text.find("NOW ")!=std::string::npos);}
  view.phase="ROUND_4";view.standings.resize(16);ui.showParticipants(view,false);for(auto const&[id,tile]:ui.m_tiles)assert(tile.tierBadge&&tile.record);

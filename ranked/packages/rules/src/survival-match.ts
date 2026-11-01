@@ -101,7 +101,8 @@ export interface SurvivalRoundContext { roundKey: string; mapGeneration: number;
 /** All ready clients stay in the selection room before native entry opens. */
 export const SURVIVAL_READY_HOLD_MS = 5_000;
 export const SURVIVAL_INTRO_MS = 6_000;
-export const SURVIVAL_RESULT_MS = 5_000;
+/** Minimum round-result presentation (client: 1.95 s roster, 1.55 s sequential eliminations, 2.0 s hold). */
+export const SURVIVAL_RESULT_MS = 5_500;
 const survivalPhases=(capacity:number):readonly SurvivalMapPhase[]=>capacity===64?
   ["ROUND_1","ROUND_2","ROUND_3","ROUND_4","FINAL"]:["ROUND_1","ROUND_2","ROUND_3","FINAL"];
 export function survivalInitialPhase(count:number,capacity=16):SurvivalMapPhase {

@@ -57,6 +57,8 @@ public:
     void activate(SurvivalSelectionContext const&);
     void release(SurvivalSelectionContext const&);
     void deactivate();
+    /** Survival lobby entry: warm the reel pool (disk + random) without a match. */
+    void prewarm();
     void update(float) override;
     geode::Ref<cocos2d::CCTexture2D> selected();
     std::vector<std::pair<std::uint64_t,geode::Ref<cocos2d::CCTexture2D>>> previews();
