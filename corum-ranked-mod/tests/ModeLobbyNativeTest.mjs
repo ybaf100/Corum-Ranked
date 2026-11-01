@@ -157,6 +157,7 @@ struct Owner:CCNode{
  corum::ranked::ui::LobbyHover*m_lobbyHover=nullptr;void refreshLobbyHover(){}
  CCMenu survivalMenu,soloMenu,panelMenu,menu,settings;
  CCMenu toolbar;CCMenu*m_menu=&menu,*m_settingsMenu=&settings,*m_lobbyToolbar=&toolbar;bool m_uiFadingOut=false,m_returnToModesAfterQueue=false,m_modeNoticeOpen=false;std::string m_renderedUiKey;
+ bool m_queueShown=false,m_queueAnimating=false,queueActive=false;CCMenu*m_queueMenu=nullptr;bool lobbyQueueActive()const{return queueActive;}
  enum class Page{Live,History};Page m_page=Page::Live;
  int headerUpdates=0;std::string presentationKey(){return "selected";}void updateModeLobbyHeader(){++headerUpdates;}
  Owner(){survivalControls.id=soloControls.id="ranked-mode-entry-controls";survivalControls.children={&survivalMenu};soloControls.children={&soloMenu};survival.children={&survivalControls};solo.children={&soloControls};panel.children={&panelMenu};}
@@ -216,7 +217,7 @@ test('mode lobby owns Cocos actions and defers full UI replacement while moving'
  assert.match(animate,/CCEaseSineInOut::create\(motion\)/);
  assert.doesNotMatch(animate,/CCScaleTo|CCMoveTo|removeAllChildren/);
  assert.match(animate,/setZOrder\(5\)/);
- assert.match(method(popup,'    bool prepareUiTransition('),/if \(m_modeTransition.moving\(\)\).*return false/);
+ assert.match(method(popup,'    bool prepareUiTransition('),/if \(m_modeTransition.moving\(\) \|\| m_queueAnimating\).*return false/);
  assert.match(method(popup,'    void render()'),/m_modeTransition.moving\(\)/);
  assert.match(method(popup,'    void onCloseLayer('),/m_modeTransition.back\(\).*animateModeLobby\(mode,false\)/);
  const card=method(popup,'    void renderModeCard(');

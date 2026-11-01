@@ -127,7 +127,15 @@ public:
     bool canEndRound() const;
     void endRound();
 #endif
+    // Queue Free Play: leave the lobby for GD while the queue keeps polling.
+    // A found match exits any running level and opens the match board.
+    bool canQueueFreePlay() const { return m_queue.status=="QUEUED" && !active() && !m_creating && !m_freePlay.active && !m_session.empty(); }
+    bool beginQueueFreePlay();
+    bool queueFreePlaying() const { return m_queueFreePlay && m_freePlay.active; }
+    void requestQueueFreePlayReturn();
 private:
+    void pumpQueueFreePlay();
+    bool m_queueFreePlay=false;
     void pumpSurrenderReturn();
     void resetSurrender();
     std::string m_surrenderEventId,m_surrenderMatchId;
@@ -190,6 +198,8 @@ private:
 };
 void showSurvivalGame();
 void showSurvivalQueue();
+// "14/64 - 01:12" outside the Ranked lobby while the Survival queue is active.
+void pumpSurvivalQueueOverlay();
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
 void showSurvivalDebugPopup();
 void showSurvivalForceRankPopup();

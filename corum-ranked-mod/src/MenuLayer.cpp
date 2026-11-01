@@ -212,6 +212,9 @@ class $modify(CorumRankedMenuLayer, MenuLayer) {
     }
 
     void onRanked(CCObject*) {
+        // During queue Free Play the queue lobby is still in the scene stack.
+        auto& survival = corum::ranked::SurvivalRuntime::get();
+        if (survival.queueFreePlaying()) { survival.requestQueueFreePlayReturn(); return; }
         corum::ranked::showRankedPopup();
     }
 };

@@ -1,3 +1,12 @@
+# v0.5.0-beta.133
+
+- Queue inside the lobby: starting a Survival or Solo queue fades out the right MATCHMAKING card and widens the left score card to the right (0.52 s ease-out) to show the queue: Survival players n/max with a seat grid, waiting time, minimum players, short-finals hint and LEAVE QUEUE; Solo a spinner, SEARCHING... and LEAVE QUEUE. Leaving reverses the motion. The separate Survival queue screen is gone.
+- Leaderboard button inside the expanded queue card (viewable while waiting).
+- Debug builds: FILL WITH BOTS next to LEAVE QUEUE in the Survival queue card.
+- Survival FREE PLAY (bottom-left while waiting): returns to the GD main menu and keeps the queue polling. While queued outside the lobby, "14/64 - 01:12" stays at the top-left and updates live; tapping it (or the Ranked menu button) returns to the queue lobby. A found match exits any running level/menu and opens the match board; leaving/losing the queue simply ends free play.
+- Survival standings: an open player-info card no longer blocks automatic level entry; it closes when the level is ready to launch. While standings cover the map preparation, the top-right clock shows the same entry countdown as the preparation screen ("ALL READY · ENTERING IN Ns").
+- Actual GD/device behaviour (animation, free-play return from a level, overlay touch) is unverified.
+
 # v0.5.0-beta.132
 
 - Survival card status line no longer shows "PROMOTION MATCH (1 WIN)" during a Survival promotion series; it shows only a win/loss streak when there is one and stays empty otherwise. Solo cards are unchanged.

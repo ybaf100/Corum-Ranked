@@ -44,6 +44,7 @@ enum class RuntimeStage{Ready,Queued};struct RuntimeView{RuntimeStage stage=Runt
 template<class T>T typeinfo_cast(CCNode*n){return dynamic_cast<T>(n);}
 struct Owner{
  corum::ranked::ModeLobbyTransition m_modeTransition;CCMenu*m_lobbyToolbar=CCMenu::create();CCNode*m_root=CCNode::create();CCLabelBMFont*m_mainStatusLabel=nullptr;std::string m_localMessage;
+ void placeLobbyFooter(){}
  ${method(popup,'    void updateModeLobbyHeader(')}
  ${method(popup,'    std::string lobbyMessage(')}
 };

@@ -58,6 +58,7 @@ struct RankedRuntime{std::string token="session";static RankedRuntime&get(){stat
 struct SurvivalRuntime{
  struct View{std::string id="match",roundKey="r1",phase="ROUND_1",state="PLAYING",ownId="human",activeAttemptId;int mapGeneration=1;bool ownEliminated=false;std::vector<SurvivalStanding> standings;matjson::Value completedRound;}m_view;
  std::string m_session="session",m_attempt;SurvivalFreePlayState m_freePlay;std::optional<WeakRef<CCScene>>m_freePlayOrigin,m_freePlayQuitScene;Ref<GJGameLevel>m_freePlayQuitLevel;bool m_freePlayReturnQueued=false,m_freePlayNativeQuitFinished=false;
+ bool m_queueFreePlay=false;static SurvivalRuntime& get(){static SurvivalRuntime r;return r;}
  bool active()const{return !m_view.id.empty();}bool freePlaying()const{return m_freePlay.active;}
  bool normalRoundCleared()const;bool officialRoundCleared()const;bool canFreePlay()const;bool beginFreePlay();bool freePlayReturnPending()const;bool beginFreePlayNativeQuit(GJGameLevel*);bool interceptFreePlayNativeQuit(GJGameLevel*)const;void finishFreePlayNativeQuit();void pumpFreePlayReturn();
 };

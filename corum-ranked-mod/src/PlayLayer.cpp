@@ -521,7 +521,9 @@ public:
             return true;
         }
         if(m_fields->survivalFreePlayHud){
-            addSurvivalHud();schedule(schedule_selector(CorumRankedPlayLayer::survivalFrame));return true;
+            // Queue Free Play has no match yet: no standings HUD, only the return watch.
+            if(!corum::ranked::SurvivalRuntime::get().queueFreePlaying())addSurvivalHud();
+            schedule(schedule_selector(CorumRankedPlayLayer::survivalFrame));return true;
         }
         if ((!m_fields->rankedLevel && !m_fields->survivalLevel) || m_isTestMode) return true;
 

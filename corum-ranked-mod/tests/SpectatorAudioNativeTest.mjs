@@ -105,6 +105,7 @@ struct CorumRankedLayer: CCLayerColor {
  bool m_rankedChildScenePushed=true,m_enteringSongGate=false,m_enteringLevel=false;
  corum::ranked::ModeLobbyTransition m_modeTransition;
  bool m_returnToModesAfterQueue=false,m_uiFadingOut=false,m_lobbyPanel=true;
+ bool m_queueShown=false,m_queueAnimating=false;bool lobbyQueueActive()const{return false;}void syncQueuePresentation(){}
  int modeReturns=0;
  void animateModeLobby(corum::ranked::RankedMode,bool opening){assert(!opening);++modeReturns;m_modeTransition.finish();}
  void* m_rankTransitionLayer=nullptr;

@@ -3,6 +3,7 @@
 #include "../domain/RankedMode.hpp"
 #include <algorithm>
 #include <cmath>
+#include <functional>
 
 namespace corum::ranked::ui {
 // Corum panels and badge assemblies contain plain CCNodes. Native cascade
@@ -76,5 +77,19 @@ private:
     ModeLobbyLayout m_layout {};
     RankedMode m_mode = RankedMode::Survival;
     bool m_opening = true;
+};
+
+/** Progress-driven tween for the queue expansion (card width, fades). The
+ * callback receives eased-by-caller progress in [0,1]. */
+class ModeLobbyTween final : public cocos2d::CCActionInterval {
+public:
+    static ModeLobbyTween* create(float seconds, std::function<void(float)> apply) {
+        auto* action = new ModeLobbyTween;
+        if (!action->initWithDuration(seconds)) { delete action; return nullptr; }
+        action->m_apply = std::move(apply); action->autorelease(); return action;
+    }
+    void update(float progress) override { if (m_apply) m_apply(std::clamp(progress,0.0f,1.0f)); }
+private:
+    std::function<void(float)> m_apply;
 };
 } // namespace corum::ranked::ui

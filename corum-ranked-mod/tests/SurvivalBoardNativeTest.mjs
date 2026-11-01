@@ -59,7 +59,9 @@ int main(){ServerClock clock;auto now=0LL;
  const ui=read('src/ui/SurvivalGameLayer.cpp');
  assert.equal((ui.match(/m_boardClock=ui::menuLabel/g)||[]).length,1);
  assert.match(ui,/survivalBoardClock\(view.state,runtime.countdownMs\(\),runtime.roundRemainingMs\(\)\)/);
- assert.match(ui,/m_boardClock->setVisible\(!result && !elimination && !clock.empty\(\)\)/);
+ assert.match(ui,/m_boardClock->setVisible\(!result && !elimination && !boardClock.empty\(\)\)/);
+ // Standings over map preparation mirror the selected-map entry countdown.
+ assert.match(ui,/boardEntryWait=nextRound && !elimination && !intro && liveBoard && view.state!="ROUND_RESULT"\?runtime.selectedPanelWaitMs\(\)/);
 });
 
 test('Back from map navigates to the retained board without forfeiting; another Back requires confirmation',()=>{

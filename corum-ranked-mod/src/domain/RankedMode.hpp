@@ -26,6 +26,7 @@ public:
     }
     void finish() { m_moving = false; }
     void recoverSolo() { if (!m_moving) m_selected = RankedMode::SoloRanked; }
+    void recoverSurvival() { if (!m_moving) m_selected = RankedMode::Survival; }
     [[nodiscard]] bool moving() const { return m_moving; }
     [[nodiscard]] std::optional<RankedMode> selected() const { return m_selected; }
 private:

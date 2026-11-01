@@ -175,6 +175,10 @@ class SurvivalGameLayer final : public CCLayerColor {
             }
         }
     }
+    void closePlayerInfo() {
+        auto* scene=CCDirector::sharedDirector()->getRunningScene();
+        if(auto* popup=scene?typeinfo_cast<ui::SurvivalPlayerInfoPopup*>(scene->getChildByIDRecursive("survival-player-info-popup"_spr)):nullptr)popup->dismiss();
+    }
     void requestClearedReplay() {
         auto& runtime=SurvivalRuntime::get();if(!runtime.canReplayCleared())return;
         m_browsingBoard=false;m_manualMap=true;m_replayRequestedContext=preparationContextText(runtime.preparationContext());
@@ -428,10 +432,13 @@ public:
         auto const nextRound=runtime.observing() || survivalCanPrepareNext(view.state,view.ownEliminated,view.resultPending,result);
         auto const liveBoard=(watching || m_browsingBoard || (runtime.officialRoundCleared() && !m_manualMap)) && !result && !elimination;
         auto const clock=survivalBoardClock(view.state,runtime.countdownMs(),runtime.roundRemainingMs());
-        m_boardClock->setString(i18n::text(clock,clock).c_str());m_boardClock->setVisible(!result && !elimination && !clock.empty());
+        // Standings shown over the map preparation: mirror its entry countdown.
+        auto const boardEntryWait=nextRound && !elimination && !intro && liveBoard && view.state!="ROUND_RESULT"?runtime.selectedPanelWaitMs():std::nullopt;
+        auto const boardClock=boardEntryWait && *boardEntryWait>0?fmt::format(fmt::runtime(text("survival-entry-wait","ALL READY · ENTERING IN {}s")),(*boardEntryWait+999)/1000):i18n::text(clock,clock);
+        m_boardClock->setString(boardClock.c_str());m_boardClock->setVisible(!result && !elimination && !boardClock.empty());
         auto const headingWidth=std::max(80.f,getContentSize().width-24-(m_boardClock->isVisible()?2*144.f:0.f));
         m_heading->setPosition({getContentSize().width/2,getContentSize().height-29});
-        ui::fitMenuLabelWidth(m_boardClock,140,.28f,.18f);
+        ui::fitMenuLabelWidth(m_boardClock,boardEntryWait?200.f:140.f,.28f,.16f);
         auto const preparationWindow=nextRound && !elimination && !intro && view.map.levelId>0 && view.state!="ROUND_RESULT";
         if(preparationWindow)m_selection->advancePreparation(view,runtime.countdownMs());
         auto const mapWindow=preparationWindow && !liveBoard;
@@ -502,7 +509,12 @@ public:
         // INTRO and round-result gates advance on the authoritative server clock.
         if(!m_motion && !elimination && !m_confirmation && !jukeboxOpen && !debugPopup && !runtime.creating() &&
             preparationWindow && !runtime.previouslyEntered() && !m_manualMap && m_selection->settled() && !runtime.surrenderPending() &&
-            (runtime.canEnter() || runtime.canEnterObserver()) && m_launchedContext!=context)queueNativeLaunch(true);
+            (runtime.canEnter() || runtime.canEnterObserver()) && m_launchedContext!=context){
+            // A player-info card opened from the board must not hold the round
+            // start: close it once the level is launchable, then enter.
+            if(RankedRoundPreparation::get().ready())closePlayerInfo();
+            queueNativeLaunch(true);
+        }
         if(m_replayRequestedContext==context && selectionWindow && !m_motion && !m_confirmation && !m_browsingBoard && runtime.canReplayCleared())queueNativeLaunch();
         if(view.state=="CANCELLED" && !result && !runtime.creating())runtime.acknowledge();
         auto const presentationMillis=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-presentationBegan).count();
