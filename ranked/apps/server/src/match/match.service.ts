@@ -3368,7 +3368,11 @@ export class MatchService {
       );
       const round = roundResult.rows[0];
       if (round) {
-        ready = { A: Boolean(round.ready_a_at), B: Boolean(round.ready_b_at) };
+        // During a Death Match the round number stays at the deciding Round;
+        // its READY flags are stale. The match-level flags (reset when the
+        // Death Match is prepared) are authoritative, or the client sees itself
+        // as already READY and never submits.
+        if (!match.current_deathmatch_id) ready = { A: Boolean(round.ready_a_at), B: Boolean(round.ready_b_at) };
         const domain = round.domain_state ? this.roundState(round) : null;
         if (domain) deathLog = recentRoundDeaths(domain, now.getTime());
         const progressA = this.runtimeState.progress(match.id, round.round_number, "A");

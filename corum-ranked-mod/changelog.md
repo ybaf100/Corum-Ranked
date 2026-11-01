@@ -1,3 +1,10 @@
+# v0.5.0-beta.147
+
+- Solo Death Match never started after a Round 3 draw: during DEATHMATCH_PREPARE the server still projected the deciding Round's READY flags (both true), so clients believed they were already READY and never submitted; the match timed out. READY now comes from the match-level flags (reset when the Death Match is prepared). The Debug "trigger Death Match" path had no prior Round, which is why it worked. Regression-tested.
+- Debug Solo END ROUND: the server ended the Round, but the open local attempt kept the player in the level until the next phase. A successful END ROUND now retires the local attempt like a concession and returns to the board immediately.
+- Survival: eliminated players default to observing, which skipped the elimination animation of the round in which they were eliminated. That round's animation now plays for them before free play/observing continues.
+- Actual GD/device behaviour is unverified.
+
 # v0.5.0-beta.146
 
 - Death Match did not start: the Death Match map's GD song download (ID 684652) never answered, Solo READY waits for map + audio, and the stuck-download timeout (120 s) exceeded the server's 60 s resource deadline, so the match was forfeited. Once the map is ready, a Solo round now waives an audio download that is still outstanding after 25 s (the level plays without that custom audio). Classified audio failures keep their existing handling; Survival is unchanged.

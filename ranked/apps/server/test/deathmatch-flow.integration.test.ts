@@ -298,6 +298,9 @@ describe("Round 3 draw and repeating deathmatch", () => {
         expect(next.currentRound.roundNumber).toBe(round + 1);
       } else {
         expect(resultState.state).toBe("DEATHMATCH_PREPARE");
+        // The deciding Round's READY flags must not leak into the Death Match:
+        // a stale ready.A=true made the client skip its own READY (forfeit).
+        expect(resultState.ready).toEqual({ A: false, B: false });
         const forbiddenCanonicalIds = new Set([
           ...selectedMaps.map((map) => map.canonicalLevelId),
           bannedDeathmatchMap.canonicalLevelId,

@@ -355,6 +355,12 @@ class SurvivalGameLayer final : public CCLayerColor {
         for(std::size_t i=0;i<m_eliminationOrder.size()&&i<m_eliminationStarts.size();++i)
             if(elapsed>=m_eliminationStarts[i] && !m_eliminationRevealed.contains(m_eliminationOrder[i]))revealElimination(m_eliminationOrder[i],true,i);
     }
+    static bool ownEliminatedIn(SurvivalMatchView const& view) {
+        if(!view.ownEliminated || view.ownId.empty() || !view.completedRound.isObject())return false;
+        for(auto const& p:view.completedRound["players"].asArray().unwrapOr(std::vector<matjson::Value>{}))
+            if(p["participantId"].asString().unwrapOr("")==view.ownId)return !p["qualified"].asBool().unwrapOr(false);
+        return false;
+    }
     bool presentEliminations(SurvivalMatchView const& view) {
         auto const now=std::chrono::steady_clock::now();
         auto const& completed=view.completedRound;
@@ -444,7 +450,10 @@ public:
             return;
         }
         m_outcome->setVisible(false);
-        auto const elimination=!runtime.observing() && presentEliminations(view);
+        // Observers skip later rounds' presentations, but the round in which the
+        // player was eliminated still plays its elimination animation (eliminated
+        // players default to observing, which previously skipped it entirely).
+        auto const elimination=(!runtime.observing() || ownEliminatedIn(view)) && presentEliminations(view);
         syncAudio(view,elimination);
         auto const intro=view.presentationGate=="INTRO";
         auto const nextRound=runtime.observing() || survivalCanPrepareNext(view.state,view.ownEliminated,view.resultPending,result);

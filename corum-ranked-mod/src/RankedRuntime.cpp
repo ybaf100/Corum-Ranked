@@ -2244,11 +2244,17 @@ void RankedRuntime::debugEndRound() {
     request.bodyJSON(body);
     m_controlBusy = true;
     log::info("[RankedDebug] end round requested match={} round={}", m_view.match.matchId, m_view.match.roundNumber);
+    auto const matchId = m_view.match.matchId; auto const round = m_view.match.roundNumber;
     m_controlRequest.spawn(
         request.post(endpoint("/api/ranked/matches/" + m_view.match.matchId + "/debug/end-round")),
-        [this](web::WebResponse response) {
+        [this, matchId, round](web::WebResponse response) {
             m_controlBusy = false;
             if (!successful(response)) { setTransientError(responseError(response)); return; }
+            // The server ended this Round: like a concession, the open local
+            // attempt is terminal and the level returns to the board now
+            // (otherwise the visual attempt kept the player in the level).
+            if (m_view.match.matchId == matchId && m_concessions.observe(matchId, "ROUND", round, 0))
+                retireConcededAttemptTransport();
             parseMatchState(response.json().unwrapOr(matjson::Value()));
             m_nextPollAt = std::chrono::steady_clock::now();
         }
