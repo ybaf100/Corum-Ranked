@@ -1,3 +1,8 @@
+# v0.5.0-beta.132
+
+- Survival card status line no longer shows "PROMOTION MATCH (1 WIN)" during a Survival promotion series; it shows only a win/loss streak when there is one and stays empty otherwise. Solo cards are unchanged.
+- Actual GD/device behaviour is unverified.
+
 # v0.5.0-beta.131
 
 - Fix: migration 0037 (sur_profiles.promotion) was not registered in the server's required-migration list, so production never applied it and Admin Survival LP changes / Survival settlement failed with `column "promotion" does not exist`. It is now registered, probed by /ready, and a test requires every migration file to be registered. (Production Neon was migrated directly with the same additive SQL before this release.)

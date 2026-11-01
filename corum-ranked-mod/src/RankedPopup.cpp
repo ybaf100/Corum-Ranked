@@ -1694,7 +1694,8 @@ class CorumRankedLayer final : public CCLayerColor {
         }
     }
 
-    void addRankStatus(RankedProfileView const& profile, CCPoint position, float scale, float width, bool lobbyFallback = false) {
+    void addRankStatus(RankedProfileView const& profile, CCPoint position, float scale, float width, bool lobbyFallback = false,
+        bool showPromotion = true) {
         std::string text;
         auto color = kCyan;
         if (std::abs(profile.resultStreak) >= 2) {
@@ -1703,8 +1704,13 @@ class CorumRankedLayer final : public CCLayerColor {
         }
         std::string state;
         if (profile.promotion.active) {
-            state = corum::ranked::i18n::promotionMatch(profile.promotion.winsRequired);
-            color = ccc3(145,255,125);
+            // Survival series: the requirement and slots already describe it; the
+            // status line keeps only a streak (or stays empty).
+            if (!showPromotion) lobbyFallback = false;
+            else {
+                state = corum::ranked::i18n::promotionMatch(profile.promotion.winsRequired);
+                color = ccc3(145,255,125);
+            }
         } else if (profile.demotionWarning) {
             state = tr("demotion-warning","DEMOTION WARNING"); color = kRed;
         }
@@ -2235,7 +2241,7 @@ class CorumRankedLayer final : public CCLayerColor {
         );
         emblem->setPosition({leftCenter.x, leftCenter.y + 18.0f});
         m_root->addChild(emblem, 4);
-        addRankStatus(profile,{leftCenter.x,leftCenter.y + 91.0f},0.26f,174.0f,true);
+        addRankStatus(profile,{leftCenter.x,leftCenter.y + 91.0f},0.26f,174.0f,true,!survival);
         auto* tier = makeLabel(corum::ranked::rankTierDisplay(upper(view.profileTier)), 0.54f, {leftCenter.x, leftCenter.y - 25.0f}, tierColor(upper(view.profileTier)), "black");
         corum::ranked::ui::fitMenuLabelWidth(tier, 150.0f, 0.54f, 0.32f);
         m_root->addChild(tier, 4);

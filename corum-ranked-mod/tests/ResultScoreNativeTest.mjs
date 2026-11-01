@@ -729,9 +729,14 @@ int main() {
     profile.resultStreak=0;profile.demotionWarning=false;profile.promotion.active=true;
     f.addRankStatus(profile,{},.26f,170);
     assert(static_cast<CCLabelBMFont*>(f.root.children.back())->text=="PROMOTION MATCH");
+    // Survival series: no promotion text and no YOUR RANK fallback; a streak still shows.
+    auto const before=f.root.children.size();
+    f.addRankStatus(profile,{},.26f,170,true,false);assert(f.root.children.size()==before);
+    profile.resultStreak=2;f.addRankStatus(profile,{},.26f,170,true,false);
+    assert(static_cast<CCLabelBMFont*>(f.root.children.back())->text=="2 WINS");
 }
 `);
-    assert.match(method(popupSource,'void renderModeCard('),/addRankStatus\(profile,[^;]+,true\)/);
+    assert.match(method(popupSource,'void renderModeCard('),/addRankStatus\(profile,[^;]+,true,!survival\)/);
     assert.doesNotMatch(method(popupSource,'void addPlayerCard('),/addRankStatus\(profile,[^;]+,true\)/);
 });
 
