@@ -1026,6 +1026,19 @@ public:
             capture?(player==m_player2&&capture->player2?(capture->player2->discontinuity?capture->player2->discontinuity->nativeEvents.size():0):(capture->discontinuity?capture->discontinuity->nativeEvents.size():0)):0);
     }
 
+    // Mid-join / resync restore backfill (>= 1 s of validated history) runs
+    // behind the same "moving" window as replay seeks. Driven from the world
+    // hook, not the spectator HUD: the HUD is hidden while the remote pose is
+    // held during the restore, which kept the cover from ever appearing.
+    void updateSpectatorSeekCover(){
+        auto& live=spectatorTransport();auto [applied,total]=live.restoreProgress();
+        if(m_fields->spectatorMode && live.restoringWorld() && total>=20 && applied<total){
+            m_fields->spectatorSeekCover.attach(this,1490);
+            m_fields->spectatorSeekCover.show(corum::ranked::i18n::text("spectator-seeking","Moving to the live position..."),
+                fmt::format("{}/{}",applied,total),static_cast<double>(applied)/static_cast<double>(total));
+        }else m_fields->spectatorSeekCover.hide();
+    }
+
     // Replay & spectate seek-speed setting also bounds spectator restore catch-up.
     std::pair<std::size_t,double> spectatorCatchupBudget(){
         auto const budget=corum::ranked::replay::spectatorCatchupBudget(corum::ranked::replay::replaySeekSpeedFromInt(
@@ -2904,7 +2917,7 @@ public:
             }
             m_fields->spectatorPanel->setVisible(false);
         }
-        if (!spectatorVisible) m_fields->spectatorSeekCover.hide();
+        if (!m_fields->spectatorMode) m_fields->spectatorSeekCover.hide();
         if (spectatorVisible) {
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
             auto const hudStarted=std::chrono::steady_clock::now();
@@ -2934,14 +2947,6 @@ public:
                 m_fields->spectatorCamera.state() == corum::ranked::SpectatorCameraState::Waiting ? i18n::text("spectator-waiting","WAITING...") : "LIVE";
             if(rendered && rendered->pose && rendered->pose->dual)state+=" · DUAL";
             setHudText(m_fields->spectatorStatusLabel,state);
-            // Restore backfill (>= 1 s of history) runs behind the same seek cover
-            // as replays; progress is the real applied/total validated samples.
-            if(auto [restoreApplied,restoreTotal]=corum::ranked::SpectatorLiveRuntime::get().restoreProgress();
-               status==corum::ranked::SpectatorLiveStatus::Syncing && restoreTotal>=20 && restoreApplied<restoreTotal){
-                m_fields->spectatorSeekCover.attach(this,1490);
-                m_fields->spectatorSeekCover.show(i18n::text("spectator-seeking","Moving to the live position..."),
-                    fmt::format("{}/{}",restoreApplied,restoreTotal),static_cast<double>(restoreApplied)/static_cast<double>(restoreTotal));
-            }else m_fields->spectatorSeekCover.hide();
             limitHudWidth(m_fields->spectatorStatusLabel,140.f,.20f,.14f);
             auto percent=rendered && m_level?corum::ranked::spectatorProgressPercent(*rendered,m_levelLength,m_level->m_timestamp):std::nullopt;
             setHudText(m_fields->spectatorProgressLabel,percent?fmt::format("{:.2f}%",*percent):"--% ");
@@ -3132,6 +3137,7 @@ class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {
                 std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-stepStarted).count());
             }
             owner->driveSpectatorCamera();
+            owner->updateSpectatorSeekCover();
             owner->logSpectatorNativeCamera("after spectator correction");
             owner->logSpectatorWorldDriver();
             return;

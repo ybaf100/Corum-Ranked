@@ -32,7 +32,16 @@ void openRecoveredGame() {
     queueInMainThread([] {
         auto* scene=CCDirector::sharedDirector()->getRunningScene();
         if(scene && scene->getChildByID("survival-online-queue"_spr))return;
-        if(RankedRuntime::get().view().stage==RuntimeStage::Ready && SurvivalRuntime::get().active())showSurvivalGame();
+        auto& runtime=SurvivalRuntime::get();
+        if(RankedRuntime::get().view().stage!=RuntimeStage::Ready || !runtime.active())return;
+        // A recovered match that only needs acknowledgement (cancelled without a
+        // result) has nothing to show: settle it quietly instead of pushing the
+        // board for one frame and auto-closing it (board flash on lobby entry).
+        if(runtime.view().state=="CANCELLED" && !runtime.view().result.isObject()){
+            log::info("[SurvivalRecover] cancelled match acknowledged without board match={}",runtime.view().id);
+            runtime.acknowledge();return;
+        }
+        showSurvivalGame();
     });
 }
 web::WebRequest request(std::string const& session) {

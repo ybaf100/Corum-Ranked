@@ -1,3 +1,10 @@
+# v0.5.0-beta.129
+
+- Elimination order follows the result board: the motion starts at the last (bottom-right) card and walks back to the best-placed eliminated card, so tied ranks go in reverse displayed order (board 14 14 14 17 18 19 20 20 22 -> 22, 20 (second), 20 (first), 19, 18, 17, 14, 14, 14). beta.128 sorted ties by participant ID.
+- Mid-join / resync spectating now shows the "Moving to the live position..." window with real restore progress. It was wired to the spectator HUD, which stays hidden while the remote pose is held during the restore, so it never appeared; it is now driven from the native world update.
+- Lobby entry board flash: a recovered Survival match that only needs acknowledgement (cancelled without a result) is acknowledged quietly instead of pushing the board for a frame and auto-closing it.
+- Actual GD/device behaviour is unverified.
+
 # v0.5.0-beta.128
 
 - Spectator RECORD -> RECAPTURE REQUIRED from the start (beta.127 regression): Entropie's start teleport trigger fires again at 4.2 ms after GD stepped the player from its start position (Y 104.95), a pose no published sample ever showed. beta.127 captured that hidden round trip as evidence; its unpublished source could never match the previous sample, so viewers rejected sequence 1. A relocation whose source was never published but whose destination is where the last sample already is (visibly continuous) is no longer attached; any relocation that moves away from the last sample is still captured and verified (or rejected) as before.

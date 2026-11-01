@@ -79,7 +79,7 @@ struct ScopedRealGameplayEnd{bool& flag;bool previous;ScopedRealGameplayEnd(bool
 template<class T>struct FieldsAccess { std::unique_ptr<T> value=std::make_unique<T>();T* operator->(){return value.get();} };
 struct CorumRankedPlayLayer: PlayLayer {
     corum::ranked::SpectatorLiveRuntime& spectatorTransport(){return corum::ranked::SpectatorLiveRuntime::get();}
-    std::pair<std::size_t,double> spectatorCatchupBudget(){return {8,2.0};}
+    std::pair<std::size_t,double> spectatorCatchupBudget(){return {8,2.0};}void updateSpectatorSeekCover(){}
     void survivalSpectatorFrame(float){}
     corum::ranked::SpectatorSceneContext survivalSpectatorSceneContext(){return {};}
 

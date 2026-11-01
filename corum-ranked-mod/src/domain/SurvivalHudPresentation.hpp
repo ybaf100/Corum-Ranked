@@ -28,18 +28,14 @@ struct SurvivalStanding {
     bool attemptActive=false,cleared=false,eliminated=false,qualified=false;
     std::string attemptId="";
 };
-/** Eliminated players of an official completed round, lowest placement first
- * (largest rank number; an unranked row counts as lowest). Ties use the stable
- * participant ID. Survivors are never part of the elimination motion. */
+/** Eliminated players of an official completed round in reverse board order:
+ * `players` is the order the result board lays the cards out (rank order,
+ * ties in their displayed order), so the motion starts at the last card
+ * (bottom-right) and walks back to the best-placed eliminated card. Survivors
+ * are never part of the elimination motion. */
 inline std::vector<std::string> survivalEliminationOrder(std::vector<SurvivalStanding> const& players) {
-    std::vector<SurvivalStanding const*> eliminated;
-    for (auto const& player : players) if (!player.passing) eliminated.push_back(&player);
-    auto const order = [](SurvivalStanding const* p) { return p->rank > 0 ? p->rank : 1 << 30; };
-    std::sort(eliminated.begin(), eliminated.end(), [&](auto const* a, auto const* b) {
-        return order(a) != order(b) ? order(a) > order(b) : a->id < b->id;
-    });
     std::vector<std::string> ids;
-    for (auto const* player : eliminated) ids.push_back(player->id);
+    for (auto it = players.rbegin(); it != players.rend(); ++it) if (!it->passing) ids.push_back(it->id);
     return ids;
 }
 struct SurvivalHudColor { unsigned char r,g,b; bool operator==(SurvivalHudColor const&) const = default; };

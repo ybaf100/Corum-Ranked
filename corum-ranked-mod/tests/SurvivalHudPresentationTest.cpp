@@ -25,18 +25,21 @@ int main() {
         for(std::size_t i=1;i<n;i++)assert(starts[i]>starts[i-1]);
         assert(starts.back()+SurvivalEliminationFallMilliseconds<=SurvivalEliminationMilliseconds);
     }
-    {   // 16 players, ranks 11..16 eliminated: 16,15,...,11; ties by participant ID; survivors excluded.
+    {   // Reverse board order: bottom-right card first, ties in displayed order (reversed); survivors excluded.
         std::vector<SurvivalStanding> round;
         for(int i=1;i<=16;i++)round.push_back({"p"+std::to_string(100+i),"P",i,0,0,0,i<=10,false,false});
-        round[12].rank=14;round[13].rank=14; // p113/p114 tie at 14
+        round[12].rank=14;round[13].rank=14; // p113/p114 tie at 14, displayed p113 then p114
         auto order=survivalEliminationOrder(round);
-        assert((order==std::vector<std::string>{"p116","p115","p113","p114","p112","p111"}));
+        assert((order==std::vector<std::string>{"p116","p115","p114","p113","p112","p111"}));
+        // Reported board: 14 14 14 17 18 19 20(1) 20(2) 22 -> 22, 20(2), 20(1), 19, 18, 17, 14, 14, 14.
+        std::vector<SurvivalStanding> board;int n=0;
+        for(int rank:{14,14,14,17,18,19,20,20,22})board.push_back({"e"+std::to_string(++n),"E",rank,0,0,0,false,false,false});
+        assert((survivalEliminationOrder(board)==std::vector<std::string>{"e9","e8","e7","e6","e5","e4","e3","e2","e1"}));
         std::vector<SurvivalStanding> big;
         for(int i=1;i<=64;i++)big.push_back({"b"+std::to_string(1000+i),"B",i,0,0,0,i<=16,true,false});
         auto bigOrder=survivalEliminationOrder(big);assert(bigOrder.size()==48 && bigOrder.front()=="b1064" && bigOrder.back()=="b1017");
         std::vector<SurvivalStanding> none{{"a","A",1,0,0,0,true,false,false}};assert(survivalEliminationOrder(none).empty());
-        std::vector<SurvivalStanding> unranked{{"z","Z",0,0,0,0,false,false,false},{"y","Y",2,0,0,0,false,false,false}};
-        assert((survivalEliminationOrder(unranked)==std::vector<std::string>{"z","y"}));
+
     }
     std::vector<SurvivalStanding> players;
     for(int i=1;i<=16;i++)players.push_back({std::to_string(i),"Bot "+std::to_string(i),i,0,0,100.0-i,i<=10,true,false});

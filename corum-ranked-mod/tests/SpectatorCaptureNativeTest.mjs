@@ -103,7 +103,7 @@ struct DebugSpectateRuntime {
 }
 struct CorumRankedPlayLayer:PlayLayer {
  corum::ranked::SpectatorLiveRuntime& spectatorTransport(){return corum::ranked::SpectatorLiveRuntime::get();}
- std::pair<std::size_t,double> spectatorCatchupBudget(){return {8,2.0};}
+ std::pair<std::size_t,double> spectatorCatchupBudget(){return {8,2.0};}void updateSpectatorSeekCover(){}
  bool blockEntryGameplayUpdate(){return false;}
  struct Fields{SpectatorSourceTrace spectatorSourceTrace;unsigned spectatorCaptureDrops=0;std::array<std::optional<SpectatorGhostPose>,2> pendingTeleportSource{};std::array<double,2> pendingTeleportLevelTime{-1,-1};int portalTeleportDepth=0;unsigned spectatorTeleportHookLogs=0,spectatorTeleportDecisionLogs=0,pauseExitLogs=0;int levelId=123;bool survivalLiveLevel=false,survivalReplayLevel=false,survivalLevel=false;struct Driver{bool partialHistory()const{return false;}template<class...T>bool apply(T...){return false;}std::optional<float> takeNativeDeltaSeconds(){return {};}}spectatorWorldDriver;bool spectatorWorldPoseApplied=false,spectatorCollisionChecked=false;SpectatorNativeProbe spectatorNativeProbe;bool rankedInitialized=false,rankedLevel=true,safetyRetired=false,spectatorMode=false,spectatorPending=false;
   corum::ranked::SpectatorSceneContext sceneContext;std::optional<SpectatorRemoteFrame>spectatorRenderedFrame;struct Remote{template<class...T>void update(T...){}void presentationVisible(bool){}}remotePlayer;
