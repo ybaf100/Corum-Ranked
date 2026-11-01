@@ -171,7 +171,21 @@ public:
                 center->setLayout(RowLayout::create()->setGap(14)->setAutoScale(true)->setAxisAlignment(AxisAlignment::Center));
             }
         }
-        center->addChild(m_fields->surrender,-1);center->sortAllChildren();center->updateLayout();
+        center->addChild(m_fields->surrender,-1);
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+        // Solo Debug Bot round: END ROUND next to the surrender X (the player
+        // cannot leave a live Solo round to the board).
+        if(!m_fields->survival && !m_fields->placement && RankedRuntime::get().canDebugEndRound()){
+            auto* face=ui::surface({96,36},{},ui::Red,ui::SurfaceRaised,255,true);
+            auto* caption=ui::menuLabel(i18n::text("survival-end-round","END ROUND"),.25f,{48,18},ui::Red,ui::FontWeight::ExtraBold);
+            ui::fitFullMenuLabel(caption,84,24,.25f);face->addChild(caption,5);
+            auto* end=CCMenuItemSpriteExtra::create(face,this,menu_selector(CorumRankedPauseLayer::onSoloEndRound));
+            end->setID("ranked-debug-end-round"_spr);
+            if(!center->getLayout())end->setPosition({m_fields->surrender->getPositionX()+80,m_fields->surrender->getPositionY()});
+            center->addChild(end,-1);
+        }
+#endif
+        center->sortAllChildren();center->updateLayout();
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
         setupSurvivalForceClear(size);
 #endif
@@ -499,6 +513,18 @@ public:
         if (popup) { m_fields->popup.emplace(popup); popup->show(); }
     }
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+    void onSoloEndRound(CCObject*){
+        auto& runtime=RankedRuntime::get();if(m_fields->survival || !runtime.canDebugEndRound() || m_fields->survivalConfirmation)return;
+        auto const matchId=runtime.view().match.matchId;auto const round=runtime.view().match.roundNumber;
+        auto* popup=ui::RankedConfirmPopup::create(i18n::text("survival-end-round","END ROUND"),
+            i18n::text("solo-end-round-question","End this round now using the current scores?"),
+            [weak=WeakRef(this),matchId,round](bool accepted){auto owner=weak.lock();if(owner)owner->m_fields->survivalConfirmation.reset();
+                auto& current=RankedRuntime::get();
+                if(accepted && current.canDebugEndRound() && current.view().match.matchId==matchId && current.view().match.roundNumber==round){
+                    log::info("[RankedDebug] pause end round match={} round={}",matchId,round);current.debugEndRound();}
+            },i18n::text("survival-end-round","END ROUND"));
+        if(popup){m_fields->survivalConfirmation.emplace(popup);popup->show();}
+    }
     void onEndRound(CCObject*){
         auto& runtime=SurvivalRuntime::get();if(!m_fields->survival || !runtime.canEndRound() || m_fields->survivalConfirmation)return;
         auto const id=m_fields->matchId,key=m_fields->survivalRoundKey;auto const generation=m_fields->survivalMapGeneration;

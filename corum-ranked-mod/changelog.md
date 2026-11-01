@@ -1,3 +1,9 @@
+# v0.5.0-beta.144
+
+- Debug build: Solo END ROUND is also in the in-level Pause menu (next to the surrender X), since a live Solo round cannot be left to the board. Same server rule: Debug build session + Debug Bot match + live Round only.
+- Fixes a History native test double that stopped beta.143 at validation.
+- Actual GD/device behaviour is unverified.
+
 # v0.5.0-beta.143
 
 - Debug build: Solo END ROUND. In a Debug Bot match, the Solo board shows END ROUND under the mode chip during a live Round; after confirmation the server settles the Round immediately from committed scores (active runs end without score). Debug build sessions and Debug Bot matches only; Death Matches are unaffected.

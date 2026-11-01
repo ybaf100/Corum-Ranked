@@ -75,7 +75,7 @@ using RoundSummaryView=int;using DeathmatchSummaryView=int;
 ${method(header,'struct HistoryMatchView')};
 int parseRoundSummary(matjson::Value const&){return 1;}int parseDeathmatchSummary(matjson::Value const&){return 1;}
 struct RankedRuntime{
- std::string m_sessionToken="token",m_historyDetailMatch,m_historyOrder="NEWEST",m_historyResult="ALL";bool m_rankedOpen=true;
+ std::string m_sessionToken="token",m_historyDetailMatch,m_historyOrder="NEWEST",m_historyResult="ALL";bool m_rankedOpen=true;bool m_historyAllRecords=false;
  std::uint64_t m_historyGeneration=1,m_historyDetailGeneration=0,m_sessionGeneration=1;
  geode::async::TaskHolder<web::WebResponse>m_historyRequest,m_historyDetailRequest;
  struct{bool historyLoading=false,historyDetailLoading=false;std::string historyError,historyDetailError;std::uint64_t historyRevision=0,revision=0;HistoryScope historyScope=HistoryScope::All;std::vector<HistoryMatchView>history;}m_view;
