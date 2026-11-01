@@ -1,3 +1,11 @@
+# v0.5.0-beta.142
+
+- Match found entrance did not play: entering a match waited for the lobby queue-expansion animation and the 0.3 s key debounce, so the match-found screen was first built ~2 s after MATCHED and missed the entrance window. A match now replaces the lobby without waiting for a queue motion or the debounce, and the entrance window is 3.5 s.
+- Debug Bot match creation no longer opens the queue expansion (it reused the JOINING stage, showing a connection error on the right card before jumping to match found).
+- Solo round options: the LDM button is disabled (grayed) on maps without a Low Detail Mode. LDM / Disable Shake no longer rebuild the screen inside the pressed button's own activation (rebuild is deferred one frame), a likely cause of crashes when tapping board buttons repeatedly.
+- Includes beta.141 (result rows/stamps after the LP presentation). beta.141's release was cancelled before publishing; beta.140 was superseded before activation.
+- Actual GD/device behaviour is unverified.
+
 # v0.5.0-beta.141
 
 - Solo match result: the round rows / WIN-LOSE stamp motion did not play after the LP presentation (the background flashed once instead). Closing the LP presentation rebuilt the result without recording it as rendered, so the next refresh fade-rebuilt it again with the motion already marked as played. The close now records the rendered key before its single rebuild.

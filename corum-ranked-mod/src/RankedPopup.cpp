@@ -922,7 +922,9 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     bool prepareUiTransition(std::string const& key) {
-        if (m_modeTransition.moving() || m_queueAnimating) { m_pendingUiKey = key; return false; }
+        // A match replaces the lobby: never wait for a lobby queue/mode motion.
+        auto const matched = RankedRuntime::get().view().stage == RuntimeStage::Matched;
+        if (m_modeTransition.moving() || (!matched && m_queueAnimating)) { m_pendingUiKey = key; return false; }
         // Solo intro / series roll: the board is rebuilt once they finish.
         if (soloHoldActive()) { m_pendingUiKey = key; return false; }
         auto const now = SteadyClock::now();
@@ -951,8 +953,9 @@ class CorumRankedLayer final : public CCLayerColor {
         // flap between polls (resource/spectator projections) otherwise rebuilt
         // every menu several times a second, so taps never landed and a tap on
         // a rebuilt menu could crash.
-        if (key != m_stableKeyCandidate) { m_stableKeyCandidate = key; m_stableKeySince = now; return false; }
-        if (now - m_stableKeySince < std::chrono::milliseconds(300)) return false;
+        auto const enteringMatch = matched && m_renderedUiKey.rfind("match:", 0) != 0;
+        if (!enteringMatch && key != m_stableKeyCandidate) { m_stableKeyCandidate = key; m_stableKeySince = now; return false; }
+        if (!enteringMatch && now - m_stableKeySince < std::chrono::milliseconds(300)) return false;
         m_stableKeyCandidate.clear();
         if (RankedRuntime::get().view().stage == RuntimeStage::Matched)
             log::info("[RankedUi] rebuild {} -> {}", m_renderedUiKey, key);
@@ -2731,8 +2734,9 @@ class CorumRankedLayer final : public CCLayerColor {
             auto const& status = survival.queue().status;
             return status == "QUEUED" || status == "JOINING" || (status == "MATCHED" && !survival.active());
         }
-        auto const stage = RankedRuntime::get().view().stage;
-        return stage == RuntimeStage::Queued || stage == RuntimeStage::JoiningQueue;
+        auto const& view = RankedRuntime::get().view();
+        if (view.debugBotCreating) return false;
+        return view.stage == RuntimeStage::Queued || view.stage == RuntimeStage::JoiningQueue;
     }
 
     CCLayerColor* selectedLobbyCard() const {
@@ -3612,7 +3616,7 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const ownA = match.side == "A";
         // Entrance (once per match): the versus intro, then cards slide in from
         // the sides, VS pops and the countdown box opens.
-        auto const animate = m_matchFoundMotionKey != match.matchId && phaseSeconds() < 2.0;
+        auto const animate = m_matchFoundMotionKey != match.matchId && phaseSeconds() < 3.5;
         m_matchFoundMotionKey = match.matchId;
         auto const lead = animate ? kVersusSettle + 0.2f : 0.0f;
         auto* savedRoot = m_root; auto* savedMenu = m_menu;
@@ -4162,7 +4166,10 @@ class CorumRankedLayer final : public CCLayerColor {
         auto* shake = option(fmt::format("{}: {}", tr("disable-shake", "DISABLE SHAKE"), level && level->m_disableShakeToggled ? "ON" : "OFF"), 0.0f,
             menu_selector(CorumRankedLayer::onDisableShake), level && level->m_disableShakeToggled);
         ldm->setID("ranked-round-ldm"_spr); shake->setID("ranked-round-disable-shake"_spr);
-        ldm->setEnabled(level != nullptr); shake->setEnabled(level != nullptr);
+        // Maps without a Low Detail Mode have nothing to toggle.
+        auto const ldmAvailable = level && level->m_lowDetailMode;
+        ldm->setEnabled(ldmAvailable); shake->setEnabled(level != nullptr);
+        if (!ldmAvailable) corum::ranked::ui::grayButtonVisual(ldm->getNormalImage());
         m_jukeboxButton = option("Jukebox", 70.0f, menu_selector(CorumRankedLayer::onJukebox), false);
         m_jukeboxButton->setID("ranked-jukebox-button"_spr);
         auto const jukeboxLoaded = corum::ranked::ui::rankedJukeboxLoaded();
@@ -5725,20 +5732,29 @@ class CorumRankedLayer final : public CCLayerColor {
         m_rankedChildScenePushed = true;
     }
 
+    // Never rebuild the tree inside the pressed item's own activation: the
+    // menu and item would be destroyed while CCMenu is still dispatching.
+    void renderAfterInput() {
+        queueInMainThread([weak = WeakRef(this)] {
+            auto self = weak.lock(); if (!self || !self->getParent()) return;
+            self->adoptCurrentPresentation(); self->render(); self->applyFadeInIfNeeded();
+        });
+    }
+
     void onLowDetail(CCObject*) {
         auto* level = findPlayableMap();
-        if (!level || m_enteringLevel) return;
+        if (!level || !level->m_lowDetailMode || m_enteringLevel) return;
         corum::ranked::RankedRoundPreparation::get().setLowDetail(!level->m_lowDetailModeToggled);
         // The exact native Saved object persists user options; never overwrite
         // the map author's m_lowDetailMode capability or any score/metadata.
-        render();
+        renderAfterInput();
     }
 
     void onDisableShake(CCObject*) {
         auto* level = findPlayableMap();
         if (!level || m_enteringLevel) return;
         level->m_disableShakeToggled = !level->m_disableShakeToggled;
-        render();
+        renderAfterInput();
     }
 
     void addRoundOptions(float y) {
@@ -5750,7 +5766,8 @@ class CorumRankedLayer final : public CCLayerColor {
             {size.width / 2.0f, y}, menu_selector(CorumRankedLayer::onDisableShake), false, 0.35f);
         ldm->setID("ranked-round-ldm"_spr);
         shake->setID("ranked-round-disable-shake"_spr);
-        ldm->setEnabled(level != nullptr);
+        ldm->setEnabled(level && level->m_lowDetailMode);
+        if (!(level && level->m_lowDetailMode)) corum::ranked::ui::grayButtonVisual(ldm->getNormalImage());
         shake->setEnabled(level != nullptr);
         addJukeboxButton({size.width / 2.0f + 116.0f, y}, 0.35f);
     }

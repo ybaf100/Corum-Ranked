@@ -224,7 +224,7 @@ ${source}
 using namespace corum::ranked;
 struct RoundOptions {
     GJGameLevel* level=nullptr;bool m_enteringLevel=false;int renders=0;
-    GJGameLevel* findPlayableMap(){return level;}void render(){++renders;}
+    GJGameLevel* findPlayableMap(){return level;}void render(){++renders;}void renderAfterInput(){++renders;}
     ${optionMethods}
 };
 using SteadyClock=std::chrono::steady_clock;
@@ -325,6 +325,8 @@ int main(){
     assert(downloaded.m_lowDetailModeToggled&&downloaded.m_disableShakeToggled&&options.renders==2);
     ticks(p);assert(downloaded.m_lowDetailModeToggled); // explicit choice survives pumps
     options.m_enteringLevel=true;options.onLowDetail(nullptr);assert(downloaded.m_lowDetailModeToggled&&options.renders==2);
+    options.m_enteringLevel=false;downloaded.m_lowDetailMode=false;options.onLowDetail(nullptr);assert(downloaded.m_lowDetailModeToggled&&options.renders==2); // no LDM on this map
+    downloaded.m_lowDetailMode=true;
     assert(meta.authorizes(&downloaded,currentPreparationContext())); // options do not alter metadata proof
     CCScene transition;director->next=&transition;
     assert(!p.launch(&origin)&&PlayLayer::constructions==0&&runtime.arms==0);

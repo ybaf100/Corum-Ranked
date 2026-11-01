@@ -217,7 +217,7 @@ test('mode lobby owns Cocos actions and defers full UI replacement while moving'
  assert.match(animate,/CCEaseSineInOut::create\(motion\)/);
  assert.doesNotMatch(animate,/CCScaleTo|CCMoveTo|removeAllChildren/);
  assert.match(animate,/setZOrder\(5\)/);
- assert.match(method(popup,'    bool prepareUiTransition('),/if \(m_modeTransition.moving\(\) \|\| m_queueAnimating\).*return false/);
+ assert.match(method(popup,'    bool prepareUiTransition('),/if \(m_modeTransition.moving\(\) \|\| \(!matched && m_queueAnimating\)\).*return false/);
  assert.match(method(popup,'    void render()'),/m_modeTransition.moving\(\)/);
  assert.match(method(popup,'    void onCloseLayer('),/m_modeTransition.back\(\).*animateModeLobby\(mode,false\)/);
  const card=method(popup,'    void renderModeCard(');

@@ -1332,11 +1332,13 @@ void RankedRuntime::startDebugBotMatch(DebugBotMatchOptions options) {
     auto request = baseRequest(m_sessionToken);
     request.bodyJSON(body);
     m_controlBusy = true;
+    m_view.debugBotCreating = true;
     setStage(RuntimeStage::JoiningQueue, "Creating DEBUG BOT MATCH...");
     m_controlRequest.spawn(
         request.post(endpoint("/api/ranked/debug/bot-match")),
         [this](web::WebResponse response) {
             m_controlBusy = false;
+            m_view.debugBotCreating = false;
             if (!successful(response)) {
                 if (handleRequiredUpdate(response)) return;
                 setStage(RuntimeStage::Ready, "Ranked session ready.", responseError(response));

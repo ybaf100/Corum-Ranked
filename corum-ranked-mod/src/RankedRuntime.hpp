@@ -445,6 +445,8 @@ struct RuntimeView {
     int survivalPlayerCount=16;
     SurvivalView survival;
     RuntimeStage stage = RuntimeStage::Idle;
+    // Debug Bot match creation reuses JoiningQueue; it is not a queue to show.
+    bool debugBotCreating = false;
     std::string status;
     std::string error;
     bool accountActiveElsewhere = false;
