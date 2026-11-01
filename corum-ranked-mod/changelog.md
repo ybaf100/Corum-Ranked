@@ -1,3 +1,8 @@
+# v0.5.0-beta.139
+
+- Same content as beta.138. beta.138 stopped at validation (a new rules test failed TypeScript's weak-type check); nothing was published or activated.
+- Actual GD/device behaviour is unverified.
+
 # v0.5.0-beta.138
 
 - Crash fix (iOS, beta.137): leaving the queue and returning to the main menu crashed in `CCEaseSineIn::update` (an ease-in fade whose inner fade action had already been freed). Lobby chrome fades no longer use per-layer CCEase wrappers: one tween on the faded group drives every surface through strong refs, and ModeLobbyFade carries its own easing.

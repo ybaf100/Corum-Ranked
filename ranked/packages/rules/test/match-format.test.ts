@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  type MatchSeriesState,
   SeededRandom,
   applyDeathmatchWinner,
   applyRoundResult,
@@ -16,7 +17,7 @@ import { allPoolMaps } from "./fixtures.js";
 
 describe("per-tier match format", () => {
   it("treats series created before formats as BO3 with a map ban", () => {
-    const legacy = { roundResults: [], roundWins: { A: 0, B: 0 }, phase: "ROUND_REQUIRED" as const, winner: null };
+    const legacy: MatchSeriesState = { roundResults: [], roundWins: { A: 0, B: 0 }, phase: "ROUND_REQUIRED", winner: null };
     expect(matchFormatOf(legacy)).toBe("BO3");
     expect(mapBanOf(legacy)).toBe(true);
     expect(applyRoundResult(legacy, "A").nextRoundNumber).toBe(2);
