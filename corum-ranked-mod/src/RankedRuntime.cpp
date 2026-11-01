@@ -4265,6 +4265,10 @@ void RankedRuntime::fetchSurvivalProfile() {
         sur.tierId = profile["tierId"].asString().unwrapOr(sur.profile.displayedTier);
         sur.profile.visibleRankedScore = static_cast<int>(profile["lp"].asInt().unwrapOr(0));
         sur.profile.demotionWarning = profile["demotionWarning"].asBool().unwrapOr(false);
+        // Same wire shape as the Solo series (sourceTier/targetTier/cutoff/gamesRequired/results).
+        sur.profile.promotion = parseRankedProfile(profile).promotion;
+        sur.promotionTop16 = static_cast<int>(profile["promotion"]["requirement"]["top16"].asInt().unwrapOr(0));
+        sur.promotionTop64 = static_cast<int>(profile["promotion"]["requirement"]["top64"].asInt().unwrapOr(0));
         auto const recovery = profile["warningRecoveryLp"].asInt();
         sur.warningRecoveryLp = recovery.isOk() ? std::optional<int>(static_cast<int>(recovery.unwrap())) : std::nullopt;
         sur.standing = parseStanding(root["standing"]);

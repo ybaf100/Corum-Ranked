@@ -452,7 +452,8 @@ public:
         auto const context=preparationContextText(runtime.preparationContext());auto* level=RankedLevelPreparation::get().level();
         m_resume->setVisible(liveBoard && runtime.canReplayCleared());m_resume->setEnabled(!m_motion && !elimination && !m_confirmation && (!m_entrySyncAfter || runtime.serverSyncMillis()>*m_entrySyncAfter));
         m_continue->setVisible(result);m_continue->setEnabled(!m_motion && !elimination && !runtime.creating());
-        auto const surrenderCaption=watching?text("survival-view-board","STANDINGS"):runtime.observing()?text("survival-leave-observer","LEAVE FREE PLAY"):text("surrender","SURRENDER");
+        // Eliminated players keep playing by default; the button only leaves.
+        auto const surrenderCaption=watching?text("survival-view-board","STANDINGS"):runtime.observing()||view.ownEliminated?text("survival-leave","LEAVE"):text("surrender","SURRENDER");
         if(surrenderCaption!=m_surrenderText->getString()){m_surrenderText->setString(surrenderCaption.c_str());ui::fitFullMenuLabel(m_surrenderText,104,22,.29f);}
         m_surrender->setVisible(watching || (nextRound && (runtime.observing() || runtime.canSurrender() || runtime.surrenderPending())));m_surrender->setEnabled(!elimination && !m_motion && (watching || runtime.observing() || runtime.canSurrender()));
         m_liveWatch->setVisible((watching || liveBoard) && runtime.officialRoundCleared() && !runtime.freePlaying());
@@ -476,7 +477,7 @@ public:
         else if(liveBoard)status=text("survival-live-board","LIVE ROUND STATUS");
         else if(view.state=="MAP_SELECTION")status=view.mapError.empty()?text("survival-selecting-map","SELECTING A SERVER MAP..."):text("survival-map-retry","MAP SEARCH FAILED · RETRYING...");
         else if(!preparation.mapReady)status=text("downloading-map","DOWNLOADING MAP...");
-        else if(!preparation.audioReady)status=text("downloading-audio","DOWNLOADING AUDIO...");
+        else if(!preparation.audioReady)status=fmt::format("{} {}%",text("downloading-audio","DOWNLOADING AUDIO..."),static_cast<int>(std::clamp(preparation.audioProgress,0.f,1.f)*100));
         else status=(m_manualMap || m_launchedContext==context)?text("survival-game-running","THE SERVER TIMER CONTINUES. YOU CAN RE-ENTER."):text("survival-auto-entry","READY · ENTERING AUTOMATICALLY...");
         if(elimination && view.state!="CANCELLED"){
             if(now<m_eliminationUntil)status=text("result","RESULT");

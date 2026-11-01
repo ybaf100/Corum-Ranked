@@ -14,6 +14,7 @@ class SurvivalSelectedMapPanel final : public cocos2d::CCLayerColor {
     SurvivalNativeOptions m_options;
     cocos2d::CCLabelBMFont *m_title=nullptr,*m_creator=nullptr,*m_metadata=nullptr,*m_readiness=nullptr,*m_countdown=nullptr,*m_stars=nullptr,*m_rating=nullptr,*m_song=nullptr;
     cocos2d::CCSprite* m_star=nullptr;
+    cocos2d::CCLayerColor *m_progressTrack=nullptr,*m_progressFill=nullptr;
     cocos2d::CCNode* m_difficulty=nullptr;
     CCMenuItemSpriteExtra *m_ldm=nullptr,*m_shake=nullptr,*m_jukebox=nullptr,*m_ready=nullptr;
     cocos2d::CCMenu* m_menu=nullptr;

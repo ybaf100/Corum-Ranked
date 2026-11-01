@@ -254,7 +254,7 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
       }return row.result;
     }
     const inputs=survivalSettlementInputs(match),human=inputs.find(p=>p.playerId===row.human_player_id);if(!human)return null;
-    const rating=await this.survival.settleLp(row.human_player_id,human.eventKey,human.delta,{generation:match.configGeneration,config:match.config});
+    const rating=await this.survival.settleLp(row.human_player_id,human.eventKey,human.delta,{generation:match.configGeneration,config:match.config},{rank:human.rank,playerCount:match.config.matchPlayerCount});
     const ledger=(await this.db.query<{lp_before:number;tier_before:string;warning_before:boolean}>(
       "SELECT lp_before,tier_before,warning_before FROM sur_lp_ledger WHERE player_id=$1 AND event_key=$2",[row.human_player_id,human.eventKey])).rows[0]!;
     const groups=new Set<string>();

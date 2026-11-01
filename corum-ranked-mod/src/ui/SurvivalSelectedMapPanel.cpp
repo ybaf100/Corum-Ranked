@@ -49,6 +49,11 @@ void SurvivalSelectedMapPanel::build(CCSize size,bool thumbnail,bool ldm){
     m_rating=caption({r.creator.x+r.creator.w*.70f,r.creator.y,r.creator.w*.30f,r.creator.h},Gold,FontWeight::ExtraBold);m_rating->setID("survival-selected-map-rating"_spr);
     m_metadata=caption(r.metadata,Cyan,FontWeight::SemiBold);m_readiness=caption(r.readiness,TextMuted,FontWeight::SemiBold);
     m_song=caption(r.song,TextMuted,FontWeight::SemiBold);m_song->setID("survival-selected-map-song"_spr);
+    // Download progress: left half = map (GD reports completion only), right
+    // half = audio (real per-file song/SFX progress from MusicDownloadManager).
+    m_progressTrack=CCLayerColor::create(ccc4(255,255,255,40),r.readiness.w,3*r.scale);m_progressTrack->setPosition({r.readiness.x,r.panel.y+1*r.scale});addChild(m_progressTrack,6);
+    m_progressFill=CCLayerColor::create(ccc4(Cyan.r,Cyan.g,Cyan.b,235),r.readiness.w,3*r.scale);m_progressFill->setAnchorPoint({0,0});m_progressFill->ignoreAnchorPointForPosition(false);
+    m_progressFill->setPosition({r.readiness.x,r.panel.y+1*r.scale});m_progressFill->setScaleX(0);m_progressFill->setID("survival-download-progress"_spr);addChild(m_progressFill,7);
     m_countdown=caption(r.ready,Gold,FontWeight::Black);m_countdown->setID("survival-automatic-entry-countdown"_spr);
     // Verified native frame used by Geode ModsLayer; never an emoji substitute.
     m_star=CCSprite::createWithSpriteFrameName("GJ_starsIcon_001.png");
@@ -133,7 +138,11 @@ void SurvivalSelectedMapPanel::present(CCSize size,bool thumbnail,SurvivalMatchV
     else if(auto wait=SurvivalRuntime::get().selectedPanelWaitMs();wait && *wait>0)
         status=fmt::format(fmt::runtime(i18n::text("survival-entry-wait","ALL READY · ENTERING IN {}s")),(*wait+999)/1000);
     else status=fmt::format("{} {}   /   {} {}",i18n::text("map","MAP"),i18n::text(prep.mapReady?"ready":"loading",prep.mapReady?"READY":"LOADING"),
-        i18n::text("audio","AUDIO"),i18n::text(prep.audioReady?"ready":"loading",prep.audioReady?"READY":"LOADING"));
+        i18n::text("audio","AUDIO"),prep.audioReady?i18n::text("ready","READY"):fmt::format("{}%",static_cast<int>(std::clamp(prep.audioProgress,0.f,1.f)*100)));
+    {   auto const done=prep.mapReady && prep.audioReady;
+        auto const value=(prep.mapReady?.5f:0.f)+.5f*(prep.audioReady?1.f:std::clamp(prep.audioProgress,0.f,1.f));
+        if(m_progressTrack)m_progressTrack->setVisible(!done);
+        if(m_progressFill){m_progressFill->setVisible(!done);m_progressFill->setScaleX(value);}}
     if(status!=m_statusText){m_statusText=status;line(m_readiness,status,r.readiness,.19f,true);}m_readiness->setColor(!prep.error.empty()?Red:prep.mapReady && prep.audioReady?Green:TextMuted);
     setPositionY(static_cast<float>((1-survivalEase(appearance))*-10*r.scale));
     setVisible(appearance>0);setModeLobbyOpacity(this,static_cast<GLubyte>(std::clamp(appearance,0.,1.)*255));

@@ -65,7 +65,7 @@ enum class RuntimeStage { AwaitingUpdate,Ready,Matched};
 struct RankedRuntime {
  struct Result{std::string stageGrade="A";int stageIndex=0;};
  struct View{RuntimeStage stage=RuntimeStage::Ready;int client=0;
-  struct{bool active=false;}promotion;bool demotionWarning=false;
+  struct{bool active=false;}promotion;bool demotionWarning=false;struct{struct{struct{bool active=false;}promotion;bool demotionWarning=false;}profile;}survival;
   struct{std::string state="ROUND_PLAYING",matchId="match",winnerSide="P1",side="P1";bool placement=false;int roundNumber=1;}match;
   struct{std::string runId="run";std::vector<Result> stageResults;}placement;}data;
  static RankedRuntime& get(){static RankedRuntime r;return r;}View const& view()const{return data;}

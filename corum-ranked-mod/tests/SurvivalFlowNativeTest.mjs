@@ -65,7 +65,8 @@ int main(){using namespace corum::ranked;SurvivalRuntime r;r.chooseOutcome(Survi
  r.m_view.roundKey="stage-2";r.m_view.state="PREPARING";assert(r.outcomeChoice()==SurvivalOutcomeChoice::Undecided);r.chooseOutcome(SurvivalOutcomeChoice::PersonalResult);assert(r.outcomeChoice()==SurvivalOutcomeChoice::Undecided);
  r.m_view.state="PLAYING";r.chooseOutcome(SurvivalOutcomeChoice::LiveSpectate);r.m_view.mapGeneration=2;assert(r.outcomeChoice()==SurvivalOutcomeChoice::Undecided);
  r.m_view.ownEliminated=true;r.chooseOutcome(SurvivalOutcomeChoice::Standings);assert(r.outcomeChoice()==SurvivalOutcomeChoice::Standings);r.lock=5;r.chooseOutcome(SurvivalOutcomeChoice::Observe);assert(r.outcomeChoice()==SurvivalOutcomeChoice::Standings);r.lock=0;r.chooseOutcome(SurvivalOutcomeChoice::Observe);assert(r.outcomeChoice()==SurvivalOutcomeChoice::Observe);
- r.m_view.roundKey="stage-3";assert(r.outcomeChoice()==SurvivalOutcomeChoice::Undecided);r.chooseOutcome(SurvivalOutcomeChoice::LiveSpectate);assert(r.outcomeChoice()==SurvivalOutcomeChoice::Undecided);
+ // No post-elimination choice: an eliminated player in a fresh context keeps playing.
+ r.m_view.roundKey="stage-3";assert(r.outcomeChoice()==SurvivalOutcomeChoice::Observe);r.chooseOutcome(SurvivalOutcomeChoice::LiveSpectate);assert(r.outcomeChoice()==SurvivalOutcomeChoice::Observe);
  r.m_view.result.ready=true;r.chooseOutcome(SurvivalOutcomeChoice::PersonalResult);assert(r.outcomeChoice()==SurvivalOutcomeChoice::PersonalResult);
  r.m_view.state="FINAL_RESULT";r.chooseOutcome(SurvivalOutcomeChoice::PersonalResult);assert(r.outcomeChoice()==SurvivalOutcomeChoice::PersonalResult);
  // A legacy match-only saved choice must not capture a new round.

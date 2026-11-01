@@ -132,10 +132,38 @@ export function survivalPlacementLp(firstRank: number, tiedPlayers: number, awar
   return Math.min(...awards.slice(firstRank - 1, firstRank + tiedPlayers - 1));
 }
 
+/** Survival promotion series (per source tier group). One qualifying finish
+ * within the chances promotes; using every chance without one costs LP. */
+export interface SurvivalPromotionRule { readonly top16: number; readonly top64: number; readonly chances: number; }
+export const SURVIVAL_PROMOTION_RULES: Readonly<Partial<Record<RankedTier, SurvivalPromotionRule>>> = Object.freeze({
+  RED: { top16: 10, top64: 40, chances: 3 },
+  AQUA: { top16: 5, top64: 15, chances: 3 },
+  BRONZE: { top16: 2, top64: 5, chances: 5 },
+  SILVER: { top16: 1, top64: 1, chances: 5 },
+});
+export const SURVIVAL_PROMOTION_FAILURE_PENALTY = 50;
+export type SurvivalPromotionMark = "WIN" | "LOSS";
+export interface SurvivalPromotionSeries {
+  readonly sourceTier: string;
+  readonly targetTier: string;
+  /** Target tier minimum LP; the player is held at cutoff - 1 during the series. */
+  readonly cutoff: number;
+  readonly chances: number;
+  readonly top16: number;
+  readonly top64: number;
+  readonly results: readonly SurvivalPromotionMark[];
+}
+/** Official placement of the settled match (best occupied rank) and its format. */
+export interface SurvivalMatchOutcome { readonly rank: number; readonly playerCount: number; }
+export function survivalPromotionPassed(series: Pick<SurvivalPromotionSeries,"top16"|"top64">, outcome: SurvivalMatchOutcome): boolean {
+  return Number.isSafeInteger(outcome.rank) && outcome.rank >= 1 && outcome.rank <= (outcome.playerCount === 64 ? series.top64 : series.top16);
+}
+
 export interface SurvivalRatingProfile {
   readonly lp: number;
   readonly tier: string;
   readonly demotionWarning: boolean;
+  readonly promotion?: SurvivalPromotionSeries | null;
 }
 export interface SurvivalRatingUpdate {
   readonly profile: SurvivalRatingProfile;
@@ -144,18 +172,56 @@ export interface SurvivalRatingUpdate {
   readonly demoted: boolean;
   readonly protected: boolean;
   readonly warningRecoveryLp: number | null;
+  readonly promotionStarted?: boolean;
+  readonly promotionSucceeded?: boolean;
+  readonly promotionFailed?: boolean;
 }
 
-export function updateSurvivalRating(before: SurvivalRatingProfile, delta: number, config: SurvivalConfig): SurvivalRatingUpdate {
+/**
+ * `outcome` (the settled official placement) enables the promotion series:
+ * reaching the next tier's boundary holds LP at boundary - 1 and starts a
+ * series; while it runs, LP is frozen and each settled match is one chance.
+ * Without an outcome (legacy/admin callers) the tier changes immediately.
+ */
+export function updateSurvivalRating(before: SurvivalRatingProfile, delta: number, config: SurvivalConfig,
+  outcome?: SurvivalMatchOutcome): SurvivalRatingUpdate {
   assertConfig(config);
   const index = config.tierBands.findIndex(band => band.tier === before.tier);
   if (index < 0 || !Number.isSafeInteger(before.lp) || before.lp < 0 || !Number.isSafeInteger(delta) ||
       !Number.isSafeInteger(before.lp + delta)) throw new RankedDomainError("INVALID_CONFIG", "Invalid Survival rating update");
   const floor = config.tierBands[index]!.minimumLp;
+  const series = before.promotion ?? null;
+  if (outcome && series) {
+    const results = [...series.results, survivalPromotionPassed(series, outcome) ? "WIN" as const : "LOSS" as const];
+    if (results.at(-1) === "WIN") {
+      const target = config.tierBands.find(band => band.tier === series.targetTier) ?? config.tierBands[Math.min(index + 1, config.tierBands.length - 1)]!;
+      const lp = Math.max(series.cutoff, target.minimumLp);
+      return { profile: { lp, tier: target.tier, demotionWarning: false, promotion: null }, actualDelta: lp - before.lp,
+        promoted: true, demoted: false, protected: false, warningRecoveryLp: null, promotionSucceeded: true };
+    }
+    if (results.length >= series.chances) {
+      const lp = Math.max(floor, series.cutoff - SURVIVAL_PROMOTION_FAILURE_PENALTY);
+      return { profile: { lp, tier: before.tier, demotionWarning: false, promotion: null }, actualDelta: lp - before.lp,
+        promoted: false, demoted: false, protected: false, warningRecoveryLp: null, promotionFailed: true };
+    }
+    return { profile: { lp: before.lp, tier: before.tier, demotionWarning: false, promotion: { ...series, results } }, actualDelta: 0,
+      promoted: false, demoted: false, protected: false, warningRecoveryLp: null };
+  }
   let lp = Math.max(0, before.lp + delta), tier = before.tier, warning = before.demotionWarning;
   let promoted = false, demoted = false, protectedLoss = false;
   const earned = survivalTierForLp(lp, config.tierBands);
   const earnedIndex = config.tierBands.indexOf(earned);
+  const next = config.tierBands[index + 1];
+  const rule = SURVIVAL_PROMOTION_RULES[config.tierBands[index]!.group];
+  if (earnedIndex > index && outcome && next && rule) {
+    // One tier at a time: hold just below the boundary and open the series.
+    const cutoff = next.minimumLp;
+    const held = cutoff - 1;
+    const promotion: SurvivalPromotionSeries = { sourceTier: before.tier, targetTier: next.tier, cutoff,
+      chances: rule.chances, top16: rule.top16, top64: rule.top64, results: [] };
+    return { profile: { lp: held, tier: before.tier, demotionWarning: false, promotion }, actualDelta: held - before.lp,
+      promoted: false, demoted: false, protected: false, warningRecoveryLp: null, promotionStarted: true };
+  }
   if (earnedIndex > index) {
     tier = earned.tier; warning = false; promoted = true;
   } else if (index > 0 && lp < floor) {
@@ -167,7 +233,7 @@ export function updateSurvivalRating(before: SurvivalRatingProfile, delta: numbe
       lp = Math.max(0, floor - config.demotionTargetOffsetLp); warning = false; demoted = true;
     }
   } else if (!config.demotionProtectionEnabled || index === 0 || lp >= floor + config.demotionWarningRecoveryLp) warning = false;
-  const profile = { lp, tier, demotionWarning: warning };
+  const profile = outcome ? { lp, tier, demotionWarning: warning, promotion: null } : { lp, tier, demotionWarning: warning };
   return { profile, actualDelta: lp - before.lp, promoted, demoted, protected: protectedLoss,
     warningRecoveryLp: warning ? floor + config.demotionWarningRecoveryLp : null };
 }

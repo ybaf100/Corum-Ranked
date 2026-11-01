@@ -411,11 +411,12 @@ describe("Survival M5 public HTTP and persistent online game",()=>{
  });
  it("applies online GOLD promotion once and keeps Solo metrics/MMR untouched",async()=>{
    const a=await client(),b=await client();await survival.profile(a.session.playerId);await survival.profile(b.session.playerId);
-   await db.query("UPDATE sur_profiles SET lp=1199,displayed_tier='SILVER' WHERE player_id=$1",[a.session.playerId]);
+   // Active SILVER->GOLD series: an official win promotes to exactly the GOLD boundary.
+   await db.query("UPDATE sur_profiles SET lp=1199,displayed_tier='SILVER',promotion=$2::jsonb WHERE player_id=$1",[a.session.playerId,JSON.stringify({sourceTier:"SILVER",targetTier:"GOLD",cutoff:1200,chances:5,top16:1,top64:1,results:[]})]);
    const solo=(await db.query("SELECT * FROM ranked_profiles ORDER BY player_id")).rows;await Promise.all([join(a),join(b)]);
    now+=180000;await touch();await queue.tickOnce();const id=(await api(a,"/queue/status")).body.matchId as string;
    const m=await prepare(id,[a,b]);await record(a,m,100);await record(b,m,20);now=survivalCurrentRound(m).endsAt!;await touch();await online.tickOnce();
-   expect((await survival.profile(a.session.playerId)).profile).toMatchObject({lp:1249,tier:"GOLD"});
+   expect((await survival.profile(a.session.playerId)).profile).toMatchObject({lp:1200,tier:"GOLD",promotion:null});
    await Promise.all([online.settle(await engine.get(id)),online.settle(await engine.get(id))]);
    expect((await db.query("SELECT * FROM sur_lp_ledger")).rows).toHaveLength(2);
    expect((await db.query("SELECT player_id FROM ranked_achievement_unlocks WHERE achievement_id='gold_reached'")).rows).toEqual([{player_id:a.session.playerId}]);

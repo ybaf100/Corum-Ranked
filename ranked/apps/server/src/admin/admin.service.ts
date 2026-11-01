@@ -218,7 +218,7 @@ export class AdminService {
       if(!Number.isInteger(body.lp) || body.lp!<0 || body.lp!>2147483647)throw new BadRequestException("Enter valid Survival LP");
       const tier=survivalTierForLp(body.lp!,captured.config.tierBands);
       await tx.query(`INSERT INTO sur_profiles(player_id,lp,displayed_tier,lp_reached_at) VALUES($1,$2,$3,$4)
-        ON CONFLICT(player_id) DO UPDATE SET lp=EXCLUDED.lp,displayed_tier=EXCLUDED.displayed_tier,demotion_warning=FALSE,lp_reached_at=EXCLUDED.lp_reached_at,updated_at=EXCLUDED.lp_reached_at`,[players[0],body.lp,tier.tier,now.toISOString()]);
+        ON CONFLICT(player_id) DO UPDATE SET lp=EXCLUDED.lp,displayed_tier=EXCLUDED.displayed_tier,demotion_warning=FALSE,promotion=NULL,lp_reached_at=EXCLUDED.lp_reached_at,updated_at=EXCLUDED.lp_reached_at`,[players[0],body.lp,tier.tier,now.toISOString()]);
       return {ok:true,scope:"SURVIVAL",own:players[0]===session.playerId,message:"Survival LP and tier updated."};
     }
     if(!["RESET_HISTORY","RESET_DB"].includes(body.action))throw new BadRequestException("Unsupported Survival Admin action");
@@ -230,7 +230,7 @@ export class AdminService {
       await tx.query("DELETE FROM sur_map_selection_history");
       await tx.query("DELETE FROM sur_queue_fill_requests");
     }
-    await tx.query(`UPDATE sur_profiles SET lp=$2,displayed_tier=$3,demotion_warning=FALSE,lp_reached_at=$4,updated_at=$4,history_visible_since=$4
+    await tx.query(`UPDATE sur_profiles SET lp=$2,displayed_tier=$3,demotion_warning=FALSE,promotion=NULL,lp_reached_at=$4,updated_at=$4,history_visible_since=$4
       WHERE player_id=ANY($1::uuid[])`,[players,initial,tier.tier,now.toISOString()]);
     return {ok:true,scope:"SURVIVAL",reset:body.action==="RESET_DB",resetPlayer:body.action==="RESET_HISTORY",own:players.includes(session.playerId),
       message:"Survival profile and visible history reset. Solo, accounts, sessions, achievements, AP and title retained."};

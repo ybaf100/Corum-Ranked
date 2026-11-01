@@ -4,14 +4,22 @@ import {publicAchievementTitle} from "../achievement/public-title.js";
 import type { HistoryOptions } from "../history/history-options.js";
 import { survivalHistoryProjection } from "../history/survival-history.js";
 import { BadRequestException, ConflictException, Inject, Injectable, NotImplementedException, ServiceUnavailableException } from "@nestjs/common";
-import { survivalTierForLp, updateSurvivalRating, type SurvivalConfig, type SurvivalRatingUpdate } from "@corum-ranked/rules";
+import { survivalTierForLp, updateSurvivalRating, type SurvivalConfig, type SurvivalMatchOutcome, type SurvivalPromotionSeries, type SurvivalRatingUpdate } from "@corum-ranked/rules";
 import type { SurvivalConfigDocument } from "../config/survival-config.service.js";
 import { AchievementService } from "../achievement/achievement.service.js";
 import { ID_GENERATOR, SERVER_CLOCK, type IdGenerator, type ServerClock } from "../common/runtime.module.js";
 import { SurvivalConfigService } from "../config/survival-config.service.js";
 import { DATABASE, type DatabasePort, type SqlExecutor } from "../database/database.port.js";
 
-interface ProfileRow { player_id: string; lp: number; displayed_tier: string; demotion_warning: boolean; lp_reached_at: Date | string; }
+interface ProfileRow { player_id: string; lp: number; displayed_tier: string; demotion_warning: boolean; lp_reached_at: Date | string; promotion?: SurvivalPromotionSeries | null; }
+/** Same shape the client already parses for the Solo promotion series. */
+export function survivalPromotionView(series: SurvivalPromotionSeries | null | undefined, bands: SurvivalConfig["tierBands"]) {
+  if (!series) return null;
+  const group = (tier: string) => bands.find(b => b.tier === tier)?.group ?? tier;
+  return { sourceTier: group(series.sourceTier), targetTier: group(series.targetTier), cutoff: series.cutoff,
+    gamesRequired: series.chances, winsRequired: 1, winsRemaining: 1, results: series.results,
+    requirement: { top16: series.top16, top64: series.top64 }, remainingChances: Math.max(0, series.chances - series.results.length) };
+}
 interface LadderRow extends ProfileRow { public_title_id?:string|null;public_title_level?:number|null; gd_account_id: string; gd_username: string; rank: number; total: number; }
 
 @Injectable()
@@ -47,7 +55,7 @@ export class SurvivalService {
   private project(row: ProfileRow, config: SurvivalConfig) {
     const band = config.tierBands.find(tier => tier.tier === row.displayed_tier);
     return { lp: Number(row.lp), tierId: row.displayed_tier, tier: band?.group ?? row.displayed_tier,
-      demotionWarning: row.demotion_warning,
+      demotionWarning: row.demotion_warning, promotion: survivalPromotionView(row.promotion, config.tierBands),
       warningRecoveryLp: row.demotion_warning && band ? band.minimumLp + config.demotionWarningRecoveryLp : null,
       lpReachedAt: new Date(row.lp_reached_at).toISOString() };
   }
@@ -90,7 +98,7 @@ export class SurvivalService {
         equippedTitle:publicAchievementTitle(row.public_title_id??null,row.public_title_level??null),
         rank: Number(row.rank), topPercent: Math.ceil(Number(row.rank) / Number(row.total) * 1000) / 10,
         tier: bands.find(band => band.tier === row.displayed_tier)?.group ?? row.displayed_tier,
-        tierId: row.displayed_tier, visibleRankedScore: Number(row.lp), promotion: null,
+        tierId: row.displayed_tier, visibleRankedScore: Number(row.lp), promotion: survivalPromotionView(row.promotion, bands),
         placement: null, placementGames: 0, placementGamesRequired: 0, placementResults: [],
         demotionWarning: row.demotion_warning, wins: publicRecords[row.player_id]?.wins??0, losses: publicRecords[row.player_id]?.losses??0, winStreak:publicRecords[row.player_id]?.winStreak??0, updatedAt: new Date(row.lp_reached_at).toISOString() })),
       total, totalPlayers: total, offset, hasMore: offset + result.rows.length < total,
@@ -135,7 +143,8 @@ export class SurvivalService {
    * A transaction updates protected LP and its warning together with the ledger.
    */
   public async settleLp(playerId: string, eventKey: string, delta: number,
-    captured:Pick<SurvivalConfigDocument,"generation"|"config"> = this.config.getSnapshot()):Promise<SurvivalRatingUpdate & {eventKey:string;serverNow:string}> {
+    captured:Pick<SurvivalConfigDocument,"generation"|"config"> = this.config.getSnapshot(),
+    outcome?: SurvivalMatchOutcome):Promise<SurvivalRatingUpdate & {eventKey:string;serverNow:string}> {
     if (!eventKey.trim() || eventKey.length > 200 || !Number.isSafeInteger(delta)) throw new BadRequestException("Invalid Survival settlement");
     return this.database.transaction(async transaction => {
       // Shared achievement operations lock the Solo profile before metrics.
@@ -152,10 +161,13 @@ export class SurvivalService {
       // Stamp arrival when applying LP after acquiring the profile lock, not
       // when a request first arrived and could still be waiting in a transaction.
       const now = this.clock.now();
-      const update = updateSurvivalRating({ lp: Number(row.lp), tier: row.displayed_tier, demotionWarning: row.demotion_warning }, delta, captured.config);
-      await transaction.query(`UPDATE sur_profiles SET lp=$2,displayed_tier=$3,demotion_warning=$4,updated_at=$5,
+      // The official placement drives the promotion series (one chance per settled match).
+      const update = updateSurvivalRating({ lp: Number(row.lp), tier: row.displayed_tier, demotionWarning: row.demotion_warning,
+        promotion: row.promotion ?? null }, delta, captured.config, outcome);
+      const promotion = outcome ? (update.profile.promotion ?? null) : (row.promotion ?? null);
+      await transaction.query(`UPDATE sur_profiles SET lp=$2,displayed_tier=$3,demotion_warning=$4,updated_at=$5,promotion=$6::jsonb,
         lp_reached_at=CASE WHEN lp<>$2 THEN $5::timestamptz ELSE lp_reached_at END WHERE player_id=$1`,
-      [playerId,update.profile.lp,update.profile.tier,update.profile.demotionWarning,now.toISOString()]);
+      [playerId,update.profile.lp,update.profile.tier,update.profile.demotionWarning,now.toISOString(),promotion?JSON.stringify(promotion):null]);
       const result = { ...update, eventKey, serverNow: now.toISOString() };
       await transaction.query(`INSERT INTO sur_lp_ledger
         (id,player_id,event_key,requested_delta,actual_delta,lp_before,lp_after,tier_before,tier_after,

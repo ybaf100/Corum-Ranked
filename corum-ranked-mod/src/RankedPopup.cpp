@@ -826,7 +826,8 @@ class CorumRankedLayer final : public CCLayerColor {
             ) + fmt::format(":mode:{}:solo:{}:sur:{}:{}:{}:{}:{}:{}:title:{}:{}:ap:{}:{}:size:{}:{}",
                 m_modeTransition.selected() ? static_cast<int>(*m_modeTransition.selected()) : -1,
                 view.soloEnabled,view.survivalEnabled,view.survival.loaded,view.survival.error,
-                view.survival.profile.visibleRankedScore.value_or(-1),view.survival.profile.demotionWarning,
+                view.survival.profile.visibleRankedScore.value_or(-1),
+                fmt::format("{}{}{}",view.survival.profile.demotionWarning,view.survival.profile.promotion.active,view.survival.profile.promotion.results.size()),
                 view.survival.standing.rank.value_or(0),view.survival.standing.total,
                 view.achievements.equippedTitle.achievementId,view.achievements.equippedTitle.level.value_or(0),
                 view.achievements.totalAp,view.achievements.unclaimedRewardCount,
@@ -954,8 +955,9 @@ class CorumRankedLayer final : public CCLayerColor {
             // promotion and demotion warning are mutually exclusive, but this
             // precedence keeps the audio deterministic if stale profile data ever
             // exposes both flags during a refresh.
-            if (view.promotion.active) return RankedAudioMode::LobbyPromotion;
-            if (view.demotionWarning) return RankedAudioMode::LobbyDemotionWarning;
+            // Either mode's series/warning changes the shared lobby BGM.
+            if (view.promotion.active || view.survival.profile.promotion.active) return RankedAudioMode::LobbyPromotion;
+            if (view.demotionWarning || view.survival.profile.demotionWarning) return RankedAudioMode::LobbyDemotionWarning;
             return RankedAudioMode::Lobby;
         };
 
@@ -2196,7 +2198,7 @@ class CorumRankedLayer final : public CCLayerColor {
             view.profileScoreVisible = source.survival.loaded;
             view.standing = source.survival.standing;
             view.placementGames = view.placementGamesRequired = 0;view.resultStreak=source.survival.winStreak;
-            view.placementResults.clear(); view.placement = {}; view.promotion = {};
+            view.placementResults.clear(); view.placement = {}; view.promotion = profile.promotion;
             view.demotionWarning = profile.demotionWarning;
         }
         auto* savedRoot = m_root; auto* savedMenu = m_menu;
@@ -2283,7 +2285,14 @@ class CorumRankedLayer final : public CCLayerColor {
 
         auto* modeName = makeLabel(survival ? "SURVIVAL" : "SOLO RANKED",0.35f,{0,115},survival ? kCyan : kGold,"black");
         corum::ranked::ui::fitMenuLabelWidth(modeName,150,0.35f,0.25f); m_root->addChild(modeName,8);
-        if (survival && source.survival.warningRecoveryLp) {
+        if (survival && source.survival.profile.promotion.active) {
+            auto const& sur = source.survival;
+            auto const text = sur.promotionTop16<=1 && sur.promotionTop64<=1 ? tr("survival-promotion-win","Promotion: win a match") :
+                fmt::format(fmt::runtime(tr("survival-promotion-requirement","Promotion: Top {} (16P) / Top {} (64P)")),sur.promotionTop16,sur.promotionTop64);
+            auto const left = std::max(0,sur.profile.promotion.gamesRequired-static_cast<int>(sur.profile.promotion.results.size()));
+            auto* condition = makeLabel(text+" · "+fmt::format(fmt::runtime(tr("survival-promotion-chances","{} chances left")),left),0.17f,{0,80},kGold,"semibold");
+            corum::ranked::ui::fitMenuLabelWidth(condition,174,0.17f,0.12f); m_root->addChild(condition,8);
+        } else if (survival && source.survival.warningRecoveryLp) {
             auto const text = fmt::format(fmt::runtime(tr("lp-warning-recovery","Clears at {} LP")),*source.survival.warningRecoveryLp);
             auto* condition = makeLabel(text,0.17f,{0,80},kRed,"semibold");
             corum::ranked::ui::fitMenuLabelWidth(condition,174,0.17f,0.12f); m_root->addChild(condition,8);

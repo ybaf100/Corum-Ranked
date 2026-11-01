@@ -127,7 +127,7 @@ namespace fmt{template<class...T>std::string format(std::string text,T const&...
 namespace i18n{std::string text(std::string const&,std::string fallback){return fallback;}}
 std::string text(char const*,char const* fallback){return fallback;}
 struct View{std::string state="ROUND_RESULT",error,mapError;bool ownEliminated=false,resultPending=false;int playerCount=16;matjson::Value result;}view;
-struct Preparation{bool mapReady=true,audioReady=true;}preparation;
+struct Preparation{bool mapReady=true,audioReady=true;float audioProgress=1;}preparation;
 std::string context="r1",m_launchedContext="r1";
 bool liveBoard=false,m_manualMap=false;struct Runtime{int remainingMs()const{return 1000;}}runtime;
 auto m_eliminationUntil=wall+std::chrono::seconds(3);

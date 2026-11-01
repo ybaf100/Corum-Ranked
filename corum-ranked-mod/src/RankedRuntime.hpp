@@ -429,6 +429,8 @@ struct SurvivalView {
     RankedProfileView profile;
     StandingView standing;
     std::optional<int> warningRecoveryLp;
+    // Survival promotion series requirement (best official placement), when active.
+    int promotionTop16=0, promotionTop64=0;
 };
 
 struct RuntimeView {

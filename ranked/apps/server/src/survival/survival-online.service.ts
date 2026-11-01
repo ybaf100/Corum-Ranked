@@ -155,7 +155,7 @@ export class SurvivalOnlineService implements OnApplicationBootstrap,OnApplicati
     const rows=(await this.db.query<ResultRow>("SELECT player_id,participant_id,result FROM sur_online_players WHERE match_id=$1 AND result IS NULL",[match.id])).rows;
     for(const row of rows){
       const input=inputs.find(p=>p.participantId===row.participant_id);if(!input)continue;
-      const rating=await this.survival.settleLp(row.player_id,input.eventKey,input.delta,{generation:match.configGeneration,config:match.config});
+      const rating=await this.survival.settleLp(row.player_id,input.eventKey,input.delta,{generation:match.configGeneration,config:match.config},{rank:input.rank,playerCount:match.config.matchPlayerCount});
       const ledger=(await this.db.query<{lp_before:number;tier_before:string;warning_before:boolean}>("SELECT lp_before,tier_before,warning_before FROM sur_lp_ledger WHERE player_id=$1 AND event_key=$2",[row.player_id,input.eventKey])).rows[0]!;
       const groups=new Set<string>();const bands=match.config.tierBands.filter(b=>{if(groups.has(b.group))return false;groups.add(b.group);return true;}).map(b=>({tier:b.group,minimum:b.minimumLp}));
       const result:SurvivalOnlineResult={matchId:match.id,debug:false,botFilled:match.players.some(p=>p.kind==="BOT"),won:(match.winnerIds??[match.winnerId]).includes(row.participant_id),rank:input.rank,tiedPlayers:input.tiedPlayers,

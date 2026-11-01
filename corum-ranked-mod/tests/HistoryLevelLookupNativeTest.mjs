@@ -93,7 +93,7 @@ struct RankedAudioManager{
 };
 enum class RuntimeStage{Ready,Matched,AwaitingUpdate};
 struct RuntimeView{
- RuntimeStage stage=RuntimeStage::Ready;struct{bool active=false;}promotion;bool demotionWarning=false;
+ RuntimeStage stage=RuntimeStage::Ready;struct{bool active=false;}promotion;bool demotionWarning=false;struct{struct{struct{bool active=false;}promotion;bool demotionWarning=false;}profile;}survival;
  struct{std::string state="ROUND_PLAYING",winnerSide="A",side="A";bool placement=false;int roundNumber=1;}match;
  struct{std::string runId;struct Stage{int stageIndex=1;std::string stageGrade="A";};std::vector<Stage>stageResults;}placement;
 };

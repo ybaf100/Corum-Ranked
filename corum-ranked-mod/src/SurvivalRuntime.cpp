@@ -346,7 +346,10 @@ SurvivalFlowStage SurvivalRuntime::flowStage() const {
     return screen==SurvivalResultScreen::Ceremony?SurvivalFlowStage::Ceremony:screen==SurvivalResultScreen::Personal?SurvivalFlowStage::PersonalResult:SurvivalFlowStage::ScoreAnimation;
 }
 SurvivalOutcomeChoice SurvivalRuntime::outcomeChoice() const {
-    if(Mod::get()->getSavedValue<std::string>("survival-outcome-context")!=optionsContext())return SurvivalOutcomeChoice::Undecided;
+    // No post-elimination choice: an eliminated player keeps playing (free play)
+    // until they explicitly leave, which stores a choice for this context.
+    if(Mod::get()->getSavedValue<std::string>("survival-outcome-context")!=optionsContext())
+        return m_view.ownEliminated && m_view.state!="FINAL_RESULT" && m_view.state!="CANCELLED"?SurvivalOutcomeChoice::Observe:SurvivalOutcomeChoice::Undecided;
     auto const choice=Mod::get()->getSavedValue<int>("survival-outcome-choice",0);
     return choice==1&&m_view.ownEliminated?SurvivalOutcomeChoice::Observe:choice==2&&(m_view.state=="FINAL_RESULT"||(m_view.ownEliminated&&m_view.result.isObject()))?SurvivalOutcomeChoice::PersonalResult:choice==3&&officialRoundCleared()?SurvivalOutcomeChoice::LiveSpectate:choice==4&&m_view.ownEliminated?SurvivalOutcomeChoice::Standings:SurvivalOutcomeChoice::Undecided;
 }

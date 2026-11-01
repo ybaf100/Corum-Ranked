@@ -2658,5 +2658,21 @@
   "spectator-seeking": {
     "en": "Moving to the live position...",
     "ko": "실시간 위치로 이동 중..."
+  },
+  "survival-promotion-requirement": {
+    "en": "Promotion: Top {} (16P) / Top {} (64P)",
+    "ko": "승격전: 16인 Top {} / 64인 Top {}"
+  },
+  "survival-promotion-win": {
+    "en": "Promotion: win a match",
+    "ko": "승격전: 우승하기"
+  },
+  "survival-promotion-chances": {
+    "en": "{} chances left",
+    "ko": "남은 기회 {}"
+  },
+  "survival-leave": {
+    "en": "LEAVE",
+    "ko": "나가기"
   }
 }

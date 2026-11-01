@@ -403,8 +403,8 @@ describe("Survival M4 persistent debug game",()=>{
     m=await prepare(m);await record(m,50);expect(sessions.assertEnvironment).toHaveBeenCalledWith(mods);
   });
   it("awards Debug Survival achievements and GOLD once through ordinary Claim and title validation",async()=>{
-    await survival.profile(session.playerId);await db.query("UPDATE sur_profiles SET lp=1199,displayed_tier='SILVER'");
-    const first=await debug.create(session,body(1));expect(first.result).toMatchObject({promoted:true,profileAfter:{tier:"GOLD",lp:1249}});
+    await survival.profile(session.playerId);await db.query("UPDATE sur_profiles SET lp=1199,displayed_tier='SILVER',promotion=$1::jsonb",[JSON.stringify({sourceTier:"SILVER",targetTier:"GOLD",cutoff:1200,chances:5,top16:1,top64:1,results:[]})]);
+    const first=await debug.create(session,body(1));expect(first.result).toMatchObject({promoted:true,profileAfter:{tier:"GOLD",lp:1200}});
     await debug.acknowledge(first.matchId,session);const second=await debug.create(session,body(1));
     await Promise.all([debug.view(second.matchId,session),debug.tickOnce()]);
     expect((await db.query("SELECT * FROM ranked_achievement_unlocks WHERE achievement_id='gold_reached'")).rows).toHaveLength(1);

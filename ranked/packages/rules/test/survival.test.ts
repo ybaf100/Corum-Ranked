@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SURVIVAL_CONFIG as config, survivalPlacementLp, survivalTierForLp, updateSurvivalRating, validateSurvivalConfig } from "../src/survival.js";
+import { SURVIVAL_PROMOTION_RULES, DEFAULT_SURVIVAL_CONFIG as config, survivalPlacementLp, survivalTierForLp, updateSurvivalRating, validateSurvivalConfig } from "../src/survival.js";
 
 describe("independent Survival M1 rules", () => {
   it("validates all agreed defaults and rejects unsafe or unsupported configuration", () => {
@@ -35,5 +35,37 @@ describe("independent Survival M1 rules", () => {
     expect(demoted.demoted).toBe(true);
     expect(updateSurvivalRating({ lp: 10, tier: "RED", demotionWarning: false }, -55, config).profile.lp).toBe(0);
     expect(updateSurvivalRating({ lp: 600, tier: "BRONZE", demotionWarning: false }, -10, { ...config, demotionProtectionEnabled: false }).profile.lp).toBe(550);
+  });
+});
+
+describe("Survival promotion series", () => {
+  const at16 = (rank: number) => ({ rank, playerCount: 16 });
+  const at64 = (rank: number) => ({ rank, playerCount: 64 });
+  it("holds below the boundary and opens a RED->AQUA series instead of promoting", () => {
+    const u = updateSurvivalRating({ lp: 290, tier: "RED", demotionWarning: false }, 30, config, at16(3));
+    expect(u.promotionStarted).toBe(true);expect(u.profile.lp).toBe(299);expect(u.profile.tier).toBe("RED");
+    expect(u.profile.promotion).toMatchObject({ sourceTier: "RED", targetTier: "AQUA", cutoff: 300, chances: 3, top16: 10, top64: 40, results: [] });
+    expect(SURVIVAL_PROMOTION_RULES).toMatchObject({ AQUA: { top16: 5, top64: 15, chances: 3 }, BRONZE: { top16: 2, top64: 5, chances: 5 }, SILVER: { top16: 1, top64: 1, chances: 5 } });
+  });
+  it("promotes on the first qualifying finish and freezes LP while the series runs", () => {
+    const start = updateSurvivalRating({ lp: 290, tier: "RED", demotionWarning: false }, 30, config, at16(1)).profile;
+    const miss = updateSurvivalRating(start, 50, config, at16(11));
+    expect(miss.actualDelta).toBe(0);expect(miss.profile.promotion?.results).toEqual(["LOSS"]);expect(miss.profile.lp).toBe(299);
+    const pass = updateSurvivalRating(miss.profile, -20, config, at64(40));
+    expect(pass.promotionSucceeded).toBe(true);expect(pass.profile).toEqual({ lp: 300, tier: "AQUA", demotionWarning: false, promotion: null });
+  });
+  it("costs 50 LP after every chance is used without a qualifying finish", () => {
+    let profile = updateSurvivalRating({ lp: 880, tier: "BRONZE", demotionWarning: false }, 40, config, at16(5)).profile;
+    expect(profile.promotion).toMatchObject({ targetTier: "SILVER", chances: 5, top16: 2, top64: 5 });
+    for (let i = 0; i < 4; i++) { const u = updateSurvivalRating(profile, 10, config, at16(3)); expect(u.promotionFailed).toBeFalsy(); profile = u.profile; }
+    const failed = updateSurvivalRating(profile, 10, config, at64(6));
+    expect(failed.promotionFailed).toBe(true);expect(failed.profile).toEqual({ lp: 850, tier: "BRONZE", demotionWarning: false, promotion: null });
+  });
+  it("SILVER->GOLD requires a win; Gold has no further series; legacy callers promote directly", () => {
+    const start = updateSurvivalRating({ lp: 1190, tier: "SILVER", demotionWarning: false }, 20, config, at16(1)).profile;
+    expect(updateSurvivalRating(start, 0, config, at16(2)).profile.promotion?.results).toEqual(["LOSS"]);
+    expect(updateSurvivalRating(start, 0, config, at64(1)).profile.tier).toBe("GOLD");
+    expect(updateSurvivalRating({ lp: 1300, tier: "GOLD", demotionWarning: false }, 50, config, at16(1)).profile).toEqual({ lp: 1350, tier: "GOLD", demotionWarning: false, promotion: null });
+    expect(updateSurvivalRating({ lp: 290, tier: "RED", demotionWarning: false }, 30, config).profile.tier).toBe("AQUA");
   });
 });

@@ -1,3 +1,11 @@
+# v0.5.0-beta.130
+
+- Survival promotion series (modelled on Solo): reaching the next tier boundary holds the rating at cutoff-1 and opens a series. RED->AQUA: Top 10 (16P) / Top 40 (64P), 3 chances; AQUA->BRONZE: Top 5 / Top 15, 3 chances; BRONZE->SILVER: Top 2 / Top 5, 5 chances; SILVER->GOLD: win the match, 5 chances. One qualifying finish promotes; running out of chances costs 50 points (never below the tier floor). Rating does not move during a series. Settlement stays idempotent through the existing ledger; new nullable column sur_profiles.promotion (migration 0037). Admin LP set/reset clears an open series.
+- The Survival card shows the active series requirement and remaining chances. Lobby BGM switches to the promotion / demotion-warning theme when either Solo or Survival has an active series / warning.
+- No post-elimination choice: an eliminated player keeps playing (free play) automatically, and the bottom-right SURRENDER button turns into LEAVE immediately.
+- Map/song download progress bar on the selected-map panel and percentage in the status line. GD level download only reports completion (half of the bar); song/SFX progress is real.
+- Actual GD/device behaviour is unverified.
+
 # v0.5.0-beta.129
 
 - Elimination order follows the result board: the motion starts at the last (bottom-right) card and walks back to the best-placed eliminated card, so tied ranks go in reverse displayed order (board 14 14 14 17 18 19 20 20 22 -> 22, 20 (second), 20 (first), 19, 18, 17, 14, 14, 14). beta.128 sorted ties by participant ID.
