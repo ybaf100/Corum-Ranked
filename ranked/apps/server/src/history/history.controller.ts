@@ -1,6 +1,6 @@
 import type { HistoryOrder, HistoryResult } from "./history-options.js";
 import { Controller, Get, Header, Query, Param, UseGuards } from "@nestjs/common";
-import { IsIn, IsOptional, IsUUID } from "class-validator";
+import { IsIn, IsOptional, IsUUID, Matches } from "class-validator";
 import { CurrentSession } from "../session/current-session.decorator.js";
 import { SessionGuard } from "../session/session.guard.js";
 import type { RankedSessionContext } from "../session/session.types.js";
@@ -15,7 +15,7 @@ export class HistoryQueryDto {
   @IsOptional() @IsIn(['ALL','WIN','LOSS','CHAMPION','PODIUM','ELIMINATED','IN_PROGRESS']) public result?:HistoryResult;
   @IsOptional() @IsIn(['true','false']) public all?:string;
 }
-export class HistoryDetailQueryDto { @IsOptional() @IsIn(['true','false']) public all?:string; }
+export class HistoryDetailQueryDto { @IsOptional() @IsIn(['true','false']) public all?:string; @IsOptional() @Matches(/^[A-Za-z0-9:_-]{1,80}$/) public participant?:string; }
 
 class HistoryDetailParams {
   @IsIn(['SOLO_RANKED','SURVIVAL']) public mode!: 'SOLO_RANKED'|'SURVIVAL';
@@ -39,7 +39,8 @@ export class HistoryController {
   @Get(':mode/:matchId')
   @Header('Cache-Control','no-store')
   public detail(@CurrentSession() session:RankedSessionContext,@Param() params:HistoryDetailParams,@Query() query:HistoryDetailQueryDto){
-    return this.history.detail(session,params.mode,params.matchId,everyoneAllowed(session,query.all));
+    const everyone=everyoneAllowed(session,query.all);
+    return this.history.detail(session,params.mode,params.matchId,everyone,everyone?query.participant:undefined);
   }
 
 }

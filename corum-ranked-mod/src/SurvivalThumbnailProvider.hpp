@@ -29,6 +29,8 @@ class SurvivalThumbnailProvider final : public cocos2d::CCNode {
     std::map<std::string,Entry> m_cache;
     std::map<std::string,std::int64_t> m_negative;
     std::string m_context,m_reveal,m_poolMatch,m_poolReveal;
+    // Lobby prewarm paces texture uploads; the disk cache is trimmed only after writes.
+    std::int64_t m_lastUploadAt=0;bool m_diskDirty=false;std::int64_t m_lastDiskTrimAt=0;
     std::vector<std::uint64_t> m_candidates;
     void candidate(std::uint64_t id);
     void seedFromDisk(std::uint64_t selected,std::size_t salt);

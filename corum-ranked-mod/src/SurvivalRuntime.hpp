@@ -64,6 +64,7 @@ public:
     SurvivalFlowStage flowStage() const;
     std::string resultFlowKey() const;
     void completeResultScreen(bool score);
+    void markPersonalResultRequested();
     void chooseOutcome(SurvivalOutcomeChoice);
     bool observing() const{return m_view.ownEliminated && outcomeChoice()==SurvivalOutcomeChoice::Observe;}
     int watchLockSeconds() const;

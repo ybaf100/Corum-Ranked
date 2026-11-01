@@ -38,12 +38,12 @@ export class HistoryService {
     matches.sort((a,b)=>Number(Boolean(b.inProgress))-Number(Boolean(a.inProgress)) ||
       ((a.finishedAt??a.createdAt??'').localeCompare(b.finishedAt??b.createdAt??'')*(options.order==='OLDEST'?1:-1)) ||
       a.matchId.localeCompare(b.matchId)||a.mode.localeCompare(b.mode));
-    const page=matches.slice(0,30);
+    const page=matches.slice(0,options.everyone?100:30);
     return { scope, matches:page,currentPlayers:await this.currentPlayers(page), serverNow: this.clock.now().toISOString() };
   }
-  public async detail(session:RankedSessionContext,mode:Exclude<HistoryScope,'ALL'>,matchId:string,everyone=false){
-    const result=mode==='SURVIVAL'?await this.survival.history(session.playerId,{matchId,everyone}):await this.solo.history(session,{matchId,everyone});
-    const match=result.matches.find(m=>m.matchId===matchId);
+  public async detail(session:RankedSessionContext,mode:Exclude<HistoryScope,'ALL'>,matchId:string,everyone=false,participantId?:string){
+    const result=mode==='SURVIVAL'?await this.survival.history(session.playerId,{matchId,everyone,...(participantId?{participantId}:{})}):await this.solo.history(session,{matchId,everyone});
+    const match=result.matches.find(m=>m.matchId===matchId&&(!participantId||(m as {myParticipantId?:string}).myParticipantId===participantId));
     if(!match)throw new NotFoundException('Match history is unavailable');
     return {match:{...match,mode},currentPlayers:await this.currentPlayers([match]),serverNow:this.clock.now().toISOString()};
   }

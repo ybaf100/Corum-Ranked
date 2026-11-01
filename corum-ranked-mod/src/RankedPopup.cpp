@@ -6055,7 +6055,7 @@ class CorumRankedLayer final : public CCLayerColor {
         if(m_historyListScroll)m_historyListOffset=m_historyListScroll->m_contentLayer->getPositionY();
         m_historyIndex=static_cast<std::size_t>(index);m_historySelectedId=rows[m_historyIndex].matchId;
         m_historyRound.clear();m_historyTabPage=0;m_page=Page::HistoryDetail;
-        RankedRuntime::get().fetchHistoryDetail(rows[m_historyIndex].mode,m_historySelectedId,true);
+        RankedRuntime::get().fetchHistoryDetail(rows[m_historyIndex].mode,m_historySelectedId,true,rows[m_historyIndex].participantId);
     }
     void onHistoryOrder(CCObject*) {m_historyOrder=m_historyOrder=="NEWEST"?"OLDEST":"NEWEST";m_historyListOffset.reset();onHistory(nullptr);}
     void onHistoryFilter(CCObject*) {
@@ -6073,7 +6073,7 @@ class CorumRankedLayer final : public CCLayerColor {
     void closeHistoryFilter(){if(m_historyFilterPopup)if(auto popup=m_historyFilterPopup->lock())popup->dismiss();m_historyFilterPopup.reset();}
     void onHistoryRefresh(CCObject*) {
         auto const& rows=RankedRuntime::get().view().history;
-        if(m_page==Page::HistoryDetail&&m_historyIndex<rows.size())RankedRuntime::get().fetchHistoryDetail(rows[m_historyIndex].mode,rows[m_historyIndex].matchId,true);
+        if(m_page==Page::HistoryDetail&&m_historyIndex<rows.size())RankedRuntime::get().fetchHistoryDetail(rows[m_historyIndex].mode,rows[m_historyIndex].matchId,true,rows[m_historyIndex].participantId);
         else {if(m_historyListScroll)m_historyListOffset=m_historyListScroll->m_contentLayer->getPositionY();onHistory(nullptr);}
     }
     void onHistoryRound(CCObject* sender) {

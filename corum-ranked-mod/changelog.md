@@ -1,3 +1,10 @@
+# v0.5.0-beta.145
+
+- Survival: after elimination, LEAVE stored an undecided outcome, which left the player on the standings board with "RANK FIXED · SETTLING LP..." and no action. LEAVE now goes to the personal result (pending until LP is settled, then the score presentation). The settling text no longer shows once the eliminated player's result has arrived.
+- Survival lobby first entry hitch: the lobby prewarm decoded and uploaded ~12 thumbnails (~20 ms GPU upload each) in consecutive frames and rescanned the whole disk cache after every upload. Prewarm uploads are now paced (one per 120 ms) and the disk cache is trimmed only after network writes (at most every 3 s).
+- Debug ALL RECORDS: Survival now lists every player's own record in every match (not only the winner's), with per-player details; up to 100 rows.
+- Actual GD/device behaviour is unverified.
+
 # v0.5.0-beta.144
 
 - Debug build: Solo END ROUND is also in the in-level Pause menu (next to the surrender X), since a live Solo round cannot be left to the board. Same server rule: Debug build session + Debug Bot match + live Round only.

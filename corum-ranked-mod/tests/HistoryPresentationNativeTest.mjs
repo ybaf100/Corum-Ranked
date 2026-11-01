@@ -80,7 +80,7 @@ struct RankedRuntime{
  geode::async::TaskHolder<web::WebResponse>m_historyRequest,m_historyDetailRequest;
  struct{bool historyLoading=false,historyDetailLoading=false;std::string historyError,historyDetailError;std::uint64_t historyRevision=0,revision=0;HistoryScope historyScope=HistoryScope::All;std::vector<HistoryMatchView>history;}m_view;
  std::string endpoint(std::string const&s){return s;}void observeServerNow(matjson::Value const&){}
- void fetchHistoryScope(HistoryScope);void fetchHistoryDetail(RankedMode,std::string const&,bool refresh=false);void cancelHistoryReads();void setHistoryFilters(std::string,std::string);
+ void fetchHistoryScope(HistoryScope);void fetchHistoryDetail(RankedMode,std::string const&,bool refresh=false,std::string const& participantId={});void cancelHistoryReads();void setHistoryFilters(std::string,std::string);
 };
 ${method(runtime,'static corum::ranked::HistoryMatchView parseHistoryMatch(')}
 ${method(runtime,'void RankedRuntime::fetchHistoryScope(')}

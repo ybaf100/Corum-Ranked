@@ -2675,6 +2675,7 @@ void RankedRuntime::queueAgain() {
 static corum::ranked::HistoryMatchView parseHistoryMatch(matjson::Value const& item) {
     using namespace corum::ranked;
     HistoryMatchView history;
+    history.participantId = item["myParticipantId"].asString().unwrapOr("");
     history.record=item;
     history.detailsLoaded=item["detailsLoaded"].asBool().unwrapOr(false);
     history.inProgress=item["inProgress"].asBool().unwrapOr(false);
@@ -2780,27 +2781,27 @@ void RankedRuntime::cancelHistoryReads() {
     m_view.historyLoading=false;m_view.historyDetailLoading=false;
 }
 
-void RankedRuntime::fetchHistoryDetail(RankedMode mode,std::string const& matchId,bool refresh) {
+void RankedRuntime::fetchHistoryDetail(RankedMode mode,std::string const& matchId,bool refresh,std::string const& participantId) {
     if(m_sessionToken.empty() || !m_rankedOpen || matchId.empty())return;
-    auto item=std::find_if(m_view.history.begin(),m_view.history.end(),[&](auto const& v){return v.matchId==matchId && v.mode==mode;});
+    auto item=std::find_if(m_view.history.begin(),m_view.history.end(),[&](auto const& v){return v.matchId==matchId && v.mode==mode && v.participantId==participantId;});
     if(item==m_view.history.end() || (item->detailsLoaded&&!refresh) || (m_view.historyDetailLoading&&m_historyDetailMatch==matchId))return;
     m_historyDetailRequest.cancel();auto const generation=++m_historyDetailGeneration;
     auto const session=m_sessionGeneration,list=m_historyGeneration;
     m_historyDetailMatch=matchId;m_view.historyDetailLoading=true;m_view.historyDetailError.clear();++m_view.historyRevision;++m_view.revision;
     auto request=baseRequest(m_sessionToken);
     auto const modeKey=mode==RankedMode::Survival?"SURVIVAL":"SOLO_RANKED";
-    m_historyDetailRequest.spawn(request.get(endpoint(std::string("/api/ranked/history/")+modeKey+"/"+matchId+(m_historyAllRecords?"?all=true":""))),
-        [this,generation,session,list,mode,matchId](web::WebResponse response){
+    m_historyDetailRequest.spawn(request.get(endpoint(std::string("/api/ranked/history/")+modeKey+"/"+matchId+(m_historyAllRecords?"?all=true"+(participantId.empty()?std::string():"&participant="+participantId):std::string()))),
+        [this,generation,session,list,mode,matchId,participantId](web::WebResponse response){
             if(!m_rankedOpen || generation!=m_historyDetailGeneration || session!=m_sessionGeneration || list!=m_historyGeneration)return;
             m_view.historyDetailLoading=false;
             if(!successful(response))m_view.historyDetailError=responseError(response);
             else {
                 auto const root=response.json().unwrapOr(matjson::Value());auto const entry=root["match"];
                 auto replacement=parseHistoryMatch(entry);if(replacement.record.isObject())replacement.record["currentPlayers"]=root["currentPlayers"];
-                if(replacement.matchId!=matchId || replacement.mode!=mode || !replacement.detailsLoaded)m_view.historyDetailError="Invalid match history detail";
+                if(replacement.matchId!=matchId || replacement.mode!=mode || replacement.participantId!=participantId || !replacement.detailsLoaded)m_view.historyDetailError="Invalid match history detail";
                 else {
                     observeServerNow(root);
-                    auto target=std::find_if(m_view.history.begin(),m_view.history.end(),[&](auto const& v){return v.matchId==matchId && v.mode==mode;});
+                    auto target=std::find_if(m_view.history.begin(),m_view.history.end(),[&](auto const& v){return v.matchId==matchId && v.mode==mode && v.participantId==participantId;});
                     if(target!=m_view.history.end())*target=std::move(replacement);
                 }
             }

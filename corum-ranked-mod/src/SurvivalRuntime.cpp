@@ -688,9 +688,16 @@ bool SurvivalRuntime::armClearedReplay(GJGameLevel* level,CCScene* origin){
     m_freePlayOrigin.emplace(origin);m_freePlayNativeQuitFinished=false;m_freePlayQuitLevel=nullptr;m_freePlayQuitScene.reset();
     log::info("[SurvivalReplay] local-only cleared replay match={} round={} level={}",m_view.id,m_view.roundKey,m_view.map.levelId);return true;
 }
+void SurvivalRuntime::markPersonalResultRequested(){
+    Mod::get()->setSavedValue(resultFlowKey()+":requested",true);(void)Mod::get()->saveData();
+}
 void SurvivalRuntime::leaveObserver(){
     if(!observing())return;
     chooseOutcome(SurvivalOutcomeChoice::Undecided);
+    // Leaving after elimination goes to the personal result (pending until the
+    // server settles LP). An undecided eliminated player had no screen with any
+    // action and stayed on the standings board ("RANK FIXED · SETTLING LP").
+    markPersonalResultRequested();
     if(m_freePlay.active && m_freePlay.observer)m_freePlay.returnRequested=true;
     pumpFreePlayReturn();
 }

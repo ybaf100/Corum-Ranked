@@ -262,6 +262,8 @@ struct HistoryMatchView {
     matjson::Value survivalRecord;
     RankedMode mode = RankedMode::SoloRanked;
     std::string matchId;
+    // Survival row owner; distinguishes per-player rows in Debug ALL RECORDS.
+    std::string participantId;
     std::string finishedAt;
     std::string side;
     std::string opponentName;
@@ -527,7 +529,7 @@ public:
     void fetchHistory(RankedMode mode = RankedMode::SoloRanked);
     void fetchHistoryScope(HistoryScope scope);
     void setHistoryFilters(std::string order,std::string result);
-    void fetchHistoryDetail(RankedMode mode,std::string const& matchId,bool refresh=false);
+    void fetchHistoryDetail(RankedMode mode,std::string const& matchId,bool refresh=false,std::string const& participantId={});
     void cancelHistoryReads();
     void fetchSurvivalProfile();
     void fetchModeAvailability();

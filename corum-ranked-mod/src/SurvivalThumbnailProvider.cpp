@@ -201,7 +201,10 @@ void SurvivalThumbnailProvider::cache(Decode const& work,Decoded decoded){
     if(!texture->initWithImage(decoded.image.get())){failed(work.job,422);return;}
     auto const k=key(work.job);
     m_cache[k]={texture,static_cast<std::size_t>(decoded.image->getWidth())*decoded.image->getHeight()*4,now(),work.job.id,work.job.medium};
-    m_negative.erase(k);trim();trimDisk();
+    m_negative.erase(k);trim();m_lastUploadAt=now();
+    // Directory scans + per-file stats on the main thread cost a visible hitch
+    // per upload. Only a network write changes the disk cache.
+    if(work.job.network)m_diskDirty=true;
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
     log::info("[SurvivalThumbnail] decoded id={} medium={} source={} decodeMs={} textureUploadMs={} texture={}x{}",work.job.id,work.job.medium,work.job.network?"network":"disk",decoded.millis,now()-uploadBegan,decoded.image->getWidth(),decoded.image->getHeight());
 #endif
@@ -225,14 +228,22 @@ void SurvivalThumbnailProvider::trimDisk(){
         auto size=entry.file_size(ec);if(size>SurvivalThumbnailMaxBytes){std::filesystem::remove(entry.path(),ec);continue;}
         files.push_back(entry);total+=size;
     }
-    std::sort(files.begin(),files.end(),[&](auto const& a,auto const& b){return a.last_write_time(ec)<b.last_write_time(ec);});
+    std::vector<std::pair<std::filesystem::file_time_type,std::filesystem::directory_entry>> dated;dated.reserve(files.size());
+    for(auto const& file:files)dated.push_back({file.last_write_time(ec),file});
+    std::sort(dated.begin(),dated.end(),[](auto const& a,auto const& b){return a.first<b.first;});
+    for(std::size_t i=0;i<dated.size();++i)files[i]=dated[i].second;
     auto remaining=files.size();
     for(auto const& file:files){if(remaining<=SurvivalThumbnailDiskFiles && total<=SurvivalThumbnailDiskBytes)break;
         auto size=file.file_size(ec);if(std::filesystem::remove(file.path(),ec)){total-=std::min(total,size);--remaining;}
     }
 }
 void SurvivalThumbnailProvider::update(float){
-    if(m_decode && m_decode->result.wait_for(std::chrono::seconds(0))==std::future_status::ready){
+    if(m_diskDirty && now()-m_lastDiskTrimAt>3000){m_diskDirty=false;m_lastDiskTrimAt=now();trimDisk();}
+    // Lobby prewarm: at most one ~20 ms GPU upload every 120 ms, so entering the
+    // Survival lobby does not stall a dozen consecutive frames. Live reveals keep
+    // their immediate pace.
+    auto const pacing=m_context.rfind("prewarm:",0)==0 && now()-m_lastUploadAt<120;
+    if(!pacing && m_decode && m_decode->result.wait_for(std::chrono::seconds(0))==std::future_status::ready){
         // Retire the completed ticket before enqueuing a cache-miss/network
         // retry; otherwise duplicate suppression sees its own finished decode.
         auto work=std::move(*m_decode);m_decode.reset();

@@ -500,7 +500,7 @@ public:
         if(view.state=="CANCELLED")status=text("survival-cancelled","MATCH CANCELLED");
         else if(result)status="";
         else if(intro)status=fmt::format("{} · {} / {}",text("matchmaking","MATCHMAKING"),view.playerCount,view.playerCount);
-        else if(view.resultPending || view.state=="FINAL_RESULT" || view.ownEliminated)status=text("survival-result-pending","RANK FIXED · SETTLING LP...");
+        else if(view.resultPending || view.state=="FINAL_RESULT" || (view.ownEliminated && !view.result.isObject()))status=text("survival-result-pending","RANK FIXED · SETTLING LP...");
         else if(!view.error.empty())status=i18n::text(view.error,view.error);
         else if(liveBoard)status=text("survival-live-board","LIVE ROUND STATUS");
         else if(view.state=="MAP_SELECTION")status=view.mapError.empty()?text("survival-selecting-map","SELECTING A SERVER MAP..."):text("survival-map-retry","MAP SEARCH FAILED · RETRYING...");
