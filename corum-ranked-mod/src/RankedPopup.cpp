@@ -1618,7 +1618,8 @@ class CorumRankedLayer final : public CCLayerColor {
         int slots,
         CCPoint center,
         float spacing = 13.0f,
-        float scale = 0.24f
+        float scale = 0.24f,
+        std::vector<int> const* ranks = nullptr
     ) {
         slots = std::clamp(slots, 1, 9);
         auto const totalWidth = spacing * static_cast<float>(slots - 1);
@@ -1626,11 +1627,13 @@ class CorumRankedLayer final : public CCLayerColor {
             std::string text = "-";
             ccColor3B color = ccc3(145, 151, 166);
             if (index < static_cast<int>(results.size())) {
+                // Survival series show the achieved rank instead of O/X.
+                auto const rank = ranks && index < static_cast<int>(ranks->size()) ? (*ranks)[static_cast<std::size_t>(index)] : 0;
                 if (results[index] == "WIN") {
-                    text = "O";
+                    text = rank > 0 ? std::to_string(rank) : "O";
                     color = kGreen;
                 } else if (results[index] == "LOSS") {
-                    text = "X";
+                    text = rank > 0 ? std::to_string(rank) : "X";
                     color = kRed;
                 }
             }
@@ -2248,7 +2251,8 @@ class CorumRankedLayer final : public CCLayerColor {
             auto* pending = makeLabel(view.survival.error.empty() ? tr("syncing", "SYNCING...") : tr("connection-issue", "CONNECTION ISSUE"), 0.25f, {leftCenter.x,leftCenter.y - 53}, kGold, "semibold");
             m_root->addChild(pending,4);
         } else if (profile.promotion.active) {
-            addRatingMarks(profile.promotion.results, profile.promotion.gamesRequired, {leftCenter.x, leftCenter.y - 49.0f}, 16.0f, 0.30f);
+            addRatingMarks(profile.promotion.results, profile.promotion.gamesRequired, {leftCenter.x, leftCenter.y - 49.0f}, 16.0f, 0.30f,
+                survival ? &source.survival.promotionRanks : nullptr);
         } else {
             if (view.profileTier == "GOLD") {
                 auto* rating = corum::ranked::ui::standingLine(standing,0.42f,view.profileScore);
@@ -2287,10 +2291,11 @@ class CorumRankedLayer final : public CCLayerColor {
         corum::ranked::ui::fitMenuLabelWidth(modeName,150,0.35f,0.25f); m_root->addChild(modeName,8);
         if (survival && source.survival.profile.promotion.active) {
             auto const& sur = source.survival;
-            auto const text = sur.promotionTop16<=1 && sur.promotionTop64<=1 ? tr("survival-promotion-win","Promotion: win a match") :
-                fmt::format(fmt::runtime(tr("survival-promotion-requirement","Promotion: Top {} (16P) / Top {} (64P)")),sur.promotionTop16,sur.promotionTop64);
-            auto const left = std::max(0,sur.profile.promotion.gamesRequired-static_cast<int>(sur.profile.promotion.results.size()));
-            auto* condition = makeLabel(text+" · "+fmt::format(fmt::runtime(tr("survival-promotion-chances","{} chances left")),left),0.17f,{0,80},kGold,"semibold");
+            // Requirement under the current 16/64 setting; chances are the slots below the tier.
+            auto const required = sur.promotionRequiredRank > 0 ? sur.promotionRequiredRank : sur.promotionTop16;
+            auto const text = required<=1 ? tr("survival-promotion-win","Promotion: win a match") :
+                fmt::format(fmt::runtime(tr("survival-promotion-requirement","Promotion: finish rank {} or better")),required);
+            auto* condition = makeLabel(text,0.17f,{0,80},kGold,"semibold");
             corum::ranked::ui::fitMenuLabelWidth(condition,174,0.17f,0.12f); m_root->addChild(condition,8);
         } else if (survival && source.survival.warningRecoveryLp) {
             auto const text = fmt::format(fmt::runtime(tr("lp-warning-recovery","Clears at {} LP")),*source.survival.warningRecoveryLp);

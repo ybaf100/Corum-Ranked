@@ -98,16 +98,18 @@ describe("Survival M1 independent profiles and LP",()=>{
     const started=await survival.settleLp(player.playerId,"m1",200,undefined,{rank:3,playerCount:16});
     expect(started).toMatchObject({promotionStarted:true,profile:{lp:299,tier:"RED"}});
     expect((await survival.profile(player.playerId)).profile).toMatchObject({lp:299,tier:"RED",
-      promotion:{sourceTier:"RED",targetTier:"AQUA",cutoff:300,gamesRequired:3,winsRequired:1,results:[],requirement:{top16:10,top64:40},remainingChances:3}});
+      promotion:{sourceTier:"RED",targetTier:"AQUA",cutoff:300,gamesRequired:3,winsRequired:1,results:[],ranks:[],requirement:{top16:10,top64:40},remainingChances:3}});
+    expect([10,40]).toContain((await survival.profile(player.playerId)).profile.promotion!.requiredRank);
     expect((await survival.leaderboard()).players[0]!.promotion).toMatchObject({targetTier:"AQUA",remainingChances:3});
     expect((await survival.settleLp(player.playerId,"m2",40,undefined,{rank:12,playerCount:16})).actualDelta).toBe(0);
     await survival.settleLp(player.playerId,"m3",40,undefined,{rank:41,playerCount:64});
+    expect((await survival.profile(player.playerId)).profile.promotion).toMatchObject({results:["LOSS","LOSS"],ranks:[12,41],remainingChances:1});
     const failed=await survival.settleLp(player.playerId,"m4",40,undefined,{rank:11,playerCount:16});
     expect(failed).toMatchObject({promotionFailed:true,profile:{lp:250,tier:"RED"}});
     expect((await survival.profile(player.playerId)).profile.promotion).toBeNull();
     await survival.settleLp(player.playerId,"m5",60,undefined,{rank:1,playerCount:16});
     const promoted=await survival.settleLp(player.playerId,"m6",-30,undefined,{rank:10,playerCount:16});
-    expect(promoted).toMatchObject({promotionSucceeded:true,profile:{lp:300,tier:"AQUA",promotion:null}});
+    expect(promoted).toMatchObject({promotionSucceeded:true,profile:{lp:350,tier:"AQUA",promotion:null}});
     // Replaying a settled event never consumes a second chance.
     expect(await survival.settleLp(player.playerId,"m6",-30,undefined,{rank:10,playerCount:16})).toMatchObject({promotionSucceeded:true});
   });

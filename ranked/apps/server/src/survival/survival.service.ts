@@ -4,7 +4,7 @@ import {publicAchievementTitle} from "../achievement/public-title.js";
 import type { HistoryOptions } from "../history/history-options.js";
 import { survivalHistoryProjection } from "../history/survival-history.js";
 import { BadRequestException, ConflictException, Inject, Injectable, NotImplementedException, ServiceUnavailableException } from "@nestjs/common";
-import { survivalTierForLp, updateSurvivalRating, type SurvivalConfig, type SurvivalMatchOutcome, type SurvivalPromotionSeries, type SurvivalRatingUpdate } from "@corum-ranked/rules";
+import { survivalPromotionRequiredRank, survivalTierForLp, updateSurvivalRating, type SurvivalConfig, type SurvivalMatchOutcome, type SurvivalPromotionSeries, type SurvivalRatingUpdate } from "@corum-ranked/rules";
 import type { SurvivalConfigDocument } from "../config/survival-config.service.js";
 import { AchievementService } from "../achievement/achievement.service.js";
 import { ID_GENERATOR, SERVER_CLOCK, type IdGenerator, type ServerClock } from "../common/runtime.module.js";
@@ -13,12 +13,14 @@ import { DATABASE, type DatabasePort, type SqlExecutor } from "../database/datab
 
 interface ProfileRow { player_id: string; lp: number; displayed_tier: string; demotion_warning: boolean; lp_reached_at: Date | string; promotion?: SurvivalPromotionSeries | null; }
 /** Same shape the client already parses for the Solo promotion series. */
-export function survivalPromotionView(series: SurvivalPromotionSeries | null | undefined, bands: SurvivalConfig["tierBands"]) {
+export function survivalPromotionView(series: SurvivalPromotionSeries | null | undefined, bands: SurvivalConfig["tierBands"], matchPlayerCount?: number) {
   if (!series) return null;
   const group = (tier: string) => bands.find(b => b.tier === tier)?.group ?? tier;
   return { sourceTier: group(series.sourceTier), targetTier: group(series.targetTier), cutoff: series.cutoff,
     gamesRequired: series.chances, winsRequired: 1, winsRemaining: 1, results: series.results,
-    requirement: { top16: series.top16, top64: series.top64 }, remainingChances: Math.max(0, series.chances - series.results.length) };
+    requirement: { top16: series.top16, top64: series.top64 },
+    requiredRank: matchPlayerCount === 16 || matchPlayerCount === 64 ? survivalPromotionRequiredRank(series, matchPlayerCount) : null,
+    ranks: series.ranks ?? [], remainingChances: Math.max(0, series.chances - series.results.length) };
 }
 interface LadderRow extends ProfileRow { public_title_id?:string|null;public_title_level?:number|null; gd_account_id: string; gd_username: string; rank: number; total: number; }
 
@@ -55,7 +57,7 @@ export class SurvivalService {
   private project(row: ProfileRow, config: SurvivalConfig) {
     const band = config.tierBands.find(tier => tier.tier === row.displayed_tier);
     return { lp: Number(row.lp), tierId: row.displayed_tier, tier: band?.group ?? row.displayed_tier,
-      demotionWarning: row.demotion_warning, promotion: survivalPromotionView(row.promotion, config.tierBands),
+      demotionWarning: row.demotion_warning, promotion: survivalPromotionView(row.promotion, config.tierBands, config.matchPlayerCount),
       warningRecoveryLp: row.demotion_warning && band ? band.minimumLp + config.demotionWarningRecoveryLp : null,
       lpReachedAt: new Date(row.lp_reached_at).toISOString() };
   }
@@ -98,7 +100,7 @@ export class SurvivalService {
         equippedTitle:publicAchievementTitle(row.public_title_id??null,row.public_title_level??null),
         rank: Number(row.rank), topPercent: Math.ceil(Number(row.rank) / Number(row.total) * 1000) / 10,
         tier: bands.find(band => band.tier === row.displayed_tier)?.group ?? row.displayed_tier,
-        tierId: row.displayed_tier, visibleRankedScore: Number(row.lp), promotion: survivalPromotionView(row.promotion, bands),
+        tierId: row.displayed_tier, visibleRankedScore: Number(row.lp), promotion: survivalPromotionView(row.promotion, bands, status.ready ? this.config.getSnapshot().config.matchPlayerCount : undefined),
         placement: null, placementGames: 0, placementGamesRequired: 0, placementResults: [],
         demotionWarning: row.demotion_warning, wins: publicRecords[row.player_id]?.wins??0, losses: publicRecords[row.player_id]?.losses??0, winStreak:publicRecords[row.player_id]?.winStreak??0, updatedAt: new Date(row.lp_reached_at).toISOString() })),
       total, totalPlayers: total, offset, hasMore: offset + result.rows.length < total,

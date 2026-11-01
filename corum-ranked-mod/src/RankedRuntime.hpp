@@ -431,6 +431,9 @@ struct SurvivalView {
     std::optional<int> warningRecoveryLp;
     // Survival promotion series requirement (best official placement), when active.
     int promotionTop16=0, promotionTop64=0;
+    // Required rank under the current 16/64 setting and the rank achieved in each series match.
+    int promotionRequiredRank=0;
+    std::vector<int> promotionRanks;
 };
 
 struct RuntimeView {

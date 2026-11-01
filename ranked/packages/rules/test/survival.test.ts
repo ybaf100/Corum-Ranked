@@ -50,9 +50,9 @@ describe("Survival promotion series", () => {
   it("promotes on the first qualifying finish and freezes LP while the series runs", () => {
     const start = updateSurvivalRating({ lp: 290, tier: "RED", demotionWarning: false }, 30, config, at16(1)).profile;
     const miss = updateSurvivalRating(start, 50, config, at16(11));
-    expect(miss.actualDelta).toBe(0);expect(miss.profile.promotion?.results).toEqual(["LOSS"]);expect(miss.profile.lp).toBe(299);
+    expect(miss.actualDelta).toBe(0);expect(miss.profile.promotion?.results).toEqual(["LOSS"]);expect(miss.profile.promotion?.ranks).toEqual([11]);expect(miss.profile.lp).toBe(299);
     const pass = updateSurvivalRating(miss.profile, -20, config, at64(40));
-    expect(pass.promotionSucceeded).toBe(true);expect(pass.profile).toEqual({ lp: 300, tier: "AQUA", demotionWarning: false, promotion: null });
+    expect(pass.promotionSucceeded).toBe(true);expect(pass.profile).toEqual({ lp: 350, tier: "AQUA", demotionWarning: false, promotion: null });expect(pass.actualDelta).toBe(51);
   });
   it("costs 50 LP after every chance is used without a qualifying finish", () => {
     let profile = updateSurvivalRating({ lp: 880, tier: "BRONZE", demotionWarning: false }, 40, config, at16(5)).profile;
@@ -64,7 +64,7 @@ describe("Survival promotion series", () => {
   it("SILVER->GOLD requires a win; Gold has no further series; legacy callers promote directly", () => {
     const start = updateSurvivalRating({ lp: 1190, tier: "SILVER", demotionWarning: false }, 20, config, at16(1)).profile;
     expect(updateSurvivalRating(start, 0, config, at16(2)).profile.promotion?.results).toEqual(["LOSS"]);
-    expect(updateSurvivalRating(start, 0, config, at64(1)).profile.tier).toBe("GOLD");
+    expect(updateSurvivalRating(start, 0, config, at64(1)).profile).toMatchObject({ tier: "GOLD", lp: 1250 });
     expect(updateSurvivalRating({ lp: 1300, tier: "GOLD", demotionWarning: false }, 50, config, at16(1)).profile).toEqual({ lp: 1350, tier: "GOLD", demotionWarning: false, promotion: null });
     expect(updateSurvivalRating({ lp: 290, tier: "RED", demotionWarning: false }, 30, config).profile.tier).toBe("AQUA");
   });

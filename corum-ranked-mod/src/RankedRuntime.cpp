@@ -4269,6 +4269,10 @@ void RankedRuntime::fetchSurvivalProfile() {
         sur.profile.promotion = parseRankedProfile(profile).promotion;
         sur.promotionTop16 = static_cast<int>(profile["promotion"]["requirement"]["top16"].asInt().unwrapOr(0));
         sur.promotionTop64 = static_cast<int>(profile["promotion"]["requirement"]["top64"].asInt().unwrapOr(0));
+        sur.promotionRequiredRank = static_cast<int>(profile["promotion"]["requiredRank"].asInt().unwrapOr(sur.promotionTop16));
+        sur.promotionRanks.clear();
+        if (profile["promotion"]["ranks"].isArray()) for (auto const& rank : profile["promotion"]["ranks"].asArray().unwrap())
+            sur.promotionRanks.push_back(static_cast<int>(rank.asInt().unwrapOr(0)));
         auto const recovery = profile["warningRecoveryLp"].asInt();
         sur.warningRecoveryLp = recovery.isOk() ? std::optional<int>(static_cast<int>(recovery.unwrap())) : std::nullopt;
         sur.standing = parseStanding(root["standing"]);

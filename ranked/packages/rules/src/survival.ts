@@ -142,6 +142,8 @@ export const SURVIVAL_PROMOTION_RULES: Readonly<Partial<Record<RankedTier, Survi
   SILVER: { top16: 1, top64: 1, chances: 5 },
 });
 export const SURVIVAL_PROMOTION_FAILURE_PENALTY = 50;
+/** Fixed bonus above the promotion boundary on success (Solo parity). */
+export const SURVIVAL_PROMOTION_SCORE_BONUS = 50;
 export type SurvivalPromotionMark = "WIN" | "LOSS";
 export interface SurvivalPromotionSeries {
   readonly sourceTier: string;
@@ -152,11 +154,16 @@ export interface SurvivalPromotionSeries {
   readonly top16: number;
   readonly top64: number;
   readonly results: readonly SurvivalPromotionMark[];
+  /** Official rank achieved in each series match, aligned with `results`. */
+  readonly ranks?: readonly number[];
+}
+export function survivalPromotionRequiredRank(series: Pick<SurvivalPromotionSeries,"top16"|"top64">, playerCount: number): number {
+  return playerCount === 64 ? series.top64 : series.top16;
 }
 /** Official placement of the settled match (best occupied rank) and its format. */
 export interface SurvivalMatchOutcome { readonly rank: number; readonly playerCount: number; }
 export function survivalPromotionPassed(series: Pick<SurvivalPromotionSeries,"top16"|"top64">, outcome: SurvivalMatchOutcome): boolean {
-  return Number.isSafeInteger(outcome.rank) && outcome.rank >= 1 && outcome.rank <= (outcome.playerCount === 64 ? series.top64 : series.top16);
+  return Number.isSafeInteger(outcome.rank) && outcome.rank >= 1 && outcome.rank <= survivalPromotionRequiredRank(series, outcome.playerCount);
 }
 
 export interface SurvivalRatingProfile {
@@ -193,9 +200,10 @@ export function updateSurvivalRating(before: SurvivalRatingProfile, delta: numbe
   const series = before.promotion ?? null;
   if (outcome && series) {
     const results = [...series.results, survivalPromotionPassed(series, outcome) ? "WIN" as const : "LOSS" as const];
+    const ranks = [...(series.ranks ?? []), outcome.rank];
     if (results.at(-1) === "WIN") {
       const target = config.tierBands.find(band => band.tier === series.targetTier) ?? config.tierBands[Math.min(index + 1, config.tierBands.length - 1)]!;
-      const lp = Math.max(series.cutoff, target.minimumLp);
+      const lp = Math.max(series.cutoff, target.minimumLp) + SURVIVAL_PROMOTION_SCORE_BONUS;
       return { profile: { lp, tier: target.tier, demotionWarning: false, promotion: null }, actualDelta: lp - before.lp,
         promoted: true, demoted: false, protected: false, warningRecoveryLp: null, promotionSucceeded: true };
     }
@@ -204,7 +212,7 @@ export function updateSurvivalRating(before: SurvivalRatingProfile, delta: numbe
       return { profile: { lp, tier: before.tier, demotionWarning: false, promotion: null }, actualDelta: lp - before.lp,
         promoted: false, demoted: false, protected: false, warningRecoveryLp: null, promotionFailed: true };
     }
-    return { profile: { lp: before.lp, tier: before.tier, demotionWarning: false, promotion: { ...series, results } }, actualDelta: 0,
+    return { profile: { lp: before.lp, tier: before.tier, demotionWarning: false, promotion: { ...series, results, ranks } }, actualDelta: 0,
       promoted: false, demoted: false, protected: false, warningRecoveryLp: null };
   }
   let lp = Math.max(0, before.lp + delta), tier = before.tier, warning = before.demotionWarning;
@@ -218,7 +226,7 @@ export function updateSurvivalRating(before: SurvivalRatingProfile, delta: numbe
     const cutoff = next.minimumLp;
     const held = cutoff - 1;
     const promotion: SurvivalPromotionSeries = { sourceTier: before.tier, targetTier: next.tier, cutoff,
-      chances: rule.chances, top16: rule.top16, top64: rule.top64, results: [] };
+      chances: rule.chances, top16: rule.top16, top64: rule.top64, results: [], ranks: [] };
     return { profile: { lp: held, tier: before.tier, demotionWarning: false, promotion }, actualDelta: held - before.lp,
       promoted: false, demoted: false, protected: false, warningRecoveryLp: null, promotionStarted: true };
   }

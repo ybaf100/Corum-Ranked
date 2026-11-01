@@ -1,3 +1,10 @@
+# v0.5.0-beta.131
+
+- Fix: migration 0037 (sur_profiles.promotion) was not registered in the server's required-migration list, so production never applied it and Admin Survival LP changes / Survival settlement failed with `column "promotion" does not exist`. It is now registered, probed by /ready, and a test requires every migration file to be registered. (Production Neon was migrated directly with the same additive SQL before this release.)
+- Survival promotion success grants a fixed +50 above the boundary (Solo parity), e.g. SILVER->GOLD promotes to 1250.
+- The Survival card shows the requirement for the current 16/64 setting: "Promotion: finish rank N or better" (rank 1: "win a match"). Remaining chances are shown as the Solo-style slots; each played slot shows the achieved rank (red when it did not qualify).
+- Actual GD/device behaviour is unverified.
+
 # v0.5.0-beta.130
 
 - Survival promotion series (modelled on Solo): reaching the next tier boundary holds the rating at cutoff-1 and opens a series. RED->AQUA: Top 10 (16P) / Top 40 (64P), 3 chances; AQUA->BRONZE: Top 5 / Top 15, 3 chances; BRONZE->SILVER: Top 2 / Top 5, 5 chances; SILVER->GOLD: win the match, 5 chances. One qualifying finish promotes; running out of chances costs 50 points (never below the tier floor). Rating does not move during a series. Settlement stays idempotent through the existing ledger; new nullable column sur_profiles.promotion (migration 0037). Admin LP set/reset clears an open series.

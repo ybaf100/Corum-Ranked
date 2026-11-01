@@ -288,3 +288,13 @@ describe("Survival six-attempt projection migration",()=>{
   expect((await database!.query("SELECT count(*)::int AS count FROM ranked_players")).rows).toEqual(before.rows);
  });
 });
+
+it('registers every migration file for production startup and readiness',async()=>{
+ const source=await readFile(new URL('../src/database/database.service.ts',import.meta.url),'utf8');
+ const registered=source.slice(source.indexOf('const REQUIRED_MIGRATIONS'),source.indexOf('] as const'));
+ const { readdir } = await import('node:fs/promises');
+ for(const file of (await readdir(new URL('../../../migrations/',import.meta.url))).filter(name=>name.endsWith('.sql'))){
+  expect(registered,file).toContain(`"${file}"`);
+ }
+ expect(source).toContain('sur_profiles.promotion');
+});

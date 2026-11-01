@@ -57,6 +57,7 @@ const REQUIRED_MIGRATIONS = [
   "0034_survival_six_attempts.sql",
   "0035_survival_round_badges.sql",
   "0036_survival_badge_source_round.sql",
+  "0037_survival_promotion_series.sql",
 ] as const;
 
 export interface RankedSchemaStatus {
@@ -102,6 +103,7 @@ type SchemaProbeRow = QueryResultRow & {
   survival_map_supply: boolean;
   survival_forced_deathmatch:boolean;
   survival_six_attempts:boolean;
+  survival_promotion_series:boolean;
 
   ranked_forum_records: boolean;
   ranked_forum_refresh_cooldowns: boolean;
@@ -232,6 +234,7 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
         SELECT
           EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='ranked_deathmatch_attempts' AND column_name='native_death') AS deathmatch_native_death,
           EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='sur_mode_state' AND column_name='match_player_count') AS survival_player_format,
+          EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='sur_profiles' AND column_name='promotion') AS survival_promotion_series,
           EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='ranked_achievement_versions' AND column_name='overhaul_activated_at') AS achievement_overhaul_epoch,
           EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='ranked_achievement_metrics' AND column_name='ranked_rounds_played') AS achievement_solo_rounds,
           EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='ranked_achievement_metrics' AND column_name='survival_rounds_played') AS achievement_survival_rounds,
@@ -383,6 +386,7 @@ export class DatabaseService implements DatabasePort, OnModuleInit, OnApplicatio
         ["survival_map_supply", "Survival candidate/audio preparation schema"],
         ["survival_forced_deathmatch", "Survival first-round Death Match schema"],
         ["survival_six_attempts", "Survival six-attempt projection schema"],
+        ["survival_promotion_series", "sur_profiles.promotion"],
 
         ["ranked_forum_records", "table ranked_forum_records"],
         ["ranked_forum_refresh_cooldowns", "table ranked_forum_refresh_cooldowns"],
