@@ -1,3 +1,8 @@
+# v0.5.0-beta.137
+
+- Same content as beta.136 (Solo result row / WIN-LOSE stamp motion, plus everything from beta.135). beta.136 stopped at validation because a C++ domain test still expected the old "382.0" score text; the test now expects "382". beta.135 and beta.136 were never published or activated.
+- Actual GD/device behaviour is unverified.
+
 # v0.5.0-beta.136
 
 - Solo match result: the round rows land one by one from the left, then a large WIN / LOSE stamps onto both player cards at the same moment (once per match; later renders show the final state).

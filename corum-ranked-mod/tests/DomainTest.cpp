@@ -242,8 +242,8 @@ void hudTests() {
     };
     auto hud = presentHud(input);
     assert(hud.fpsText == "FPS : -");
-    assert(hud.ownScoreText == "Score : 382.0");
-    assert(hud.opponentScoreText == "Score : 417.0");
+    assert(hud.ownScoreText == "Score : 382");
+    assert(hud.opponentScoreText == "Score : 417");
     assert(hud.ownChecks[0] == ClearCheckColor::Green);
     assert(hud.ownChecks[1] == ClearCheckColor::Gray);
     assert(hud.ownChecks[2] == ClearCheckColor::Gray);
@@ -277,7 +277,7 @@ void hudTests() {
     input.qualifyingPercent = 20.1;
     hud = presentHud(input);
     assert(hud.ownScoreText == "Score : 118.5");
-    assert(hud.opponentScoreText == "Score : 73.0");
+    assert(hud.opponentScoreText == "Score : 73");
     assert(hud.qualifyingText == "Qualifying : 20%");
     assert(input.scoreA==118.5 && input.qualifyingPercent==20.1);
     input.scoreA = 382;
@@ -305,8 +305,8 @@ void hudTests() {
     input.banner = "TIEBREAKER";
     hud = presentHud(input);
     assert(hud.fpsText == "FPS : 120");
-    assert(hud.ownScoreText == "Score : 417.0");
-    assert(hud.opponentScoreText == "Score : 382.0");
+    assert(hud.ownScoreText == "Score : 417");
+    assert(hud.opponentScoreText == "Score : 382");
     assert(hud.stateText == "TIEBREAKER");
 
     // ROUND_PLAYING can remain visible until the next poll after 5:00. Derive
@@ -359,8 +359,8 @@ void hudTests() {
     assert(hud.spectatorVisible);
     assert(hud.spectatorOpponentText == "PlayerB");
     assert(hud.spectatorProgressText == "CURRENT : 73%");
-    assert(hud.ownScoreText == "Score : 417.0");
-    assert(hud.opponentScoreText == "Score : 382.0");
+    assert(hud.ownScoreText == "Score : 417");
+    assert(hud.opponentScoreText == "Score : 382");
     assert(hud.ownChecks[0] == ClearCheckColor::Green);
     assert(hud.ownChecks[1] == ClearCheckColor::Green);
     assert(hud.ownChecks[2] == ClearCheckColor::Green);
