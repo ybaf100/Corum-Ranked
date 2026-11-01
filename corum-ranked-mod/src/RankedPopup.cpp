@@ -562,6 +562,13 @@ class CorumRankedLayer final : public CCLayerColor {
     // Live spectating is entered from the finished-attempt board, not automatically.
     std::string m_spectateRequestKey;
     SteadyClock::time_point m_soloHoldUntil{};
+    std::string m_stableKeyCandidate;
+    SteadyClock::time_point m_stableKeySince{};
+    // Holds presentation rebuilds until a one-shot entrance motion finishes.
+    void holdForMotion(float seconds) {
+        auto const until = SteadyClock::now() + std::chrono::milliseconds(static_cast<int>(seconds * 1000.0f));
+        if (until > m_soloHoldUntil) m_soloHoldUntil = until;
+    }
     CCLabelBMFont *m_soloTabLabel = nullptr, *m_soloClockLabel = nullptr, *m_soloClockCaption = nullptr, *m_soloOwnScore = nullptr, *m_soloOppScore = nullptr;
     CCNode *m_soloClockPanel = nullptr, *m_soloFooterPlate = nullptr;
     std::vector<CCLayerColor*> m_soloPips;
@@ -938,8 +945,17 @@ class CorumRankedLayer final : public CCLayerColor {
         // pointer between touch-began and touch-ended on iOS. The visible UI tree
         // now changes only when its presentation key changes; countdowns and live
         // values are updated in place by updateDynamicUi().
-        if (key == m_renderedUiKey) return false;
+        if (key == m_renderedUiKey) { m_stableKeyCandidate.clear(); return false; }
         m_pendingUiKey = key;
+        // A key must hold for a moment before the tree is rebuilt. Keys that
+        // flap between polls (resource/spectator projections) otherwise rebuilt
+        // every menu several times a second, so taps never landed and a tap on
+        // a rebuilt menu could crash.
+        if (key != m_stableKeyCandidate) { m_stableKeyCandidate = key; m_stableKeySince = now; return false; }
+        if (now - m_stableKeySince < std::chrono::milliseconds(300)) return false;
+        m_stableKeyCandidate.clear();
+        if (RankedRuntime::get().view().stage == RuntimeStage::Matched)
+            log::info("[RankedUi] rebuild {} -> {}", m_renderedUiKey, key);
         auto const fadeOut = uiFadeOutSeconds();
         if (fadeOut <= 0.0 || !m_fadeRoot) {
             m_renderedUiKey = key;
@@ -1151,6 +1167,15 @@ class CorumRankedLayer final : public CCLayerColor {
     void resetHistoryUi() {
         ++m_historyUiGeneration;suspendHistoryThumbnail();m_historyThumbnail=nullptr;m_historyThumbnailPlaceholder=nullptr;m_historyTexture=nullptr;m_historyListScroll=nullptr;m_historyBoardScroll=nullptr;m_historyProfiles.clear();m_historyIcons.clear();
     }
+    // Motion groups carry their own CCMenu; release any tracked touch before the
+    // tree is destroyed so a selected item is never activated after removal.
+    static void cancelNestedMenuTouches(CCNode* node) {
+        if (!node) return;
+        for (auto* child : CCArrayExt<CCNode*>(node->getChildren())) {
+            if (auto* menu = typeinfo_cast<CCMenu*>(child)) corum::ranked::ui::cancelMenuTouch(menu);
+            cancelNestedMenuTouches(child);
+        }
+    }
     void clearUi() {
         resetHistoryUi();
         if(m_lobbyHover)m_lobbyHover->detach();
@@ -1165,6 +1190,7 @@ class CorumRankedLayer final : public CCLayerColor {
         m_queueSlots.clear(); m_queueLeave = m_queueFill = nullptr; m_queueShown = m_queueAnimating = false;
         resetDynamicUiPointers();
         corum::ranked::ui::cancelMenuTouch(m_menu);
+        cancelNestedMenuTouches(m_root);
         m_root->removeAllChildrenWithCleanup(true);
         m_menu->removeAllChildrenWithCleanup(true);
     }
@@ -3586,7 +3612,7 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const ownA = match.side == "A";
         // Entrance (once per match): the versus intro, then cards slide in from
         // the sides, VS pops and the countdown box opens.
-        auto const animate = m_matchFoundMotionKey != match.matchId && phaseSeconds() < 1.0;
+        auto const animate = m_matchFoundMotionKey != match.matchId && phaseSeconds() < 2.0;
         m_matchFoundMotionKey = match.matchId;
         auto const lead = animate ? kVersusSettle + 0.2f : 0.0f;
         auto* savedRoot = m_root; auto* savedMenu = m_menu;
@@ -3628,7 +3654,12 @@ class CorumRankedLayer final : public CCLayerColor {
         corum::ranked::ui::fitMenuLabelWidth(hint, 176.0f, 0.24f, 0.16f);
         m_root->addChild(hint, 5);
         m_root = outerRoot;
-        if (animate) { centerGroup->setPositionY(-10.0f); revealGroup(centerGroup, lead + 0.55f, {0, 10.0f}, 0.35f); addVersusIntro(match); }
+        if (animate) {
+            centerGroup->setPositionY(-10.0f); revealGroup(centerGroup, lead + 0.55f, {0, 10.0f}, 0.35f); addVersusIntro(match);
+            // Map/audio preparation progress changes the key during MATCHED;
+            // rebuilding would cut the one-shot entrance short.
+            holdForMotion(lead + 1.0f);
+        }
     }
 
     void renderBan(MatchView const& match) {
@@ -3667,6 +3698,7 @@ class CorumRankedLayer final : public CCLayerColor {
             box->runAction(CCSequence::create(CCEaseOut::create(CCScaleTo::create(0.30f, 1.0f), 3.0f), CCDelayTime::create(0.35f),
                 CallFuncExt::create([box] { corum::ranked::ui::fadeModeLobbySurfaces(box, 0.3f, false); }), CCDelayTime::create(0.32f), CCRemoveSelf::create(), nullptr));
             m_root->addChild(box, 0);
+            holdForMotion(1.1f);
         }
         auto* savedRoot = m_root; auto* savedMenu = m_menu;
         for (std::size_t i = 0; i < count; ++i) {
@@ -4764,6 +4796,7 @@ class CorumRankedLayer final : public CCLayerColor {
         (void)rowsRoot;
         // Big verdict stamp on each card (both together, after the last row).
         auto const stampDelay = 0.35f + 0.28f * static_cast<float>(rowIndex) + 0.15f;
+        if (animateRows) holdForMotion(stampDelay + 0.45f);
         for (int side = 0; side < 2; ++side) {
             auto const own = side == 0;
             auto const won = own ? ownWon : !ownWon && !match.winnerSide.empty();

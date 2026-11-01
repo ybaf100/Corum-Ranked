@@ -129,6 +129,7 @@ struct CorumRankedLayer : CCLayerColor {
     void setKeypadEnabled(bool v){keypad=v;}
     void schedule(int,float){++scheduled;} void unschedule(int){--scheduled;}
     void refresh(float){++refreshed;}void resetDynamicUiPointers(){}
+    static void cancelNestedMenuTouches(Root*){}
     ${body(popup, 'void onEnter() override')}
     ${body(popup, 'void onExit() override')}
     ${body(popup, 'void clearUi()')}

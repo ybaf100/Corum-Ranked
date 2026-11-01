@@ -1,3 +1,10 @@
+# v0.5.0-beta.140
+
+- Match found / map ban / match result entrances were cut short: map and audio preparation progress changes the screen key during MATCHED and BAN, and every change rebuilt the screen (bot and normal matches alike). Presentation rebuilds now wait until these one-shot motions finish, and the match-found entrance window is wider.
+- Board after leaving a level: a presentation key must now hold for 0.3 s before the screen is rebuilt, so keys that flap between polls no longer rebuild every menu several times a second (taps not registering; repeated taps could crash). Tracked touches on every nested menu are released before a rebuild, and Matched-stage rebuilds are logged (`[RankedUi] rebuild old -> new`) for diagnosis.
+- Replays: confirmed and locked by a regression test that replay playback/compatibility never depends on the Corum Ranked client version (only record identity, replay format and the CBF environment), so existing replays stay playable across client updates.
+- Actual GD/device behaviour is unverified.
+
 # v0.5.0-beta.139
 
 - Same content as beta.138. beta.138 stopped at validation (a new rules test failed TypeScript's weak-type check); nothing was published or activated.
