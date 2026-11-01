@@ -1,3 +1,8 @@
+# v0.5.0-beta.146
+
+- Death Match did not start: the Death Match map's GD song download (ID 684652) never answered, Solo READY waits for map + audio, and the stuck-download timeout (120 s) exceeded the server's 60 s resource deadline, so the match was forfeited. Once the map is ready, a Solo round now waives an audio download that is still outstanding after 25 s (the level plays without that custom audio). Classified audio failures keep their existing handling; Survival is unchanged.
+- Actual GD/device behaviour is unverified.
+
 # v0.5.0-beta.145
 
 - Survival: after elimination, LEAVE stored an undecided outcome, which left the player on the standings board with "RANK FIXED · SETTLING LP..." and no action. LEAVE now goes to the personal result (pending until LP is settled, then the score presentation). The settling text no longer shows once the eliminated player's result has arrived.

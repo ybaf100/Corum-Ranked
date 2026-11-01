@@ -88,7 +88,16 @@ void RankedRoundPreparation::update(float dt) {
     pump();
 }
 bool RankedRoundPreparation::ready() const {
-    return m_context == currentPreparationContext() && m_view.mapReady && m_view.audioReady && m_view.error.empty();
+    if (m_context != currentPreparationContext() || !m_view.mapReady) return false;
+    if (m_view.audioReady && m_view.error.empty()) return true;
+    // Solo: a GD song/SFX download that never answers must not forfeit the
+    // match at the server's 60 s resource deadline. Once the map itself is
+    // ready, waive audio after a bounded wait (the level plays without that
+    // custom audio); Survival keeps its own audio-failure handling.
+    // A classified audio failure keeps its existing blocking/report path; only
+    // a download that is still outstanding (no answer at all) is waived.
+    auto const stalledOnly = !m_view.audioFailure && (m_view.error.empty() || m_view.error == "CONTENT URL REQUEST STILL ACTIVE - WAITING");
+    return stalledOnly && !SurvivalRuntime::get().acquiring() && clockSeconds() - m_contextBegan >= kSoloAudioWaiveSeconds;
 }
 void RankedRoundPreparation::retry() {
     // Do not reissue a timed-out active request or rebind its untagged delegate.

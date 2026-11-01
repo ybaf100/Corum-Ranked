@@ -75,6 +75,7 @@ private:
     unsigned m_mapQuiet = 0;
     double m_nextPumpAt = 0;
     double m_mapBegan = 0, m_contextBegan = 0, m_urlNextAt = 0;
+    static constexpr double kSoloAudioWaiveSeconds = 25.0;
     bool m_urlPending = false;
     double m_urlBegan = 0;
     unsigned m_urlQuiet = 0, m_urlAttempts = 0;
