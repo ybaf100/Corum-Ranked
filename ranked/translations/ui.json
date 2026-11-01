@@ -2670,5 +2670,9 @@
   "survival-leave": {
     "en": "LEAVE",
     "ko": "나가기"
+  },
+  "spectate-live": {
+    "en": "SPECTATE",
+    "ko": "관전하기"
   }
 }

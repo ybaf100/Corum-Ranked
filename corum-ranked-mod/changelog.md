@@ -1,3 +1,12 @@
+# v0.5.0-beta.134
+
+- Solo match board redesign (same Corum style, new layout): series scoreboard top-centre (round tab, own/opponent names, BO3 pips, match-point / tiebreaker / death-match banner), countdown clock top-right, own card left and opponent card right with a per-round state strip (READY / DOWNLOADING / death-match attempt pips), map column in the centre (title, creator, difficulty band, MAP/AUDIO rows, load bar, LDM / Disable Shake / Jukebox), status bar at the bottom.
+- Round overview before each round's map: rounds 1-3 at a glance (result, both best scores, map); the next round's card revolves like a revolving door (2.5 turns, 1.8 s) into the map card, holds 1 s, the cards drop out one by one and the player cards and round panel rise in (Survival map-panel motion). Death match entry shifts the cards one slot left (round 1 fades out) and slams the DEATH MATCH card into the freed slot before the reveal. Plays once per round from the start of PREPARE; no replay controls.
+- With Level Thumbnails enabled (and its mods present) the map thumbnail appears on the revealed card and in the map column.
+- Round result: ROUND WON / LOST / DRAW, both records, and the winner's series digit rolls up while its BO3 pip fills.
+- Your attempt finished: opponent live progress board; when global live spectating is ON a SPECTATE button enters it (no longer automatic).
+- Actual GD/device behaviour (layout on every aspect ratio, motion, thumbnails, spectate entry) is unverified.
+
 # v0.5.0-beta.133
 
 - Queue inside the lobby: starting a Survival or Solo queue fades out the right MATCHMAKING card and widens the left score card to the right (0.52 s ease-out) to show the queue: Survival players n/max with a seat grid, waiting time, minimum players, short-finals hint and LEAVE QUEUE; Solo a spinner, SEARCHING... and LEAVE QUEUE. Leaving reverses the motion. The separate Survival queue screen is gone.

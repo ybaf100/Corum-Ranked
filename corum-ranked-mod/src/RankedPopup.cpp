@@ -1,3 +1,4 @@
+#include <array>
 #include "ui/SurvivalBadgeCollection.hpp"
 #include "ui/SurvivalRoundBadge.hpp"
 #include "replay/HistoryReplayButton.hpp"
@@ -8,6 +9,7 @@
 #include "HistoryLevelLookup.hpp"
 #include "SurvivalThumbnailProvider.hpp"
 #include "ui/ModeLobbyMotion.hpp"
+#include "ui/SoloRoundIntro.hpp"
 #include "ui/ModeLobbySurfaceFade.hpp"
 #include "ui/LobbyHover.hpp"
 
@@ -552,6 +554,21 @@ class CorumRankedLayer final : public CCLayerColor {
     CCLabelBMFont* m_spectatorProgressLabel = nullptr;
     CCLabelBMFont* m_spectatorScoreLabel = nullptr;
     CCLabelBMFont* m_spectatorHintLabel = nullptr;
+    // Solo VS board / round overview intro.
+    std::string m_soloIntroPlayed, m_soloScoreAnimated;
+    bool m_soloIntroRunning = false;
+    // Live spectating is entered from the finished-attempt board, not automatically.
+    std::string m_spectateRequestKey;
+    SteadyClock::time_point m_soloHoldUntil{};
+    CCLabelBMFont *m_soloTabLabel = nullptr, *m_soloClockLabel = nullptr, *m_soloClockCaption = nullptr, *m_soloOwnScore = nullptr, *m_soloOppScore = nullptr;
+    CCNode *m_soloClockPanel = nullptr, *m_soloFooterPlate = nullptr;
+    std::vector<CCLayerColor*> m_soloPips;
+    CCLayerColor* m_spectatorBarFill = nullptr;
+    CCMenuItemSpriteExtra* m_soloSpectateButton = nullptr;
+    float m_spectatorBarWidth = 0.0f;
+    std::vector<std::pair<CCSprite*, CCSize>> m_soloThumbs;
+    corum::ranked::SurvivalSelectionContext m_soloThumbContext;
+    Ref<CCTexture2D> m_soloThumbTexture;
 
     bool init() override {
         if (!CCLayerColor::initWithColor({0, 0, 0, 0})) return false;
@@ -693,6 +710,7 @@ class CorumRankedLayer final : public CCLayerColor {
         updateDynamicUi();
         syncQueuePresentation();
         updateHistoryThumbnail();
+        updateSoloThumbnails();
         updateHistoryIcons();
         syncLobbyPopulation();
         syncAudioMode();
@@ -896,6 +914,8 @@ class CorumRankedLayer final : public CCLayerColor {
 
     bool prepareUiTransition(std::string const& key) {
         if (m_modeTransition.moving() || m_queueAnimating) { m_pendingUiKey = key; return false; }
+        // Solo intro / series roll: the board is rebuilt once they finish.
+        if (soloHoldActive()) { m_pendingUiKey = key; return false; }
         auto const now = SteadyClock::now();
         if (m_renderedUiKey.empty()) {
             m_renderedUiKey = key;
@@ -1117,6 +1137,10 @@ class CorumRankedLayer final : public CCLayerColor {
         m_spectatorProgressLabel = nullptr;
         m_spectatorScoreLabel = nullptr;
         m_spectatorHintLabel = nullptr;
+        m_soloTabLabel = m_soloClockLabel = m_soloClockCaption = m_soloOwnScore = m_soloOppScore = nullptr;
+        m_soloClockPanel = m_soloFooterPlate = nullptr;
+        m_soloPips.clear(); m_spectatorBarFill = nullptr; m_spectatorBarWidth = 0.0f; m_soloSpectateButton = nullptr;
+        m_soloThumbs.clear(); m_soloIntroRunning = false;
     }
 
     void suspendHistoryThumbnail() {
@@ -1274,34 +1298,13 @@ class CorumRankedLayer final : public CCLayerColor {
             m_banTimerLabel->setColor(remaining <= 3 ? kSideRed : ccc3(245, 248, 255));
         }
 
-        if (m_prepareFooterLabel) {
-            auto const ownA = match.side == "A";
-            auto& runtime = RankedRuntime::get();
-            auto const clearSyncPending =
-                match.deathmatchSequence <= 0 &&
-                runtime.localDisplayClears() >= 3 &&
-                runtime.hasLocalAttemptInFlight();
-            auto const seconds = std::max(0, 10 - static_cast<int>(std::floor(phaseSeconds())));
-            std::string footer = fmt::format("{}  {:02d}", tr("starts-in", "STARTS IN"), seconds);
-            if (clearSyncPending) {
-                footer = tr("syncing-clear", "SYNCING CLEAR...");
-            } else if (match.state == "DEATHMATCH_PLAYING") {
-                auto displayOwnUsed = ownA ? match.deathmatchAttemptsUsedA : match.deathmatchAttemptsUsedB;
-                auto displayOpponentUsed = ownA ? match.deathmatchAttemptsUsedB : match.deathmatchAttemptsUsedA;
-                displayOwnUsed = std::max(displayOwnUsed, runtime.localDeathmatchVisualAttemptsUsed());
-                footer = displayOwnUsed >= 3
-                    ? fmt::format("{}   {}/3", tr("waiting-opponent", "WAITING FOR OPPONENT"), displayOpponentUsed)
-                    : corum::ranked::i18n::attemptOfThree(std::min(3, displayOwnUsed + 1));
-            } else if (phaseSeconds() >= 10.0) {
-                auto const ownReady = ownA ? match.readyA : match.readyB;
-                auto const opponentReady = ownA ? match.readyB : match.readyA;
-                if (!ownReady) footer = corum::ranked::RankedRoundPreparation::get().ready()
-                    ? tr("sending-ready", "SENDING READY...") : tr("waiting-download", "WAITING FOR YOUR DOWNLOAD");
-                else if (!opponentReady) footer = corum::ranked::i18n::waitingForPlayer(upper(shorten(match.opponentName, 13)));
-                else footer = tr("starting", "STARTING...");
-            }
-            m_prepareFooterLabel->setString(footer.c_str());
+        if (m_prepareFooterLabel && !m_soloIntroRunning) {
+            ccColor3B accent = kGold;
+            auto const footer = soloFooterText(match, accent);
+            if (footer != m_prepareFooterLabel->getString()) m_prepareFooterLabel->setString(footer.c_str());
+            if (m_soloFooterPlate) corum::ranked::ui::setSurfaceAccent(m_soloFooterPlate, accent);
         }
+        updateSoloClock(match);
 
         if (
             match.state == "ROUND_PREPARE" ||
@@ -1349,6 +1352,9 @@ class CorumRankedLayer final : public CCLayerColor {
                     ? fmt::format("{}%", match.spectatorCurrentProgress.value_or(0)).c_str()
                     : "--"
             );
+            if (m_soloSpectateButton) m_soloSpectateButton->setEnabled(RankedRuntime::get().canEnterCurrentLevelAsSpectator());
+            if (m_spectatorBarFill)
+                m_spectatorBarFill->setContentSize({m_spectatorBarWidth * std::clamp(match.spectatorCurrentProgress.value_or(0) / 100.0f, 0.0f, 1.0f), 7.0f});
             if (m_spectatorScoreLabel) {
                 m_spectatorScoreLabel->setString(
                     scoreComparison(ownScore, opponentScore,match.deathmatchSequence>0).c_str()
@@ -1751,13 +1757,16 @@ class CorumRankedLayer final : public CCLayerColor {
         bool self,
         int accountId,
         PlayerCardRefs* outRefs = nullptr,
-        bool combineTierAndScore = false
+        bool combineTierAndScore = false,
+        float stripHeight = 0.0f
     ) {
         auto const& tier = profile.displayedTier;
         auto const accent = tierColor(upper(tier));
-        auto* panel = makeNeonPanel({150.0f, 184.0f}, center, accent, kDeepPanel, 246);
+        // stripHeight extends the card downwards for the VS board round state.
+        auto const panelCenter = CCPoint{center.x, center.y - stripHeight / 2.0f};
+        auto* panel = makeNeonPanel({150.0f, 184.0f + stripHeight}, panelCenter, accent, kDeepPanel, 246);
         m_root->addChild(panel, 1);
-        if (profile.promotion.active) addPromotionAura(center, {150.0f, 184.0f});
+        if (profile.promotion.active) addPromotionAura(panelCenter, {150.0f, 184.0f + stripHeight});
 
         auto* ribbon = makeTextPlate(
             self ? tr("you", "YOU") : tr("opponent", "OPPONENT"),
@@ -3557,261 +3566,557 @@ class CorumRankedLayer final : public CCLayerColor {
         m_root->addChild(privacy, 4);
     }
 
+    struct SoloLayout { float scale = 1, centerY = 0, sideOffset = 0; CCSize win; };
+    SoloLayout soloLayout() const {
+        SoloLayout layout; layout.win = CCDirector::sharedDirector()->getWinSize();
+        layout.scale = std::clamp(std::min((layout.win.width - 16.0f) / 553.0f, (layout.win.height - 110.0f) / 210.0f), 0.6f, 1.0f);
+        layout.centerY = layout.win.height - 78.0f - 105.0f * layout.scale;
+        layout.sideOffset = 201.5f * layout.scale;
+        return layout;
+    }
+
     void renderPrepare(MatchView const& match) {
-        auto const size = CCDirector::sharedDirector()->getWinSize();
-        auto const ownA = match.side == "A";
+        auto const layout = soloLayout();
+        auto const& size = layout.win;
+        auto const ownA = soloOwnA(match);
         auto const deathmatch = match.deathmatchSequence > 0;
-
-        // A/B cards keep the screen symmetric while the centre column is reserved
-        // for match state, map information and resource readiness.
-        addPlayerCard({96.0f, size.height / 2.0f - 2.0f}, match.playerAName, match.playerAProfile, ownA, match.playerAAccountId);
-        addPlayerCard({size.width - 96.0f, size.height / 2.0f - 2.0f}, match.playerBName, match.playerBProfile, !ownA, match.playerBAccountId);
-
-        auto* title = makeLabel(
-            deathmatch ? tr("death-match", "DEATH MATCH") : fmt::format("ROUND {}", match.roundNumber),
-            deathmatch ? 0.62f : 0.56f,
-            {size.width / 2.0f, size.height - 27.0f},
-            ccc3(245, 248, 255),
-            "black"
-        );
-        corum::ranked::ui::fitMenuLabelWidth(title, size.width - 180.0f, deathmatch ? 0.62f : 0.56f, 0.34f);
-        m_root->addChild(title, 6);
-
-        auto displayDeathmatchUsedA = match.deathmatchAttemptsUsedA;
-        auto displayDeathmatchUsedB = match.deathmatchAttemptsUsedB;
-        if (deathmatch) {
-            auto const localOwnUsed = RankedRuntime::get().localDeathmatchVisualAttemptsUsed();
-            if (ownA) displayDeathmatchUsedA = std::max(displayDeathmatchUsedA, localOwnUsed);
-            else displayDeathmatchUsedB = std::max(displayDeathmatchUsedB, localOwnUsed);
-
-            auto* sub = makeLabel(tr("three-attempts", "3 ATTEMPTS"), 0.34f, {size.width / 2.0f, size.height - 52.0f}, kCyan, "black");
-            m_root->addChild(sub, 6);
-            auto* attemptsPlate = makeNeonPanel({132.0f, 24.0f}, {size.width / 2.0f, size.height - 72.0f}, kBlue, {8, 18, 38}, 245);
-            m_root->addChild(attemptsPlate, 2);
-            auto* attempts = makeLabel(
-                fmt::format("A  {}/3    |    B  {}/3", displayDeathmatchUsedA, displayDeathmatchUsedB),
-                0.26f,
-                {size.width / 2.0f, size.height - 72.0f},
-                ccc3(226, 232, 245),
-                "semibold"
-            );
-            m_root->addChild(attempts, 6);
-        } else if (!match.banner.empty() && match.banner != "NONE") {
-            auto* sub = makeTextPlate(
-                displayBanner(match.banner),
-                {132.0f, 24.0f},
-                {size.width / 2.0f, size.height - 57.0f},
-                match.banner == "TIEBREAKER" ? kGold : kSideRed,
-                0.20f,
-                match.banner == "TIEBREAKER" ? kGold : kSideRed,
-                "goldFont.fnt"
-            );
-            m_root->addChild(sub, 3);
-        }
-
-        // Series score is deliberately compact. It represents round wins in the
-        // Bo3, never the score accumulated inside the current map.
-        auto const seriesY = deathmatch ? size.height - 94.0f : size.height - 84.0f;
-        auto* seriesPlate = makeNeonPanel({116.0f, 27.0f}, {size.width / 2.0f, seriesY}, kBlue, {7, 17, 35}, 245);
-        m_root->addChild(seriesPlate, 2);
-        auto* seriesCaption = makeLabel(tr("series", "SERIES"), 0.23f, {size.width / 2.0f, seriesY + 7.0f}, kCyan, "semibold");
-        m_root->addChild(seriesCaption, 6);
-        auto* seriesScore = makeLabel(
-            fmt::format("{}   :   {}", match.roundWinsA, match.roundWinsB),
-            0.33f,
-            {size.width / 2.0f, seriesY - 5.0f},
-            ccc3(245, 248, 255),
-            "black"
-        );
-        m_root->addChild(seriesScore, 6);
-
-        auto const mapY = size.height / 2.0f + 41.0f;
-        if (match.currentMap) {
-            auto* crown = CCSprite::createWithSpriteFrameName("GJ_bigStar_001.png");
-            if (crown) {
-                crown->setScale(0.24f);
-                crown->setColor(kCyan);
-                crown->setPosition({size.width / 2.0f, mapY + 31.0f});
-                m_root->addChild(crown, 4);
-            }
-            auto* mapName = makeLabel(match.currentMap->title, 0.40f, {size.width / 2.0f, mapY + 7.0f}, corum::ranked::ui::Text, "semibold");
-            corum::ranked::ui::fitFullMenuLabel(mapName, 154.0f, 32.0f, 0.40f);
-            m_root->addChild(mapName, 6);
-
-            auto const diffColor = difficultyColor(match.currentMap->difficulty);
-            auto* diffPlate = makeNeonPanel({146.0f, 36.0f}, {size.width / 2.0f, mapY - 27.0f}, diffColor, {12, 17, 27}, 246);
-            m_root->addChild(diffPlate, 2);
-            addMapDifficulty(*match.currentMap, {size.width / 2.0f, mapY - 19}, 125, 17);
-            auto const lengthMetadata=corum::ranked::ui::displayedMapMetadata(match.currentMap->levelId,match.currentMap->metadata);
-            auto* difficulty = makeLabel(corum::ranked::mapLengthText(lengthMetadata), 0.30f, {size.width / 2.0f, mapY - 35.0f}, corum::ranked::ui::Text, "semibold");
-            corum::ranked::ui::fitMenuLabelWidth(difficulty, 124.0f, 0.30f, 0.20f);
-            m_root->addChild(difficulty, 6);
-        }
+        auto const prepareState = match.state == "ROUND_PREPARE" || match.state == "DEATHMATCH_PREPARE";
+        auto const introKey = fmt::format("{}:{}:{}", match.matchId, match.roundNumber, match.deathmatchSequence);
+        // The overview + revolving reveal plays once per round, only from the
+        // start of PREPARE (a later rebuild or re-entry shows the board directly).
+        auto const intro = prepareState && match.currentMap && m_soloIntroPlayed != introKey && phaseSeconds() < 1.5;
+        if (prepareState) m_soloIntroPlayed = introKey;
+        auto const ownWins = ownA ? match.roundWinsA : match.roundWinsB;
+        auto const oppWins = ownA ? match.roundWinsB : match.roundWinsA;
+        addSoloHeader(match, intro ? std::string("ROUND OVERVIEW") : soloRoundTitle(match), ownWins, oppWins);
+        addSoloClock(match);
 
         auto& runtime = RankedRuntime::get();
-        auto const clearSyncPending =
-            !deathmatch &&
-            runtime.localDisplayClears() >= 3 &&
-            runtime.hasLocalAttemptInFlight();
-        auto* infoPlate = makeNeonPanel({154.0f, 118.0f}, {size.width / 2.0f, size.height / 2.0f - 36.0f}, kBlue, kDeepPanel2, 224);
-        m_root->addChild(infoPlate, 1);
-
-        auto const mapPos = CCPoint{size.width / 2.0f, size.height / 2.0f - 14.0f};
-        auto const songPos = CCPoint{size.width / 2.0f, size.height / 2.0f - 42.0f};
-        addPreparationStatusRows(mapPos, songPos, 116.0f, clearSyncPending);
-
-        addRoundOptions(size.height / 2.0f - 106.0f);
-        auto const loadStageY = size.height / 2.0f - 66.0f;
-        m_prepareLoadStageLabel = makeLabel(
-            preparationStageText(),
-            0.18f,
-            {size.width / 2.0f, loadStageY},
-            m_levelLookupError.empty() ? kCyan : kGold,
-            "semibold"
-        );
-        corum::ranked::ui::fitMenuLabelWidth(m_prepareLoadStageLabel, 138.0f, 0.18f, 0.12f);
-        m_root->addChild(m_prepareLoadStageLabel, 6);
-
-        constexpr float prepareBarWidth = 112.0f;
-        auto* prepareBarBack = CCLayerColor::create({5, 12, 25, 245});
-        prepareBarBack->setContentSize({prepareBarWidth, 8.0f});
-        prepareBarBack->setPosition({size.width / 2.0f - 68.0f, size.height / 2.0f - 85.0f});
-        m_root->addChild(prepareBarBack, 4);
-        m_prepareLoadFill = CCLayerColor::create({kCyan.r, kCyan.g, kCyan.b, 245});
-        m_prepareLoadFill->setContentSize({prepareBarWidth * m_prepareLoadVisual, 8.0f});
-        m_prepareLoadFill->setPosition(prepareBarBack->getPosition());
-        m_prepareLoadWidth = prepareBarWidth;
-        m_root->addChild(m_prepareLoadFill, 5);
-        m_prepareLoadPercentLabel = makeLabel(
-            fmt::format("{}%", static_cast<int>(std::round(m_prepareLoadVisual * 100.0f))),
-            0.20f,
-            {size.width / 2.0f + 61.0f, size.height / 2.0f - 81.0f},
-            ccc3(235, 242, 255),
-            "black"
-        );
-        m_root->addChild(m_prepareLoadPercentLabel, 6);
-
-        auto const seconds = std::max(0, 10 - static_cast<int>(std::floor(phaseSeconds())));
-        std::string footer = fmt::format("{}  {:02d}", tr("starts-in", "STARTS IN"), seconds);
-        ccColor3B footerAccent = seconds <= 3 ? kSideRed : kBlue;
-        if (clearSyncPending) {
-            footer = tr("syncing-clear", "SYNCING CLEAR...");
-            footerAccent = kCyan;
-        } else if (match.state == "DEATHMATCH_PLAYING") {
-            auto const ownUsed = ownA ? displayDeathmatchUsedA : displayDeathmatchUsedB;
-            auto const opponentUsed = ownA ? displayDeathmatchUsedB : displayDeathmatchUsedA;
-            footer = ownUsed >= 3
-                ? fmt::format("{}   {}/3", tr("waiting-opponent", "WAITING FOR OPPONENT"), opponentUsed)
-                : corum::ranked::i18n::attemptOfThree(std::min(3, ownUsed + 1));
-            footerAccent = ownUsed >= 3 ? kBlue : kGold;
-        } else if (phaseSeconds() >= 10.0) {
-            auto const ownReady = ownA ? match.readyA : match.readyB;
-            auto const opponentReady = ownA ? match.readyB : match.readyA;
-            if (!ownReady) footer = corum::ranked::RankedRoundPreparation::get().ready()
-                ? tr("sending-ready", "SENDING READY...") : tr("waiting-download", "WAITING FOR YOUR DOWNLOAD");
-            else if (!opponentReady) footer = corum::ranked::i18n::waitingForPlayer(upper(shorten(match.opponentName, 13)));
-            else footer = tr("starting", "STARTING...");
-            footerAccent = kGold;
+        auto const clearSyncPending = !deathmatch && runtime.localDisplayClears() >= 3 && runtime.hasLocalAttemptInFlight();
+        auto* savedRoot = m_root; auto* savedMenu = m_menu;
+        std::array<CCLayerColor*, 3> columns{};
+        auto const xs = std::array<float, 3>{size.width / 2.0f - layout.sideOffset, size.width / 2.0f, size.width / 2.0f + layout.sideOffset};
+        for (int i = 0; i < 3; ++i) {
+            columns[i] = makeSoloColumn({xs[i], layout.centerY}, layout.scale);
+            m_root = columns[i]; m_menu = typeinfo_cast<CCMenu*>(columns[i]->getChildByID("ranked-solo-column-menu"_spr));
+            if (i == 1) addSoloMapColumn(match, clearSyncPending);
+            else {
+                auto const own = i == 0;
+                auto const sideA = own == ownA;
+                addPlayerCard({0, 13.0f}, sideA ? match.playerAName : match.playerBName, sideA ? match.playerAProfile : match.playerBProfile,
+                    own, sideA ? match.playerAAccountId : match.playerBAccountId, nullptr, false, 26.0f);
+                addSoloStrip(match, own, {0, -92.0f}, 132.0f);
+            }
+            m_root = savedRoot; m_menu = savedMenu;
         }
-        auto* footerPlate = makeTextPlate(
-            footer,
-            {170.0f, 28.0f},
-            {size.width / 2.0f, 27.0f},
-            footerAccent,
-            0.31f,
-            ccc3(245, 248, 255),
-            "black",
-            &m_prepareFooterLabel
-        );
+        ccColor3B accent = kGold;
+        auto const footer = soloFooterText(match, accent);
+        auto* footerPlate = makeTextPlate(footer, {225.0f * layout.scale, 22.0f}, {size.width / 2.0f, 18.0f}, accent, 0.27f,
+            ccc3(245, 248, 255), "black", &m_prepareFooterLabel);
+        m_soloFooterPlate = footerPlate;
         m_root->addChild(footerPlate, 3);
+        if (intro) startSoloIntro(match, columns, layout);
+    }
+
+    void startSoloIntro(MatchView const& match, std::array<CCLayerColor*, 3> const& columns, SoloLayout const& layout) {
+        using corum::ranked::ui::SoloIntroReveal;
+        int revealSlot = 2; bool shift = false;
+        auto cards = soloIntroCards(match, revealSlot, shift);
+        auto const& map = *match.currentMap;
+        SoloIntroReveal reveal;
+        reveal.label = soloRoundTitle(match);
+        reveal.chip = match.deathmatchSequence > 0 ? "3 ATTEMPTS" : match.roundNumber >= 3 ? "DECIDER" : "NEXT";
+        reveal.accent = match.deathmatchSequence > 0 ? kSideRed : kCyan;
+        reveal.mapTitle = map.title; reveal.creator = map.creator.empty() ? "-" : map.creator;
+        auto const lengthMetadata = corum::ranked::ui::displayedMapMetadata(map.levelId, map.metadata);
+        reveal.detail = fmt::format("{}  ·  {}", upper(map.difficulty), corum::ranked::mapLengthText(lengthMetadata));
+        reveal.detailColor = difficultyColor(map.difficulty);
+        reveal.levelText = fmt::format("GD #{}", map.levelId);
+        auto* thumbHolder = CCNode::create();
+        if (addSoloThumbnail(thumbHolder, {0, 0}, corum::ranked::ui::kSoloIntroThumb, match)) reveal.thumbnail = thumbHolder;
+        // Columns stay hidden (and untouchable) until the board rises.
+        for (auto* column : columns) {
+            corum::ranked::ui::setModeLobbyOpacity(column, 0);
+            column->setPositionY(column->getPositionY() - 13.0f);
+            setLobbyNodeInput(column, false);
+        }
+        if (m_soloFooterPlate) m_soloFooterPlate->setVisible(false);
+        m_soloIntroRunning = true;
+        auto const deathmatchEntry = match.deathmatchSequence > 0;
+        auto const round = match.roundNumber;
+        auto weak = WeakRef(this);
+        auto* intro = corum::ranked::ui::SoloRoundIntro::create(cards, reveal, shift, revealSlot, static_cast<float>(phaseSeconds()),
+            [weak, deathmatchEntry, round](int phase) {
+                auto self = weak.lock(); if (!self || !self->m_prepareFooterLabel) return;
+                std::string text = deathmatchEntry ? std::string("DEATH MATCH") : fmt::format("ROUND {}  ·  SELECTING MAP...", round);
+                if (phase == 2) text = "REVEALING MAP...";
+                if (phase == 3) text = "MAP DECIDED";
+                if (self->m_soloFooterPlate) self->m_soloFooterPlate->setVisible(true);
+                self->m_prepareFooterLabel->setString(text.c_str());
+            },
+            [weak, columns, title = soloRoundTitle(match)] {
+                auto self = weak.lock(); if (!self) return;
+                if (self->m_soloTabLabel) self->m_soloTabLabel->setString(title.c_str());
+                for (std::size_t i = 0; i < columns.size(); ++i) {
+                    auto* column = columns[i];
+                    column->runAction(CCSequence::create(CCDelayTime::create(corum::ranked::kSoloIntroRiseStagger * static_cast<float>(i)),
+                        CCSpawn::create(CCEaseOut::create(CCMoveBy::create(corum::ranked::kSoloIntroRiseSeconds, {0, 13.0f}), 3.0f),
+                            CCEaseSineOut::create(corum::ranked::ui::ModeLobbyFade::create(0.42f, 255)), nullptr), nullptr));
+                }
+            },
+            [weak] {
+                // Rebuild once without a fade so deferred readiness changes land
+                // on the now-static board (the intro node is no longer updating).
+                queueInMainThread([weak] {
+                    auto self = weak.lock(); if (!self || !self->getParent()) return;
+                    self->m_soloIntroRunning = false;
+                    if (self->m_page != Page::Live || self->m_uiFadingOut) return;
+                    self->m_renderedUiKey = self->presentationKey(); self->m_pendingUiKey.clear();
+                    self->render();
+                });
+            });
+        if (!intro) { m_soloIntroRunning = false; return; }
+        intro->setPosition({layout.win.width / 2.0f, layout.win.height - 76.0f - corum::ranked::ui::kSoloCardH / 2.0f * layout.scale});
+        intro->setScale(std::min(layout.scale, (layout.win.width - 16.0f) / 480.0f));
+        intro->setID("ranked-solo-round-intro"_spr);
+        m_root->addChild(intro, 8);
+    }
+
+    // ---- Solo board (round overview, revolving reveal, VS board) ------------
+
+    bool soloOwnA(MatchView const& match) const { return match.side == "A"; }
+
+    std::string soloRoundTitle(MatchView const& match) const {
+        return match.deathmatchSequence > 0 ? fmt::format("DEATH MATCH {}", match.deathmatchSequence) : fmt::format("ROUND {}", match.roundNumber);
+    }
+
+    // Header: mode chip (top-left), series scoreboard with BO3 pips (top-centre)
+    // and the death-match / match-point banner under it. Own side is on the left.
+    void addSoloHeader(MatchView const& match, std::string const& tab, int ownWins, int opponentWins) {
+        auto const size = CCDirector::sharedDirector()->getWinSize();
+        auto const ownA = soloOwnA(match);
+        auto* mode = makeTextPlate("SOLO RANKED  BO3", {78.0f, 18.0f}, {10.0f + 39.0f, size.height - 22.0f}, kBlue, 0.21f, kGold, "black");
+        m_root->addChild(mode, 3);
+        auto const top = size.height - 35.0f;
+        m_root->addChild(makeNeonPanel({213.0f, 47.0f}, {size.width / 2.0f, top}, kBlue, {7, 17, 35}, 248), 2);
+        auto* tabPlate = makeTextPlate(tab, {std::max(70.0f, 13.0f + 7.0f * static_cast<float>(tab.size())), 14.0f},
+            {size.width / 2.0f, size.height - 12.0f}, kCyan, 0.21f, kCyan, "black", &m_soloTabLabel);
+        m_root->addChild(tabPlate, 4);
+        auto const ownName = upper(shorten(ownA ? match.playerAName : match.playerBName, 12));
+        auto const oppName = upper(shorten(ownA ? match.playerBName : match.playerAName, 12));
+        auto* own = makeLabel(ownName, 0.27f, {size.width / 2.0f - 98.0f, top + 9.0f}, kGold, "extrabold");
+        own->setAnchorPoint({0, 0.5f}); corum::ranked::ui::fitMenuLabelWidth(own, 66.0f, 0.27f, 0.17f); m_root->addChild(own, 5);
+        auto* opp = makeLabel(oppName, 0.27f, {size.width / 2.0f + 98.0f, top + 9.0f}, corum::ranked::ui::Text, "extrabold");
+        opp->setAnchorPoint({1, 0.5f}); corum::ranked::ui::fitMenuLabelWidth(opp, 66.0f, 0.27f, 0.17f); m_root->addChild(opp, 5);
+        m_soloPips.clear();
+        for (int side = 0; side < 2; ++side) {
+            auto const wins = side == 0 ? ownWins : opponentWins;
+            auto const color = side == 0 ? kGold : corum::ranked::ui::Text;
+            for (int i = 0; i < 2; ++i) {
+                auto const x = side == 0 ? size.width / 2.0f - 98.0f + i * 15.0f : size.width / 2.0f + 98.0f - 11.5f - i * 15.0f;
+                auto* empty = CCLayerColor::create({164, 181, 205, 70}, 11.5f, 4.5f); empty->setPosition({x, top - 11.0f}); m_root->addChild(empty, 4);
+                auto* fill = CCLayerColor::create({color.r, color.g, color.b, 255}, 11.5f, 4.5f);
+                fill->ignoreAnchorPointForPosition(false); fill->setAnchorPoint({0.5f, 0.5f});
+                fill->setPosition({x + 5.75f, top - 8.75f}); fill->setVisible(i < wins); m_root->addChild(fill, 5);
+                m_soloPips.push_back(fill);
+            }
+        }
+        auto* caption = makeLabel(tr("series", "SERIES"), 0.19f, {size.width / 2.0f, top + 13.0f}, kCyan, "semibold");
+        m_root->addChild(caption, 5);
+        m_soloOwnScore = makeLabel(std::to_string(ownWins), 0.62f, {size.width / 2.0f - 18.0f, top - 5.0f}, corum::ranked::ui::Text, "black");
+        m_root->addChild(m_soloOwnScore, 5);
+        m_root->addChild(makeLabel(":", 0.52f, {size.width / 2.0f, top - 4.0f}, ccc3(74, 90, 116), "black"), 5);
+        m_soloOppScore = makeLabel(std::to_string(opponentWins), 0.62f, {size.width / 2.0f + 18.0f, top - 5.0f}, corum::ranked::ui::Text, "black");
+        m_root->addChild(m_soloOppScore, 5);
+        std::string banner;
+        ccColor3B bannerColor = kSideRed;
+        if (match.deathmatchSequence > 0) { banner = "DEATH MATCH  ·  3 ATTEMPTS"; bannerColor = kCyan; }
+        else if (!match.banner.empty() && match.banner != "NONE") { banner = displayBanner(match.banner); bannerColor = match.banner == "TIEBREAKER" ? kGold : kSideRed; }
+        if (!banner.empty()) m_root->addChild(makeTextPlate(banner, {124.0f, 13.0f}, {size.width / 2.0f, size.height - 66.0f}, bannerColor, 0.19f, bannerColor, "black"), 3);
+    }
+
+    // Top-right clock: countdown in PREPARE, own death-match attempt, or LIVE.
+    std::pair<std::string, std::string> soloClockText(MatchView const& match, ccColor3B& color) const {
+        auto const prepare = match.state == "ROUND_PREPARE" || match.state == "DEATHMATCH_PREPARE";
+        if (prepare) {
+            auto const seconds = std::max(0, 10 - static_cast<int>(std::floor(phaseSeconds())));
+            color = seconds <= 3 ? kSideRed : kBlue;
+            return {tr("starts-in", "STARTS IN"), fmt::format("{:02d}", seconds)};
+        }
+        if (match.state == "DEATHMATCH_PLAYING" || match.deathmatchSequence > 0) {
+            auto used = soloOwnA(match) ? match.deathmatchAttemptsUsedA : match.deathmatchAttemptsUsedB;
+            used = std::max(used, RankedRuntime::get().localDeathmatchVisualAttemptsUsed());
+            color = kGold;
+            return {"ATTEMPT", fmt::format("{}/3", std::min(3, used + (used < 3 ? 1 : 0)))};
+        }
+        color = kCyan;
+        return {"ROUND", "LIVE"};
+    }
+
+    void addSoloClock(MatchView const& match) {
+        auto const size = CCDirector::sharedDirector()->getWinSize();
+        ccColor3B color = kBlue;
+        auto const [caption, value] = soloClockText(match, color);
+        m_soloClockPanel = makeNeonPanel({67.0f, 47.0f}, {size.width - 10.0f - 33.5f, size.height - 35.0f}, color, {8, 18, 40}, 248);
+        m_root->addChild(m_soloClockPanel, 2);
+        m_soloClockCaption = makeLabel(caption, 0.19f, {size.width - 43.5f, size.height - 23.0f}, corum::ranked::ui::TextMuted, "semibold");
+        corum::ranked::ui::fitMenuLabelWidth(m_soloClockCaption, 60.0f, 0.19f, 0.13f); m_root->addChild(m_soloClockCaption, 5);
+        m_soloClockLabel = makeLabel(value, 0.66f, {size.width - 43.5f, size.height - 42.0f}, color, "black");
+        corum::ranked::ui::fitMenuLabelWidth(m_soloClockLabel, 58.0f, 0.66f, 0.36f); m_root->addChild(m_soloClockLabel, 5);
+    }
+
+    void updateSoloClock(MatchView const& match) {
+        if (!m_soloClockLabel || !m_soloClockCaption) return;
+        ccColor3B color = kBlue;
+        auto const [caption, value] = soloClockText(match, color);
+        if (caption != m_soloClockCaption->getString()) m_soloClockCaption->setString(caption.c_str());
+        if (value != m_soloClockLabel->getString()) { m_soloClockLabel->setString(value.c_str()); corum::ranked::ui::fitMenuLabelWidth(m_soloClockLabel, 58.0f, 0.66f, 0.36f); }
+        m_soloClockLabel->setColor(color);
+        if (m_soloClockPanel) corum::ranked::ui::setSurfaceAccent(m_soloClockPanel, color);
+    }
+
+    // Bottom status bar message (the countdown itself lives in the clock).
+    std::string soloFooterText(MatchView const& match, ccColor3B& accent) const {
+        auto const ownA = soloOwnA(match);
+        auto& runtime = RankedRuntime::get();
+        auto const clearSyncPending = match.deathmatchSequence <= 0 && runtime.localDisplayClears() >= 3 && runtime.hasLocalAttemptInFlight();
+        if (clearSyncPending) { accent = kCyan; return tr("syncing-clear", "SYNCING CLEAR..."); }
+        if (match.state == "DEATHMATCH_PLAYING") {
+            auto ownUsed = ownA ? match.deathmatchAttemptsUsedA : match.deathmatchAttemptsUsedB;
+            auto const opponentUsed = ownA ? match.deathmatchAttemptsUsedB : match.deathmatchAttemptsUsedA;
+            ownUsed = std::max(ownUsed, runtime.localDeathmatchVisualAttemptsUsed());
+            accent = ownUsed >= 3 ? kBlue : kGold;
+            return ownUsed >= 3 ? fmt::format("{}   {}/3", tr("waiting-opponent", "WAITING FOR OPPONENT"), opponentUsed)
+                : corum::ranked::i18n::attemptOfThree(std::min(3, ownUsed + 1));
+        }
+        auto const ownReady = ownA ? match.readyA : match.readyB;
+        auto const opponentReady = ownA ? match.readyB : match.readyA;
+        accent = kGold;
+        if (phaseSeconds() < 10.0) {
+            if (corum::ranked::RankedRoundPreparation::get().ready()) { accent = kGreen; return tr("ready-to-start", "READY TO START"); }
+            return tr("waiting-download", "WAITING FOR YOUR DOWNLOAD");
+        }
+        if (!ownReady) return corum::ranked::RankedRoundPreparation::get().ready() ? tr("sending-ready", "SENDING READY...") : tr("waiting-download", "WAITING FOR YOUR DOWNLOAD");
+        if (!opponentReady) return corum::ranked::i18n::waitingForPlayer(upper(shorten(match.opponentName, 13)));
+        accent = kGreen;
+        return tr("starting", "STARTING...");
+    }
+
+    // Per-player round state shown at the bottom of each VS card.
+    void addSoloStrip(MatchView const& match, bool own, CCPoint center, float width) {
+        auto const ownA = soloOwnA(match);
+        auto const sideA = own == ownA;
+        if (match.deathmatchSequence > 0) {
+            auto const used = sideA ? match.deathmatchAttemptsUsedA : match.deathmatchAttemptsUsedB;
+            auto const shown = own ? std::max(used, RankedRuntime::get().localDeathmatchVisualAttemptsUsed()) : used;
+            m_root->addChild(makeNeonPanel({width, 21.0f}, center, own ? kGold : corum::ranked::ui::TextMuted, kDeepPanel2, 236), 3);
+            auto* caption = makeLabel("ATTEMPTS", 0.19f, {center.x - width / 2.0f + 8.0f, center.y}, corum::ranked::ui::TextMuted, "semibold");
+            caption->setAnchorPoint({0, 0.5f}); m_root->addChild(caption, 5);
+            for (int i = 0; i < 3; ++i) {
+                auto const filled = i < shown;
+                auto const color = own ? kGold : corum::ranked::ui::Text;
+                auto* pip = CCLayerColor::create(filled ? ccc4(color.r, color.g, color.b, 255) : ccc4(164, 181, 205, 70), 7.0f, 7.0f);
+                pip->setPosition({center.x + width / 2.0f - 34.0f + i * 10.0f, center.y - 3.5f}); m_root->addChild(pip, 5);
+            }
+            return;
+        }
+        auto const prepare = match.state == "ROUND_PREPARE" || match.state == "ROUND_ENTERING";
+        std::string text; ccColor3B color = kCyan;
+        if (prepare) {
+            auto const ready = sideA ? match.readyA : match.readyB;
+            if (own && !ready && !corum::ranked::RankedRoundPreparation::get().ready()) text = tr("downloading", "DOWNLOADING...");
+            else if (ready || (own && corum::ranked::RankedRoundPreparation::get().ready())) { text = tr("ready", "READY"); color = kGreen; }
+            else text = tr("preparing", "PREPARING...");
+        } else {
+            auto const score = sideA ? match.scoreA : match.scoreB;
+            text = fmt::format("BEST  {}", formatScore(score, false));
+            color = own ? kGold : corum::ranked::ui::Text;
+        }
+        auto* plate = makeTextPlate(text, {width, 21.0f}, center, color, 0.24f, color, "black");
+        m_root->addChild(plate, 3);
+    }
+
+    CCLayerColor* makeSoloColumn(CCPoint position, float scale) {
+        auto* column = CCLayerColor::create({0, 0, 0, 255}, 0, 0);
+        column->setCascadeOpacityEnabled(true); column->setPosition(position); column->setScale(scale);
+        m_root->addChild(column, 3);
+        auto* menu = CCMenu::create(); menu->setPosition(CCPointZero); menu->setID("ranked-solo-column-menu"_spr); column->addChild(menu, 20);
+        return column;
+    }
+
+    CCSprite* addSoloThumbnail(CCNode* parent, CCPoint center, CCSize size, MatchView const& match) {
+        if (!match.currentMap || match.currentMap->levelId <= 0 || !corum::ranked::SurvivalThumbnailProvider::supported()) return nullptr;
+        auto const context = corum::ranked::SurvivalSelectionContext{match.matchId,
+            fmt::format("solo:{}:{}", match.roundNumber, match.deathmatchSequence), 0, static_cast<std::uint64_t>(match.currentMap->levelId), 0};
+        if (!m_soloThumbContext.sameReveal(context) || m_soloThumbContext.levelId != context.levelId) {
+            m_soloThumbContext = context; m_soloThumbContext.sceneGeneration = ++m_historyThumbnailGeneration; m_soloThumbTexture = nullptr;
+        }
+        auto* sprite = CCSprite::create(); sprite->setPosition(center); parent->addChild(sprite, 6);
+        m_soloThumbs.push_back({sprite, size});
+        return sprite;
+    }
+
+    void updateSoloThumbnails() {
+        if (m_soloThumbs.empty() || !m_soloThumbContext.levelId) return;
+        auto& provider = corum::ranked::SurvivalThumbnailProvider::history(); provider.activate(m_soloThumbContext);
+        auto texture = provider.selected(); if (!texture) return;
+        auto const size = texture->getContentSize(); if (size.width <= 0 || size.height <= 0) return;
+        for (auto const& [sprite, box] : m_soloThumbs) {
+            if (sprite->getTexture() == texture.data()) continue;
+            sprite->setTexture(texture.data()); sprite->setTextureRect({0, 0, size.width, size.height});
+            sprite->setScale(std::min(box.width / size.width, box.height / size.height));
+        }
+        m_soloThumbTexture = texture;
+    }
+
+    // Centre column: map identity, difficulty band (+thumbnail), readiness rows,
+    // load bar and the round options. Local coordinates (column centre = 0,0).
+    void addSoloMapColumn(MatchView const& match, bool clearSyncPending) {
+        m_root->addChild(makeNeonPanel({225.0f, 210.0f}, {0, 0}, kBlue, kDeepPanel2, 236), 1);
+        auto* caption = makeLabel(fmt::format("{}  ·  MAP", soloRoundTitle(match)), 0.21f, {-100.0f, 92.0f}, kCyan, "semibold");
+        caption->setAnchorPoint({0, 0.5f}); corum::ranked::ui::fitMenuLabelWidth(caption, 130.0f, 0.21f, 0.15f); m_root->addChild(caption, 5);
+        if (match.currentMap) {
+            auto const& map = *match.currentMap;
+            auto* id = makeLabel(fmt::format("GD #{}", map.levelId), 0.19f, {100.0f, 92.0f}, corum::ranked::ui::TextMuted, "semibold");
+            id->setAnchorPoint({1, 0.5f}); m_root->addChild(id, 5);
+            auto* title = makeLabel(map.title, 0.47f, {-100.0f, 75.0f}, corum::ranked::ui::Text, "black");
+            title->setAnchorPoint({0, 0.5f}); corum::ranked::ui::fitMenuLabelWidth(title, 200.0f, 0.47f, 0.24f); m_root->addChild(title, 5);
+            if (!map.creator.empty()) {
+                auto* creator = makeLabel("by " + map.creator, 0.22f, {-100.0f, 58.0f}, corum::ranked::ui::TextMuted, "semibold");
+                creator->setAnchorPoint({0, 0.5f}); corum::ranked::ui::fitMenuLabelWidth(creator, 200.0f, 0.22f, 0.15f); m_root->addChild(creator, 5);
+            }
+            auto const diffColor = difficultyColor(map.difficulty);
+            m_root->addChild(makeNeonPanel({205.0f, 42.0f}, {0, 27.0f}, diffColor, {12, 17, 27}, 246), 2);
+            auto const thumb = corum::ranked::SurvivalThumbnailProvider::supported() && map.levelId > 0;
+            auto const badgeX = thumb ? -34.0f : 0.0f, badgeWidth = thumb ? 120.0f : 150.0f;
+            addMapDifficulty(map, {badgeX, 34.0f}, badgeWidth, 16);
+            auto const lengthMetadata = corum::ranked::ui::displayedMapMetadata(map.levelId, map.metadata);
+            auto* length = makeLabel(corum::ranked::mapLengthText(lengthMetadata), 0.24f, {badgeX, 18.0f}, corum::ranked::ui::Text, "semibold");
+            corum::ranked::ui::fitMenuLabelWidth(length, badgeWidth, 0.24f, 0.16f); m_root->addChild(length, 6);
+            if (thumb) {
+                m_root->addChild(makeNeonPanel({62.0f, 36.0f}, {66.0f, 27.0f}, kBlue, {5, 11, 23}, 248), 3);
+                addSoloThumbnail(m_root, {66.0f, 27.0f}, {60.0f, 34.0f}, match);
+            }
+        }
+        addPreparationStatusRows({-52.0f, -8.0f}, {52.0f, -8.0f}, 100.0f, clearSyncPending);
+        constexpr float barWidth = 168.0f;
+        auto* back = CCLayerColor::create({5, 12, 25, 245}); back->setContentSize({barWidth, 7.0f});
+        back->setPosition({-100.0f, -36.0f}); m_root->addChild(back, 4);
+        m_prepareLoadFill = CCLayerColor::create({kCyan.r, kCyan.g, kCyan.b, 245});
+        m_prepareLoadFill->setContentSize({barWidth * m_prepareLoadVisual, 7.0f}); m_prepareLoadFill->setPosition(back->getPosition());
+        m_prepareLoadWidth = barWidth; m_root->addChild(m_prepareLoadFill, 5);
+        m_prepareLoadPercentLabel = makeLabel(fmt::format("{}%", static_cast<int>(std::round(m_prepareLoadVisual * 100.0f))), 0.23f,
+            {100.0f, -32.5f}, ccc3(235, 242, 255), "black");
+        m_prepareLoadPercentLabel->setAnchorPoint({1, 0.5f}); m_root->addChild(m_prepareLoadPercentLabel, 6);
+        m_prepareLoadStageLabel = makeLabel(preparationStageText(), 0.18f, {-100.0f, -50.0f}, m_levelLookupError.empty() ? kCyan : kGold, "semibold");
+        m_prepareLoadStageLabel->setAnchorPoint({0, 0.5f}); corum::ranked::ui::fitMenuLabelWidth(m_prepareLoadStageLabel, 200.0f, 0.18f, 0.12f);
+        m_root->addChild(m_prepareLoadStageLabel, 6);
+        auto* level = findPlayableMap();
+        auto* ldm = addButton(fmt::format("{}: {}", tr("low-detail", "LDM"), level && level->m_lowDetailModeToggled ? "ON" : "OFF"),
+            {-72.0f, -84.0f}, menu_selector(CorumRankedLayer::onLowDetail), false, 0.27f);
+        auto* shake = addButton(fmt::format("{}: {}", tr("disable-shake", "DISABLE SHAKE"), level && level->m_disableShakeToggled ? "ON" : "OFF"),
+            {2.0f, -84.0f}, menu_selector(CorumRankedLayer::onDisableShake), false, 0.27f);
+        ldm->setID("ranked-round-ldm"_spr); shake->setID("ranked-round-disable-shake"_spr);
+        ldm->setEnabled(level != nullptr); shake->setEnabled(level != nullptr);
+        addJukeboxButton({76.0f, -84.0f}, 0.27f);
+    }
+
+    std::vector<corum::ranked::ui::SoloIntroCard> soloIntroCards(MatchView const& match, int& revealSlot, bool& shift) const {
+        using corum::ranked::ui::SoloIntroCard;
+        auto const ownA = soloOwnA(match);
+        auto const outcome = [&](std::string const& result, SoloIntroCard& card) {
+            if (result.empty()) return;
+            auto const draw = result == "DRAW";
+            auto const win = !draw && (result == "A") == ownA;
+            card.result = draw ? "DRAW" : win ? "WIN" : "LOSS";
+            card.accent = card.resultColor = draw ? corum::ranked::ui::TextMuted : win ? kGold : kSideRed;
+        };
+        std::vector<SoloIntroCard> past;
+        for (auto const& round : match.rounds) {
+            if (match.deathmatchSequence <= 0 && round.roundNumber >= match.roundNumber) continue;
+            SoloIntroCard card; card.label = fmt::format("ROUND {}", round.roundNumber); card.map = round.mapTitle;
+            card.detail = upper(round.difficulty); card.detailColor = difficultyColor(round.difficulty);
+            card.you = formatScore(ownA ? round.scoreA : round.scoreB, false); card.opp = formatScore(ownA ? round.scoreB : round.scoreA, false);
+            outcome(round.result, card); past.push_back(card);
+        }
+        for (auto const& dm : match.deathmatches) {
+            if (dm.sequence >= match.deathmatchSequence) continue;
+            SoloIntroCard card; card.label = fmt::format("DEATH MATCH {}", dm.sequence); card.map = dm.mapTitle;
+            card.detail = upper(dm.difficulty); card.detailColor = difficultyColor(dm.difficulty);
+            card.you = formatScore(ownA ? dm.scoreA : dm.scoreB, true); card.opp = formatScore(ownA ? dm.scoreB : dm.scoreA, true);
+            outcome(dm.winnerSide, card); past.push_back(card);
+        }
+        shift = match.deathmatchSequence > 0 && past.size() >= 3;
+        if (shift) { revealSlot = 2; return std::vector<SoloIntroCard>(past.end() - 3, past.end()); }
+        // Normal BO3: the revealed round sits in its own slot; later rounds are locked.
+        revealSlot = std::clamp(match.roundNumber - 1, 0, 2);
+        std::vector<SoloIntroCard> cards;
+        for (int slot = 0; slot < 3; ++slot) {
+            if (slot == revealSlot) continue;
+            if (slot < revealSlot && static_cast<std::size_t>(slot) < past.size()) { cards.push_back(past[static_cast<std::size_t>(slot)]); continue; }
+            SoloIntroCard locked; locked.label = fmt::format("ROUND {}", slot + 1); locked.locked = true; cards.push_back(locked);
+        }
+        return cards;
+    }
+
+    bool soloHoldActive() const { return m_soloIntroRunning || SteadyClock::now() < m_soloHoldUntil; }
+
+    void onSpectateLive(CCObject*) {
+        auto const& match = RankedRuntime::get().view().match;
+        if (m_enteringLevel || !RankedRuntime::get().canEnterCurrentLevelAsSpectator()) return;
+        m_spectateRequestKey = fmt::format("{}:{}:{}", match.matchId, match.roundNumber, match.deathmatchSequence);
+        maybeEnterLevel();
     }
 
     void renderSpectatorWait(MatchView const& match) {
-        auto const size = CCDirector::sharedDirector()->getWinSize();
-        auto const ownA = match.side == "A";
+        auto const layout = soloLayout();
+        auto const& size = layout.win;
+        auto const ownA = soloOwnA(match);
         auto const ownScore = ownA ? match.scoreA : match.scoreB;
         auto const opponentScore = ownA ? match.scoreB : match.scoreA;
         auto const opponentAttemptActive = match.spectatorCurrentProgress.has_value();
         auto const progress = match.spectatorCurrentProgress.value_or(0);
-        auto const opponent = match.spectatorOpponentName.empty()
-            ? match.opponentName
-            : match.spectatorOpponentName;
+        auto const opponent = match.spectatorOpponentName.empty() ? match.opponentName : match.spectatorOpponentName;
+        addSoloHeader(match, soloRoundTitle(match), ownA ? match.roundWinsA : match.roundWinsB, ownA ? match.roundWinsB : match.roundWinsA);
+        // Clock: the last-attempt deadline when it applies, otherwise LIVE.
+        m_root->addChild(makeNeonPanel({67.0f, 47.0f}, {size.width - 43.5f, size.height - 35.0f}, kGold, {8, 18, 40}, 248), 2);
+        auto const lastAttempt = match.state == "LAST_ATTEMPT_WINDOW";
+        m_root->addChild(makeLabel(lastAttempt ? "LAST ATTEMPT" : "OPPONENT", 0.17f, {size.width - 43.5f, size.height - 23.0f}, corum::ranked::ui::TextMuted, "semibold"), 5);
+        auto const seconds = std::max<std::int64_t>(0, RankedRuntime::get().deadlineSeconds().value_or(0));
+        m_root->addChild(makeLabel(lastAttempt ? fmt::format("{}:{:02d}", seconds / 60, seconds % 60) : std::string("LIVE"), 0.5f,
+            {size.width - 43.5f, size.height - 42.0f}, kGold, "black"), 5);
 
-        auto* title = makeLabel(tr("attempt-finished", "YOUR ATTEMPT IS FINISHED"), 0.48f, {size.width / 2.0f, size.height - 34.0f}, kGold, "goldFont.fnt");
-        corum::ranked::ui::fitMenuLabelWidth(title, size.width - 70.0f, 0.48f, 0.30f);
-        m_root->addChild(title, 5);
-        auto* subtitle = makeLabel(tr("waiting-opponent", "WAITING FOR OPPONENT"), 0.24f, {size.width / 2.0f, size.height - 59.0f}, kCyan);
-        m_root->addChild(subtitle, 5);
-
-        auto* panel = makeNeonPanel({246.0f, 142.0f}, {size.width / 2.0f, size.height / 2.0f - 4.0f}, kBlue, kDeepPanel, 238);
-        m_root->addChild(panel, 1);
-
-        auto* name = makeLabel(upper(shorten(opponent, 18)), 0.32f, {size.width / 2.0f, size.height / 2.0f + 38.0f});
-        corum::ranked::ui::fitMenuLabelWidth(name, 205.0f, 0.32f, 0.21f);
-        m_root->addChild(name, 5);
-        auto* live = makeLabel(
-            opponentAttemptActive
-                ? tr("live-progress", "LIVE PROGRESS")
-                : tr("waiting-start", "WAITING TO START"),
-            0.20f,
-            {size.width / 2.0f, size.height / 2.0f + 15.0f},
-            kCyan,
-            "semibold"
-        );
-        m_spectatorStateLabel = live;
-        m_root->addChild(live, 5);
-        auto* pct = makeLabel(
-            opponentAttemptActive ? fmt::format("{}%", progress) : "--",
-            0.74f,
-            {size.width / 2.0f, size.height / 2.0f - 15.0f},
-            kGold,
-            "goldFont.fnt"
-        );
-        m_spectatorProgressLabel = pct;
-        m_root->addChild(pct, 5);
-        auto* score = makeLabel(
-            scoreComparison(ownScore, opponentScore,match.deathmatchSequence>0),
-            0.22f,
-            {size.width / 2.0f, size.height / 2.0f - 53.0f},
-            ccc3(218, 228, 244),
-            "semibold"
-        );
-        m_spectatorScoreLabel = score;
-        corum::ranked::ui::fitMenuLabelWidth(score, 225.0f, 0.22f, 0.16f);
-        m_root->addChild(score, 5);
-
-        std::string hintText = tr("round-resolve-hint", "THE ROUND WILL RESOLVE WHEN THE ACTIVE ATTEMPT ENDS");
-        if (!opponentAttemptActive && match.state == "LAST_ATTEMPT_WINDOW") {
-            auto const seconds = std::max<std::int64_t>(0, RankedRuntime::get().deadlineSeconds().value_or(0));
-            hintText = fmt::format(fmt::runtime(tr("last-attempt-seconds","OPPONENT HAS {}s TO START THE LAST ATTEMPT")),seconds);
+        auto* savedRoot = m_root; auto* savedMenu = m_menu;
+        auto const xs = std::array<float, 3>{size.width / 2.0f - layout.sideOffset, size.width / 2.0f, size.width / 2.0f + layout.sideOffset};
+        for (int i = 0; i < 3; ++i) {
+            auto* column = makeSoloColumn({xs[i], layout.centerY}, layout.scale);
+            m_root = column; m_menu = typeinfo_cast<CCMenu*>(column->getChildByID("ranked-solo-column-menu"_spr));
+            if (i == 1) {
+                m_root->addChild(makeNeonPanel({225.0f, 210.0f}, {0, 0}, kBlue, kDeepPanel2, 236), 1);
+                auto* title = makeLabel(tr("attempt-finished", "YOUR ATTEMPT IS FINISHED"), 0.40f, {0, 86.0f}, kGold, "black");
+                corum::ranked::ui::fitMenuLabelWidth(title, 205.0f, 0.40f, 0.24f); m_root->addChild(title, 5);
+                m_spectatorStateLabel = makeLabel(opponentAttemptActive ? tr("live-progress", "LIVE PROGRESS") : tr("waiting-start", "WAITING TO START"),
+                    0.23f, {0, 66.0f}, kCyan, "semibold");
+                m_root->addChild(m_spectatorStateLabel, 5);
+                m_spectatorProgressLabel = makeLabel(opponentAttemptActive ? fmt::format("{}%", progress) : std::string("--"), 1.45f, {0, 22.0f}, kGold, "black");
+                corum::ranked::ui::fitMenuLabelWidth(m_spectatorProgressLabel, 200.0f, 1.45f, 0.7f); m_root->addChild(m_spectatorProgressLabel, 5);
+                constexpr float barWidth = 190.0f;
+                auto* back = CCLayerColor::create({5, 12, 25, 245}); back->setContentSize({barWidth, 7.0f});
+                back->setPosition({-95.0f, -25.0f}); m_root->addChild(back, 4);
+                m_spectatorBarFill = CCLayerColor::create({kGold.r, kGold.g, kGold.b, 245});
+                m_spectatorBarFill->setContentSize({barWidth * std::clamp(progress / 100.0f, 0.0f, 1.0f), 7.0f});
+                m_spectatorBarFill->setPosition(back->getPosition()); m_spectatorBarWidth = barWidth; m_root->addChild(m_spectatorBarFill, 5);
+                auto* scorePlate = makeTextPlate(scoreComparison(ownScore, opponentScore, match.deathmatchSequence > 0), {205.0f, 24.0f}, {0, -56.0f},
+                    kBlue, 0.22f, ccc3(218, 228, 244), "semibold", &m_spectatorScoreLabel);
+                m_root->addChild(scorePlate, 3);
+                // Global live spectating ON: offer it instead of entering automatically.
+                if (match.spectatorLiveEnabled) {
+                    auto* spectate = addButton(tr("spectate-live", "SPECTATE"), {0, -86.0f}, menu_selector(CorumRankedLayer::onSpectateLive), false, 0.42f);
+                    spectate->setID("ranked-solo-spectate"_spr);
+                    spectate->setEnabled(RankedRuntime::get().canEnterCurrentLevelAsSpectator());
+                    m_soloSpectateButton = spectate;
+                }
+            } else {
+                auto const own = i == 0;
+                auto const sideA = own == ownA;
+                addPlayerCard({0, 13.0f}, sideA ? match.playerAName : match.playerBName, sideA ? match.playerAProfile : match.playerBProfile,
+                    own, sideA ? match.playerAAccountId : match.playerBAccountId, nullptr, false, 26.0f);
+                auto const text = own ? std::string("ATTEMPTS FINISHED") : opponentAttemptActive ? std::string("LIVE ATTEMPT") : tr("waiting-start", "WAITING TO START");
+                auto const color = own ? corum::ranked::ui::TextMuted : opponentAttemptActive ? kSideRed : kCyan;
+                m_root->addChild(makeTextPlate(text, {132.0f, 21.0f}, {0, -92.0f}, color, 0.23f, color, "black"), 3);
+            }
+            m_root = savedRoot; m_menu = savedMenu;
         }
-        auto* hint = makeLabel(hintText, 0.24f, {size.width / 2.0f, 28.0f}, ccc3(195, 205, 224), "semibold");
-        m_spectatorHintLabel = hint;
-        corum::ranked::ui::fitMenuLabelWidth(hint, size.width - 80.0f, 0.24f, 0.16f);
-        m_root->addChild(hint, 5);
+        std::string hintText = tr("round-resolve-hint", "THE ROUND WILL RESOLVE WHEN THE ACTIVE ATTEMPT ENDS");
+        if (!opponentAttemptActive && lastAttempt)
+            hintText = fmt::format(fmt::runtime(tr("last-attempt-seconds", "OPPONENT HAS {}s TO START THE LAST ATTEMPT")), seconds);
+        auto* hint = makeTextPlate(hintText, {std::min(size.width - 40.0f, 300.0f), 22.0f}, {size.width / 2.0f, 18.0f}, kBlue, 0.22f,
+            ccc3(195, 205, 224), "semibold", &m_spectatorHintLabel);
+        m_root->addChild(hint, 3);
     }
 
+    // Round result: outcome title, both records and the series score rolling
+    // up for the round winner (played once per round).
     void renderInterRound(MatchView const& match) {
         auto const size = CCDirector::sharedDirector()->getWinSize();
-        auto* title = makeLabel(
-            match.state == "DEATHMATCH_RESULT" ? "DEATH MATCH RESULT" : "ROUND RESULT",
-            0.62f,
-            {size.width / 2.0f, size.height / 2.0f + 58.0f},
-            ccc3(245, 248, 255),
-            "goldFont.fnt"
-        );
-        corum::ranked::ui::fitMenuLabelWidth(title, size.width - 90.0f, 0.62f, 0.34f);
-        m_root->addChild(title, 5);
+        auto const ownA = soloOwnA(match);
+        auto const deathmatch = match.state == "DEATHMATCH_RESULT" || match.deathmatchSequence > 0;
+        std::string result; double ownScore = 0, oppScore = 0; int ownClears = 0, oppClears = 0; std::string mapTitle;
+        if (deathmatch) {
+            for (auto const& dm : match.deathmatches) if (dm.sequence == match.deathmatchSequence) {
+                result = dm.winnerSide; ownScore = ownA ? dm.scoreA : dm.scoreB; oppScore = ownA ? dm.scoreB : dm.scoreA; mapTitle = dm.mapTitle;
+            }
+        } else {
+            for (auto const& round : match.rounds) if (round.roundNumber == match.roundNumber) {
+                result = round.result; ownScore = ownA ? round.scoreA : round.scoreB; oppScore = ownA ? round.scoreB : round.scoreA;
+                ownClears = ownA ? round.clearsA : round.clearsB; oppClears = ownA ? round.clearsB : round.clearsA; mapTitle = round.mapTitle;
+            }
+        }
+        auto const known = !result.empty();
+        auto const draw = result == "DRAW";
+        auto const ownWin = known && !draw && (result == "A") == ownA;
+        auto const ownWins = ownA ? match.roundWinsA : match.roundWinsB;
+        auto const oppWins = ownA ? match.roundWinsB : match.roundWinsA;
+        auto const animKey = fmt::format("{}:{}:{}:{}", match.matchId, match.roundNumber, match.deathmatchSequence, result);
+        auto const animate = known && !draw && !deathmatch && m_soloScoreAnimated != animKey && (ownWin ? ownWins : oppWins) > 0;
+        if (known) m_soloScoreAnimated = animKey;
+        addSoloHeader(match, fmt::format("{} RESULT", soloRoundTitle(match)), ownWins - (animate && ownWin ? 1 : 0), oppWins - (animate && !ownWin ? 1 : 0));
 
-        auto* series = makeNeonPanel({150.0f, 58.0f}, {size.width / 2.0f, size.height / 2.0f - 1.0f}, kBlue, {7, 17, 36}, 248);
-        m_root->addChild(series, 2);
-        auto* caption = makeLabel(tr("series-score", "SERIES SCORE"), 0.20f, {size.width / 2.0f, size.height / 2.0f + 14.0f}, kCyan, "semibold");
-        m_root->addChild(caption, 5);
-        auto* score = makeLabel(fmt::format("{}   :   {}", match.roundWinsA, match.roundWinsB), 0.45f, {size.width / 2.0f, size.height / 2.0f - 10.0f}, ccc3(245, 248, 255), "goldFont.fnt");
-        m_root->addChild(score, 5);
-
-        auto* next = makeTextPlate(tr("next-map-preparing", "NEXT MAP PREPARING..."), {166.0f, 30.0f}, {size.width / 2.0f, size.height / 2.0f - 58.0f}, kCyan, 0.21f, ccc3(225, 235, 248), "semibold");
+        auto const titleText = !known ? std::string(deathmatch ? "DEATH MATCH RESULT" : "ROUND RESULT") : draw ? std::string("ROUND DRAW") : ownWin ? std::string("ROUND WON") : std::string("ROUND LOST");
+        auto* title = makeLabel(titleText, 0.86f, {size.width / 2.0f, size.height - 98.0f}, !known || draw ? corum::ranked::ui::Text : ownWin ? kGold : kSideRed, "black");
+        corum::ranked::ui::fitMenuLabelWidth(title, size.width - 120.0f, 0.86f, 0.4f);
+        m_root->addChild(title, 6);
+        if (!mapTitle.empty()) {
+            auto* sub = makeLabel(mapTitle, 0.25f, {size.width / 2.0f, size.height - 124.0f}, corum::ranked::ui::TextMuted, "semibold");
+            corum::ranked::ui::fitMenuLabelWidth(sub, size.width - 140.0f, 0.25f, 0.16f); m_root->addChild(sub, 6);
+        }
+        auto const cardWidth = std::min(170.0f, (size.width - 60.0f) / 2.0f);
+        for (int i = 0; i < 2; ++i) {
+            auto const own = i == 0;
+            auto const winner = known && !draw && own == ownWin;
+            auto const center = CCPoint{size.width / 2.0f + (own ? -1.0f : 1.0f) * (cardWidth / 2.0f + 6.0f), size.height / 2.0f - 30.0f};
+            auto const accent = winner ? kGold : corum::ranked::ui::TextMuted;
+            m_root->addChild(makeNeonPanel({cardWidth, 92.0f}, center, accent, kDeepPanel, 246), 2);
+            auto* name = makeLabel(upper(shorten(own == ownA ? match.playerAName : match.playerBName, 14)), 0.28f,
+                {center.x - cardWidth / 2.0f + 10.0f, center.y + 30.0f}, corum::ranked::ui::Text, "extrabold");
+            name->setAnchorPoint({0, 0.5f}); corum::ranked::ui::fitMenuLabelWidth(name, cardWidth - 20.0f, 0.28f, 0.18f); m_root->addChild(name, 5);
+            auto* status = makeLabel(!known ? "SETTLING..." : winner ? "WINNER" : draw ? "DRAW" : "ROUND LOST", 0.2f,
+                {center.x - cardWidth / 2.0f + 10.0f, center.y + 16.0f}, winner ? kGold : corum::ranked::ui::TextMuted, "black");
+            status->setAnchorPoint({0, 0.5f}); m_root->addChild(status, 5);
+            auto* caption = makeLabel("BEST", 0.19f, {center.x - cardWidth / 2.0f + 10.0f, center.y - 6.0f}, corum::ranked::ui::TextMuted, "semibold");
+            caption->setAnchorPoint({0, 0.5f}); m_root->addChild(caption, 5);
+            auto* best = makeLabel(formatScore(own ? ownScore : oppScore, deathmatch), 0.62f, {center.x - cardWidth / 2.0f + 10.0f, center.y - 28.0f},
+                winner ? corum::ranked::ui::Text : ccc3(195, 205, 224), "black");
+            best->setAnchorPoint({0, 0.5f}); corum::ranked::ui::fitMenuLabelWidth(best, cardWidth * 0.62f, 0.62f, 0.3f); m_root->addChild(best, 5);
+            if (!deathmatch) addClearChecks(own ? ownClears : oppClears, {center.x + cardWidth / 2.0f - 12.0f, center.y - 28.0f}, true);
+        }
+        auto* next = makeTextPlate(tr("next-map-preparing", "NEXT MAP PREPARING..."), {std::min(225.0f, size.width - 40.0f), 26.0f}, {size.width / 2.0f, 30.0f},
+            kCyan, 0.25f, ccc3(225, 235, 248), "black");
         m_root->addChild(next, 3);
+        if (!animate) return;
+        // Title pops in, then the winner's digit rolls up and its next pip fills.
+        title->setScale(title->getScale() * 1.35f); title->setOpacity(0);
+        auto const titleScale = title->getScale() / 1.35f;
+        title->runAction(CCSequence::create(CCDelayTime::create(0.25f), CCSpawn::create(CCFadeIn::create(0.26f),
+            CCEaseBackOut::create(CCScaleTo::create(0.42f, titleScale)), nullptr), nullptr));
+        auto* digit = ownWin ? m_soloOwnScore : m_soloOppScore;
+        auto const wins = ownWin ? ownWins : oppWins;
+        if (digit) {
+            auto const base = digit->getPosition();
+            auto* incoming = makeLabel(std::to_string(wins), 0.62f, {base.x, base.y - 12.0f}, ownWin ? kGold : corum::ranked::ui::Text, "black");
+            incoming->setOpacity(0); m_root->addChild(incoming, 6);
+            digit->runAction(CCSequence::create(CCDelayTime::create(0.75f), CCSpawn::create(CCMoveBy::create(0.22f, {0, 12.0f}), CCFadeOut::create(0.2f), nullptr), nullptr));
+            incoming->runAction(CCSequence::create(CCDelayTime::create(0.78f), CCSpawn::create(CCFadeIn::create(0.18f),
+                CCEaseBackOut::create(CCMoveTo::create(0.52f, base)), CCSequence::create(CCScaleTo::create(0.2f, 0.62f * 1.35f), CCEaseBackOut::create(CCScaleTo::create(0.3f, 0.62f)), nullptr), nullptr), nullptr));
+        }
+        auto const pipIndex = (ownWin ? 0 : 2) + std::clamp(wins - 1, 0, 1);
+        if (static_cast<std::size_t>(pipIndex) < m_soloPips.size()) {
+            auto* pip = m_soloPips[static_cast<std::size_t>(pipIndex)];
+            pip->setVisible(true); pip->setScale(0.2f); pip->setOpacity(0);
+            pip->runAction(CCSequence::create(CCDelayTime::create(0.78f), CCSpawn::create(CCFadeIn::create(0.2f),
+                CCEaseBackOut::create(CCScaleTo::create(0.42f, 1.0f)), nullptr), nullptr));
+        }
+        m_soloHoldUntil = SteadyClock::now() + std::chrono::milliseconds(1700);
     }
 
     void addClearChecks(int clears, CCPoint base, bool rightAligned = false, CCNode* parent = nullptr) {
@@ -5137,6 +5442,10 @@ class CorumRankedLayer final : public CCLayerColor {
             !corum::ranked::roundAcquireState(view.match.state)) return;
         auto& runtime = RankedRuntime::get();
         if (!runtime.canEnterCurrentLevel() && !runtime.canEnterNativeRoundScene() && !runtime.canEnterCurrentLevelAsSpectator()) return;
+        // Spectating is opt-in: only the board's SPECTATE button arms it, once.
+        auto const spectateOnly = !runtime.canEnterCurrentLevel() && !runtime.canEnterNativeRoundScene();
+        auto const spectateKey = fmt::format("{}:{}:{}", view.match.matchId, view.match.roundNumber, view.match.deathmatchSequence);
+        if (spectateOnly && m_spectateRequestKey != spectateKey) return;
         // Owned Ranked dialogs must yield before the native modal gate.
         // Close only dialogs opened by this exact carrier; other modals retain
         // their existing launch protection.
@@ -5150,6 +5459,7 @@ class CorumRankedLayer final : public CCLayerColor {
         m_leaderboard.reset();
         closeJukeboxNotice();
         if (!corum::ranked::RankedRoundPreparation::get().launch(CCDirector::sharedDirector()->getRunningScene())) return;
+        if (spectateOnly) m_spectateRequestKey.clear();
         m_enteringLevel = true;
         m_rankedChildScenePushed = true;
     }

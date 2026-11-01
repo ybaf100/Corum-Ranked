@@ -616,6 +616,7 @@ inline constexpr std::array kTranslations {
     CatalogTranslation{"solo-ranked", "SOLO RANKED", "솔로 랭크"},
     CatalogTranslation{"song-download-only", "ONLY SONG DOWNLOAD IS AVAILABLE", "노래 다운로드만 가능합니다"},
     CatalogTranslation{"song-downloaded", "SONG DOWNLOADED", "노래 다운로드 완료"},
+    CatalogTranslation{"spectate-live", "SPECTATE", "관전하기"},
     CatalogTranslation{"spectator-buffering", "BUFFERING...", "수신 지연 중..."},
     CatalogTranslation{"spectator-disconnected", "DISCONNECTED · REOPEN SPECTATE", "연결 끊김 · 관전을 다시 여세요"},
     CatalogTranslation{"spectator-history-gap", "HISTORY GAP · RESYNCING", "기록 누락 · 재동기화 중"},
