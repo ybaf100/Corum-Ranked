@@ -1,3 +1,8 @@
+# v0.5.0-beta.141
+
+- Solo match result: the round rows / WIN-LOSE stamp motion did not play after the LP presentation (the background flashed once instead). Closing the LP presentation rebuilt the result without recording it as rendered, so the next refresh fade-rebuilt it again with the motion already marked as played. The close now records the rendered key before its single rebuild.
+- Actual GD/device behaviour is unverified.
+
 # v0.5.0-beta.140
 
 - Match found / map ban / match result entrances were cut short: map and audio preparation progress changes the screen key during MATCHED and BAN, and every change rebuilt the screen (bot and normal matches alike). Presentation rebuilds now wait until these one-shot motions finish, and the match-found entrance window is wider.

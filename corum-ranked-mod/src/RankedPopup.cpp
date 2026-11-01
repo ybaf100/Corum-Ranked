@@ -4529,6 +4529,14 @@ class CorumRankedLayer final : public CCLayerColor {
         return true;
     }
 
+    // A direct render() records its key as rendered so the next refresh does
+    // not fade-rebuild the same screen (which restarted/cut one-shot motions).
+    void adoptCurrentPresentation() {
+        m_renderedUiKey = presentationKey(); m_pendingUiKey.clear(); m_stableKeyCandidate.clear();
+        if (m_uiFadingOut && m_fadeRoot) { m_fadeRoot->stopAllActions(); m_fadeRoot->setOpacity(255); }
+        m_uiFadingOut = false;
+    }
+
     void restoreResultInput() {
         auto const weak = WeakRef<CorumRankedLayer>(this);
         queueInMainThread([weak] {
@@ -4584,7 +4592,12 @@ class CorumRankedLayer final : public CCLayerColor {
             auto* score = corum::ranked::ui::ResultScoreLayer::create(std::move(input),layer.data(),[weak] {
                 if (auto owner = weak.lock()) {
                     owner->m_resultScoreLayer = nullptr;
-                    if (owner->isRunning()) { owner->render(); owner->restoreResultInput(); }
+                    // Rebuild once, already recorded as the rendered key, so the next
+                    // refresh does not fade-rebuild again and cut the row/stamp motion.
+                    if (owner->isRunning()) {
+                        owner->adoptCurrentPresentation();
+                        owner->render(); owner->restoreResultInput();
+                    }
                 }
             });
             layer->m_fadeRoot->setOpacity(opacity);

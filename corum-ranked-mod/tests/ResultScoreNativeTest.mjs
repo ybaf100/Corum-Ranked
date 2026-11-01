@@ -853,7 +853,7 @@ struct CorumRankedLayer : CCLayerColor {
     corum::ranked::ui::ResultScoreLayer* m_resultScoreLayer=nullptr;
     corum::ranked::ResultPresentationGate m_resultPresentationGate;
     bool m_resultScorePending=false;std::string m_rankTransitionPlayedKey;int rendered=0,toasts=0;
-    void render(){++rendered;}void updateDynamicUi(){}void playNextAchievementToast(){++toasts;}
+    void render(){++rendered;}void adoptCurrentPresentation(){}void updateDynamicUi(){}void playNextAchievementToast(){++toasts;}
     ${['bool playResultRankTransition(','void restoreResultInput()','std::optional<corum::ranked::ScoreAnimationInput> resultScoreInput(',
        'void queueResultScore(','void beginResultScore('].map(name=>method(popupSource,name)).join('\n')}
 };
