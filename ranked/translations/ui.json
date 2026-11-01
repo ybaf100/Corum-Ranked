@@ -2674,5 +2674,25 @@
   "spectate-live": {
     "en": "SPECTATE",
     "ko": "관전하기"
+  },
+  "single-game": {
+    "en": "SINGLE",
+    "ko": "단판"
+  },
+  "no-ban": {
+    "en": "NO BAN",
+    "ko": "밴 안 함"
+  },
+  "no-ban-random-maps": {
+    "en": "NO BAN  ·  MAPS DRAWN AT RANDOM",
+    "ko": "밴 없음  ·  맵 무작위 선정"
+  },
+  "round-one-in": {
+    "en": "ROUND 1 IN",
+    "ko": "1라운드까지"
+  },
+  "prepare-round-one": {
+    "en": "GET READY FOR ROUND 1",
+    "ko": "1라운드를 준비하세요"
   }
 }

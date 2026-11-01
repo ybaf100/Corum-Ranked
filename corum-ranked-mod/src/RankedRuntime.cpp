@@ -1787,6 +1787,8 @@ void RankedRuntime::parseMatchState(matjson::Value const& root) {
     m_view.match.clearsB = 0;
     m_view.match.roundWinsA = static_cast<int>(root["series"]["roundWins"]["A"].asInt().unwrapOr(0));
     m_view.match.roundWinsB = static_cast<int>(root["series"]["roundWins"]["B"].asInt().unwrapOr(0));
+    m_view.match.singleGame = root["series"]["format"].asString().unwrapOr("BO3") == "SINGLE";
+    m_view.match.mapBan = root["series"]["mapBan"].asBool().unwrapOr(true);
     m_view.match.rounds.clear();
     m_view.match.deathmatches.clear();
     m_view.match.cancellationReason = root["cancellation"]["reason"].asString().unwrapOr("");

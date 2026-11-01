@@ -20,12 +20,20 @@ inline void setModeLobbyOpacity(cocos2d::CCLayerColor* group, GLubyte opacity) {
     for (auto* child : geode::cocos::CCArrayExt<cocos2d::CCNode*>(group->getChildren())) propagateModeOpacity(child,opacity);
 }
 
+// Easing lives inside the fade: no CCEase wrapper owns a separate inner action.
+enum class ModeLobbyEase { Linear, SineIn, SineOut };
+inline float modeLobbyEase(ModeLobbyEase ease, float progress) {
+    progress = std::clamp(progress,0.0f,1.0f);
+    if (ease == ModeLobbyEase::SineIn) return 1.0f - std::cos(progress * 1.57079632679f);
+    if (ease == ModeLobbyEase::SineOut) return std::sin(progress * 1.57079632679f);
+    return progress;
+}
 class ModeLobbyFade final : public cocos2d::CCActionInterval {
 public:
-    static ModeLobbyFade* create(float seconds, GLubyte opacity) {
+    static ModeLobbyFade* create(float seconds, GLubyte opacity, ModeLobbyEase ease = ModeLobbyEase::Linear) {
         auto* action = new ModeLobbyFade;
         if (!action->initWithDuration(seconds)) { delete action; return nullptr; }
-        action->m_end = opacity; action->autorelease(); return action;
+        action->m_end = opacity; action->m_ease = ease; action->autorelease(); return action;
     }
     void startWithTarget(cocos2d::CCNode* target) override {
         cocos2d::CCActionInterval::startWithTarget(target);
@@ -34,11 +42,12 @@ public:
     }
     void update(float progress) override {
         if (m_group) setModeLobbyOpacity(m_group,static_cast<GLubyte>(std::lround(
-            m_start + (m_end - m_start) * std::clamp(progress,0.0f,1.0f))));
+            m_start + (m_end - m_start) * modeLobbyEase(m_ease,progress))));
     }
 private:
     cocos2d::CCLayerColor* m_group = nullptr;
     int m_start = 255, m_end = 255;
+    ModeLobbyEase m_ease = ModeLobbyEase::Linear;
 };
 
 /** One action owns all crossing nodes, so the content swap cannot drift from

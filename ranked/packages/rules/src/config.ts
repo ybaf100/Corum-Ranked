@@ -86,6 +86,12 @@ export const validateTierBands = (bands: readonly TierBand[]): readonly string[]
     if (!Number.isInteger(band.promotionWinsRequired) || band.promotionWinsRequired < 0) {
       errors.push(`${band.tier}.promotionWinsRequired must be a non-negative integer`);
     }
+    if (band.matchFormat !== undefined && band.matchFormat !== "BO3" && band.matchFormat !== "SINGLE") {
+      errors.push(`${band.tier}.matchFormat must be BO3 or SINGLE`);
+    }
+    if (band.mapBan !== undefined && typeof band.mapBan !== "boolean") {
+      errors.push(`${band.tier}.mapBan must be TRUE or FALSE`);
+    }
     if (highest || internal) {
       if (band.promotionGames !== 0 || band.promotionWinsRequired !== 0) {
         errors.push(`${band.tier} cannot configure a promotion series within a division or above GOLD`);

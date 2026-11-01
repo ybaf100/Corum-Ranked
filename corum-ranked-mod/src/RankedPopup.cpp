@@ -495,6 +495,8 @@ class CorumRankedLayer final : public CCLayerColor {
     std::string m_phaseKey;
     std::string m_resourceKey;
     std::string m_lastMatchId;
+    // Sentinel for a confirmed/pending NO BAN (the server stores a null ban).
+    static constexpr char const* kNoBanChoice = "__no_ban__";
     std::string m_selectedBan;
     std::string m_pendingBan;
     std::string m_localMessage;
@@ -1076,7 +1078,7 @@ class CorumRankedLayer final : public CCLayerColor {
         // Reconcile it before the phase-key early return.
         if (view.stage == RuntimeStage::Matched) {
             if (view.match.ownBanConfirmed) {
-                m_selectedBan = view.match.ownBanCanonicalLevelId;
+                m_selectedBan = view.match.ownBanCanonicalLevelId.empty() ? std::string(kNoBanChoice) : view.match.ownBanCanonicalLevelId;
                 m_pendingBan.clear();
             } else if (!view.error.empty() && !m_pendingBan.empty()) {
                 m_pendingBan.clear();
@@ -2628,7 +2630,7 @@ class CorumRankedLayer final : public CCLayerColor {
                     corum::ranked::ui::fadeModeLobbySurfaces(self->m_lobbyContents,.18f,true);
                     self->m_lobbyContents->setVisible(true);
                     self->m_lobbyContents->runAction(CCSequence::create(
-                        CCEaseSineOut::create(corum::ranked::ui::ModeLobbyFade::create(.18f,255)),CallFuncExt::create(finish),nullptr));
+                        corum::ranked::ui::ModeLobbyFade::create(.18f,255,corum::ranked::ui::ModeLobbyEase::SineOut),CallFuncExt::create(finish),nullptr));
                 }
                 else finish();
             } else {self->m_lobbyPanel->setVisible(false);finish();}
@@ -2636,7 +2638,7 @@ class CorumRankedLayer final : public CCLayerColor {
         if(!opening && m_lobbyContents) {
             corum::ranked::ui::fadeModeLobbySurfaces(m_lobbyContents,.18f,false);
             auto keep=Ref<CCAction>(sequence);
-            m_lobbyContents->runAction(CCSequence::create(CCEaseSineIn::create(corum::ranked::ui::ModeLobbyFade::create(.18f,0)),
+            m_lobbyContents->runAction(CCSequence::create(corum::ranked::ui::ModeLobbyFade::create(.18f,0,corum::ranked::ui::ModeLobbyEase::SineIn),
                 CallFuncExt::create([weak=WeakRef(this),keep]{if(auto self=weak.lock();self && self->m_lobbyPanel){
                     if(self->m_lobbyContents)self->m_lobbyContents->setVisible(false);
                     self->m_lobbyPanel->runAction(keep.data());}}),nullptr));
@@ -2889,7 +2891,7 @@ class CorumRankedLayer final : public CCLayerColor {
             auto* panel = m_lobbyPanel;
             panel->stopAllActions();
             corum::ranked::ui::fadeModeLobbySurfaces(panel,0.20f,false);
-            panel->runAction(CCSequence::create(CCEaseSineIn::create(corum::ranked::ui::ModeLobbyFade::create(0.20f,0)),
+            panel->runAction(CCSequence::create(corum::ranked::ui::ModeLobbyFade::create(0.20f,0,corum::ranked::ui::ModeLobbyEase::SineIn),
                 CallFuncExt::create([panel] { panel->setVisible(false); }),nullptr));
             card->runAction(CCSequence::create(
                 CCDelayTime::create(0.22f),
@@ -2898,7 +2900,7 @@ class CorumRankedLayer final : public CCLayerColor {
                     corum::ranked::ui::setModeLobbyOpacity(contents,0); contents->setVisible(true); contents->setPositionY(-6.0f);
                     corum::ranked::ui::fadeModeLobbySurfaces(contents,0.28f,true);
                     contents->runAction(CCSequence::create(
-                        CCSpawn::create(CCEaseSineOut::create(corum::ranked::ui::ModeLobbyFade::create(0.28f,255)),
+                        CCSpawn::create(corum::ranked::ui::ModeLobbyFade::create(0.28f,255,corum::ranked::ui::ModeLobbyEase::SineOut),
                             CCEaseSineOut::create(CCMoveTo::create(0.28f,{0,0})),nullptr),
                         CallFuncExt::create(finish),nullptr));
                 }),nullptr));
@@ -2914,13 +2916,13 @@ class CorumRankedLayer final : public CCLayerColor {
                     panel->stopAllActions(); panel->setVisible(true);
                     corum::ranked::ui::setModeLobbyOpacity(panel,0);
                     corum::ranked::ui::fadeModeLobbySurfaces(panel,0.24f,true);
-                    panel->runAction(CCSequence::create(CCEaseSineOut::create(corum::ranked::ui::ModeLobbyFade::create(0.24f,255)),
+                    panel->runAction(CCSequence::create(corum::ranked::ui::ModeLobbyFade::create(0.24f,255,corum::ranked::ui::ModeLobbyEase::SineOut),
                         CallFuncExt::create(finish),nullptr));
                 }),nullptr);
             if (contents) {
                 auto keep = Ref<CCAction>(collapse);
                 corum::ranked::ui::fadeModeLobbySurfaces(contents,0.18f,false);
-                contents->runAction(CCSequence::create(CCEaseSineIn::create(corum::ranked::ui::ModeLobbyFade::create(0.18f,0)),
+                contents->runAction(CCSequence::create(corum::ranked::ui::ModeLobbyFade::create(0.18f,0,corum::ranked::ui::ModeLobbyEase::SineIn),
                     CallFuncExt::create([card, contents, keep] { contents->setVisible(false); card->runAction(keep.data()); }),nullptr));
             } else card->runAction(collapse);
         }
@@ -3474,13 +3476,119 @@ class CorumRankedLayer final : public CCLayerColor {
         renderInterRound(match);
     }
 
+    // Versus intro (once per match, ~2.4 s): both sides sweep in on slanted
+    // slabs, icons slam, names/titles slide, VS slams with a flash, the series
+    // format appears, then the intro fades into the match-found board.
+    static constexpr float kVersusSettle = 2.35f;
+    void addVersusIntro(MatchView const& match) {
+        auto const size = CCDirector::sharedDirector()->getWinSize();
+        auto const ownA = match.side == "A";
+        auto* intro = CCLayerColor::create({0, 0, 0, 255}, 0, 0);
+        intro->setCascadeOpacityEnabled(true); intro->setID("ranked-versus-intro"_spr);
+        m_root->addChild(intro, 40);
+        // Backdrop so the board underneath stays hidden until the settle.
+        intro->addChild(CCLayerColor::create({3, 6, 14, 255}, size.width, size.height), 0);
+        for (int side = 0; side < 2; ++side) {
+            auto const own = side == 0;
+            auto const accent = own ? kGold : kSideRed;
+            auto const fill = own ? ccc4(9, 26, 56, 255) : ccc4(44, 11, 25, 255);
+            auto* slab = CCLayerColor::create(fill, size.width * 0.62f, size.height * 1.6f);
+            slab->setSkewX(-12.0f);
+            auto* edge = CCLayerColor::create({accent.r, accent.g, accent.b, 255}, 3.0f, size.height * 1.6f);
+            edge->setPosition({own ? size.width * 0.62f - 3.0f : 0.0f, 0}); slab->addChild(edge, 1);
+            auto const restX = own ? size.width * 0.5f - size.width * 0.62f + 12.0f : size.width * 0.5f - 12.0f;
+            slab->setPosition({restX + (own ? -size.width : size.width), -size.height * 0.3f});
+            slab->runAction(CCSequence::create(CCDelayTime::create(0.12f),
+                CCEaseOut::create(CCMoveTo::create(0.42f, {restX, -size.height * 0.3f}), 3.0f), nullptr));
+            intro->addChild(slab, 1);
+            // Speed lines.
+            for (int i = 0; i < 3; ++i) {
+                auto* line = CCLayerColor::create({accent.r, accent.g, accent.b, 90}, 90.0f + 40.0f * (i % 2), 1.5f);
+                auto const y = size.height * (0.25f + 0.25f * static_cast<float>(i));
+                auto const x = own ? 20.0f + 26.0f * i : size.width - 130.0f - 18.0f * i;
+                line->setPosition({x + (own ? -size.width : size.width), y});
+                line->runAction(CCSequence::create(CCDelayTime::create(0.12f + 0.04f * i),
+                    CCEaseOut::create(CCMoveTo::create(0.6f, {x + (own ? 50.0f : -50.0f), y}), 3.0f), nullptr));
+                intro->addChild(line, 2);
+            }
+            auto const& profile = (own == ownA) ? match.playerAProfile : match.playerBProfile;
+            auto const& name = (own == ownA) ? match.playerAName : match.playerBName;
+            auto const accountId = (own == ownA) ? match.playerAAccountId : match.playerBAccountId;
+            auto const cx = own ? size.width * 0.24f : size.width * 0.76f;
+            auto const tierAccent = tierColor(upper(profile.displayedTier));
+            auto* label = makeLabel(own ? tr("you", "YOU") : tr("opponent", "OPPONENT"), 0.24f, {cx, size.height - 46.0f}, own ? kGold : ccc3(220, 228, 242), "extrabold");
+            label->setOpacity(0); label->runAction(CCSequence::create(CCDelayTime::create(0.62f), CCFadeIn::create(0.26f), nullptr));
+            intro->addChild(label, 5);
+            // Icon slams in from 1.8x.
+            auto* plate = makeNeonPanel({78.0f, 78.0f}, CCPointZero, own ? kGold : kSideRed, {5, 11, 23}, 250);
+            auto* icon = own ? corum::ranked::ui::PlayerIcon::createLocal() : corum::ranked::ui::PlayerIcon::createRemote(accountId);
+            auto* slam = CCNode::create(); slam->setPosition({cx, size.height * 0.60f}); slam->addChild(plate, 1);
+            if (icon) { icon->setScale(1.4f); slam->addChild(icon, 2); }
+            slam->setScale(1.8f); slam->setVisible(false);
+            slam->runAction(CCSequence::create(CCDelayTime::create(0.42f), CCShow::create(),
+                CCEaseBackOut::create(CCScaleTo::create(0.30f, 1.0f)), nullptr));
+            intro->addChild(slam, 6);
+            // Name slides in from outside, title and rating follow.
+            auto* nameLabel = makeLabel(shorten(upper(name), 15), 0.58f, {cx, size.height * 0.60f - 58.0f}, corum::ranked::ui::Text, "black");
+            corum::ranked::ui::fitMenuLabelWidth(nameLabel, size.width * 0.40f, 0.58f, 0.32f);
+            auto const namePos = nameLabel->getPosition();
+            nameLabel->setPosition(namePos + CCPoint{own ? -size.width * 0.5f : size.width * 0.5f, 0}); nameLabel->setOpacity(0);
+            nameLabel->runAction(CCSequence::create(CCDelayTime::create(0.62f),
+                CCSpawn::create(CCEaseOut::create(CCMoveTo::create(0.36f, namePos), 3.0f), CCFadeIn::create(0.24f), nullptr), nullptr));
+            intro->addChild(nameLabel, 6);
+            auto lineY = size.height * 0.60f - 80.0f;
+            if (profile.equippedTitle.active) {
+                auto* title = makeLabel(achievementTitleText(profile.equippedTitle), 0.26f, {cx, lineY}, achievementTitleColor(profile.equippedTitle), "semibold");
+                corum::ranked::ui::fitMenuLabelWidth(title, size.width * 0.38f, 0.26f, 0.16f);
+                corum::ranked::ui::styleAchievementText(title, profile.equippedTitle.level.value_or(corum::ranked::achievementRarityTier(profile.equippedTitle.rarity)));
+                title->setOpacity(0); title->runAction(CCSequence::create(CCDelayTime::create(0.76f), CCFadeIn::create(0.3f), nullptr));
+                intro->addChild(title, 6);
+                lineY -= 22.0f;
+            }
+            auto const placement = profile.placementGames < profile.placementGamesRequired;
+            auto const rating = placement ? tr("placement", "PLACEMENT")
+                : fmt::format("{}  {} LP", corum::ranked::rankTierDisplay(upper(profile.displayedTier)), profile.visibleRankedScore.value_or(0));
+            auto* ratingPlate = makeTextPlate(rating, {122.0f, 20.0f}, {cx, lineY}, tierAccent, 0.22f, ccc3(240, 244, 250), "black");
+            ratingPlate->setVisible(false);
+            ratingPlate->runAction(CCSequence::create(CCDelayTime::create(0.88f), CCShow::create(), nullptr));
+            intro->addChild(ratingPlate, 6);
+        }
+        // VS slam + flash + shake.
+        auto* versus = makeLabel("VS", 1.25f, {size.width / 2.0f, size.height * 0.60f}, kGold, "display");
+        versus->setRotation(-6.0f); versus->setScale(4.0f); versus->setVisible(false);
+        versus->runAction(CCSequence::create(CCDelayTime::create(0.90f), CCShow::create(),
+            CCEaseIn::create(CCScaleTo::create(0.22f, 1.25f), 3.0f), nullptr));
+        intro->addChild(versus, 8);
+        auto* flash = CCLayerColor::create({255, 255, 255, 0}, size.width, size.height);
+        flash->runAction(CCSequence::create(CCDelayTime::create(1.12f), CCFadeTo::create(0.03f, 190), CCFadeTo::create(0.36f, 0), nullptr));
+        intro->addChild(flash, 9);
+        intro->runAction(CCSequence::create(CCDelayTime::create(1.12f),
+            CCMoveBy::create(0.04f, {-5.0f, 2.0f}), CCMoveBy::create(0.04f, {9.0f, -4.0f}), CCMoveBy::create(0.04f, {-7.0f, 3.0f}),
+            CCMoveBy::create(0.04f, {3.0f, -1.0f}), nullptr));
+        // Format and ban rule under the VS.
+        auto const format = match.singleGame ? "SOLO RANKED  ·  " + tr("single-game", "SINGLE") : std::string("SOLO RANKED  ·  BO3");
+        auto* chip = makeTextPlate(format, {150.0f, 20.0f}, {size.width / 2.0f, size.height * 0.60f - 50.0f}, kBlue, 0.23f, kGold, "black");
+        auto* banLine = makeLabel(match.mapBan ? fmt::format("MAP BAN  ·  {}", match.singleGame ? 4 : 5) : tr("no-ban-random-maps", "NO BAN  ·  MAPS DRAWN AT RANDOM"),
+            0.20f, {size.width / 2.0f, size.height * 0.60f - 70.0f}, match.mapBan ? ccc3(164, 181, 205) : kGreen, "extrabold");
+        chip->setVisible(false); banLine->setOpacity(0);
+        chip->runAction(CCSequence::create(CCDelayTime::create(1.35f), CCShow::create(), nullptr));
+        banLine->runAction(CCSequence::create(CCDelayTime::create(1.45f), CCFadeIn::create(0.26f), nullptr));
+        intro->addChild(chip, 7); intro->addChild(banLine, 7);
+        // Settle: fade the whole intro (chrome explicitly) and remove it.
+        intro->runAction(CCSequence::create(CCDelayTime::create(kVersusSettle),
+            CallFuncExt::create([intro] { corum::ranked::ui::fadeModeLobbySurfaces(intro, 0.32f, false); }),
+            corum::ranked::ui::ModeLobbyFade::create(0.32f, 0, corum::ranked::ui::ModeLobbyEase::SineIn),
+            CCRemoveSelf::create(), nullptr));
+    }
+
     void renderMatchFound(MatchView const& match) {
         auto const size = CCDirector::sharedDirector()->getWinSize();
         auto const ownA = match.side == "A";
-        // Entrance (once per match): cards slide in from the sides, VS pops,
-        // then the ban countdown box opens.
+        // Entrance (once per match): the versus intro, then cards slide in from
+        // the sides, VS pops and the countdown box opens.
         auto const animate = m_matchFoundMotionKey != match.matchId && phaseSeconds() < 1.0;
         m_matchFoundMotionKey = match.matchId;
+        auto const lead = animate ? kVersusSettle + 0.2f : 0.0f;
         auto* savedRoot = m_root; auto* savedMenu = m_menu;
         for (int side = 0; side < 2; ++side) {
             auto* group = makeMotionGroup();
@@ -3488,12 +3596,12 @@ class CorumRankedLayer final : public CCLayerColor {
             if (side == 0) addPlayerCard({100.0f, size.height / 2.0f - 2.0f}, match.playerAName, match.playerAProfile, ownA, match.playerAAccountId);
             else addPlayerCard({size.width - 100.0f, size.height / 2.0f - 2.0f}, match.playerBName, match.playerBProfile, !ownA, match.playerBAccountId);
             m_root = savedRoot; m_menu = savedMenu;
-            if (animate) { group->setPositionX(side == 0 ? -60.0f : 60.0f); revealGroup(group, 0.05f, {side == 0 ? 60.0f : -60.0f, 0}, 0.45f); }
+            if (animate) { group->setPositionX(side == 0 ? -60.0f : 60.0f); revealGroup(group, lead + 0.05f, {side == 0 ? 60.0f : -60.0f, 0}, 0.45f); }
         }
 
         addScreenHeader(
             tr("match-found", "MATCH FOUND"),
-            tr("private-ban-phase", "PRIVATE BAN PHASE"),
+            match.mapBan ? tr("private-ban-phase", "PRIVATE BAN PHASE") : tr("no-ban-random-maps", "NO BAN  ·  MAPS DRAWN AT RANDOM"),
             corum::ranked::ui::Text,
             kCyan
         );
@@ -3502,7 +3610,7 @@ class CorumRankedLayer final : public CCLayerColor {
         m_root->addChild(versus, 5);
         if (animate) {
             versus->setScale(0.0f);
-            versus->runAction(CCSequence::create(CCDelayTime::create(0.35f), CCEaseBackOut::create(CCScaleTo::create(0.32f, 0.40f)), nullptr));
+            versus->runAction(CCSequence::create(CCDelayTime::create(lead + 0.35f), CCEaseBackOut::create(CCScaleTo::create(0.32f, 0.40f)), nullptr));
         }
         auto* centerGroup = makeMotionGroup();
         auto* outerRoot = m_root; m_root = centerGroup;
@@ -3510,16 +3618,17 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const left = std::max(0, 5 - static_cast<int>(std::floor(phaseSeconds())));
         auto* countdownPlate = makeNeonPanel({116.0f, 58.0f}, {size.width / 2.0f, size.height / 2.0f - 2.0f}, left <= 2 ? kSideRed : kBlue, {7, 17, 36}, 236);
         m_root->addChild(countdownPlate, 2);
-        auto* phase = makeLabel(tr("map-ban-in", "MAP BAN IN"), 0.27f, {size.width / 2.0f, size.height / 2.0f + 14.0f}, kCyan, "semibold");
+        auto* phase = makeLabel(match.mapBan ? tr("map-ban-in", "MAP BAN IN") : tr("round-one-in", "ROUND 1 IN"), 0.27f, {size.width / 2.0f, size.height / 2.0f + 14.0f}, kCyan, "semibold");
         m_root->addChild(phase, 5);
         auto* countdown = makeLabel(fmt::format("{}", left), 0.64f, {size.width / 2.0f, size.height / 2.0f - 8.0f}, left <= 2 ? kSideRed : kGold, "black");
         m_matchFoundCountdownLabel = countdown;
         m_root->addChild(countdown, 5);
-        auto* hint = makeLabel(tr("prepare-private-ban", "GET READY TO CHOOSE A PRIVATE BAN"), 0.24f, {size.width / 2.0f, size.height / 2.0f - 35.0f}, ccc3(210, 219, 236), "semibold");
+        auto* hint = makeLabel(match.mapBan ? tr("prepare-private-ban", "GET READY TO CHOOSE A PRIVATE BAN") : tr("prepare-round-one", "GET READY FOR ROUND 1"),
+            0.24f, {size.width / 2.0f, size.height / 2.0f - 35.0f}, ccc3(210, 219, 236), "semibold");
         corum::ranked::ui::fitMenuLabelWidth(hint, 176.0f, 0.24f, 0.16f);
         m_root->addChild(hint, 5);
         m_root = outerRoot;
-        if (animate) { centerGroup->setPositionY(-10.0f); revealGroup(centerGroup, 0.55f, {0, 10.0f}, 0.35f); }
+        if (animate) { centerGroup->setPositionY(-10.0f); revealGroup(centerGroup, lead + 0.55f, {0, 10.0f}, 0.35f); addVersusIntro(match); }
     }
 
     void renderBan(MatchView const& match) {
@@ -3542,10 +3651,11 @@ class CorumRankedLayer final : public CCLayerColor {
         auto* timerCaption = makeLabel(tr("time-left", "TIME LEFT"), 0.24f, {size.width - 42.0f, size.height - 56.0f}, kCyan, "semibold");
         m_root->addChild(timerCaption, 6);
 
+        // BO3 shows five candidates, a single game four.
         auto const count = std::min<std::size_t>(5, match.candidateMaps.size());
-        auto const cardWidth = (size.width - 34.0f) / 5.0f;
+        auto const cardWidth = std::min(130.0f, (size.width - 34.0f) / static_cast<float>(std::max<std::size_t>(4, count)));
         auto const cardHeight = std::min(170.0f, size.height - 122.0f);
-        auto const startX = 17.0f + cardWidth / 2.0f;
+        auto const startX = size.width / 2.0f - cardWidth * static_cast<float>(count > 0 ? count - 1 : 0) / 2.0f;
         auto const centerY = size.height / 2.0f + 2.0f;
         // Entrance (once per match): the match-found box opens across the row,
         // then the map cards rise in one after another.
@@ -3620,6 +3730,14 @@ class CorumRankedLayer final : public CCLayerColor {
             m_root = savedRoot; m_menu = savedMenu;
         }
 
+        // NO BAN: confirm without removing a candidate (server null ban).
+        if (m_selectedBan == kNoBanChoice) {
+            m_root->addChild(makeTextPlate(tr("no-ban", "NO BAN"), {74.0f, 24.0f}, {size.width - 50.0f, 24.0f}, kGold, 0.20f, kGold), 3);
+        } else if (m_pendingBan == kNoBanChoice) {
+            m_root->addChild(makeTextPlate(tr("banning", "BANNING..."), {74.0f, 24.0f}, {size.width - 50.0f, 24.0f}, kGold, 0.16f, kGold), 3);
+        } else if (m_selectedBan.empty() && m_pendingBan.empty()) {
+            addButton(tr("no-ban", "NO BAN"), {size.width - 50.0f, 24.0f}, menu_selector(CorumRankedLayer::onNoBan), false, 0.42f);
+        }
         auto* privacyPlate = makeNeonPanel({248.0f, 36.0f}, {size.width / 2.0f, 24.0f}, kBlue, {8, 18, 36}, 242);
         m_root->addChild(privacyPlate, 1);
         auto* privacy = makeLabel(tr("private-ban-notice", "YOUR BAN IS PRIVATE  |  REVEALED WHEN THE PHASE ENDS"), 0.25f, {size.width / 2.0f, 24.0f}, ccc3(215, 225, 242), "semibold");
@@ -3638,7 +3756,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 corum::ranked::ui::fadeModeLobbySurfaces(group, seconds * 0.8f, true);
             }),
             CCSpawn::create(CCEaseOut::create(CCMoveBy::create(seconds, offset), 3.0f),
-                CCEaseSineOut::create(corum::ranked::ui::ModeLobbyFade::create(seconds * 0.8f, 255)), nullptr), nullptr));
+                corum::ranked::ui::ModeLobbyFade::create(seconds * 0.8f, 255,corum::ranked::ui::ModeLobbyEase::SineOut), nullptr), nullptr));
     }
 
     // A group container at the origin: children keep screen coordinates.
@@ -3780,7 +3898,7 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const size = CCDirector::sharedDirector()->getWinSize();
         auto const ownA = soloOwnA(match);
         if (modeChip) {
-            auto* mode = makeTextPlate("SOLO RANKED  BO3", {78.0f, 18.0f}, {10.0f + 39.0f, size.height - 22.0f}, kBlue, 0.21f, kGold, "black");
+            auto* mode = makeTextPlate(match.singleGame ? "SOLO RANKED  " + tr("single-game", "SINGLE") : std::string("SOLO RANKED  BO3"), {78.0f, 18.0f}, {10.0f + 39.0f, size.height - 22.0f}, kBlue, 0.21f, kGold, "black");
             m_root->addChild(mode, 3);
         }
         auto const top = size.height - 35.0f;
@@ -3798,7 +3916,8 @@ class CorumRankedLayer final : public CCLayerColor {
         for (int side = 0; side < 2; ++side) {
             auto const wins = side == 0 ? ownWins : opponentWins;
             auto const color = side == 0 ? kGold : corum::ranked::ui::Text;
-            for (int i = 0; i < 2; ++i) {
+            // Wins needed: two for BO3, one for a single game.
+            for (int i = 0; i < (match.singleGame ? 1 : 2); ++i) {
                 auto const x = side == 0 ? size.width / 2.0f - 98.0f + i * 15.0f : size.width / 2.0f + 98.0f - 11.5f - i * 15.0f;
                 auto* empty = CCLayerColor::create({164, 181, 205, 70}, 11.5f, 4.5f); empty->setPosition({x, top - 11.0f}); m_root->addChild(empty, 4);
                 auto* fill = CCLayerColor::create({color.r, color.g, color.b, 255}, 11.5f, 4.5f);
@@ -4046,6 +4165,12 @@ class CorumRankedLayer final : public CCLayerColor {
         }
         shift = match.deathmatchSequence > 0 && past.size() >= 3;
         if (shift) { revealSlot = 2; return std::vector<SoloIntroCard>(past.end() - 3, past.end()); }
+        // Single game: the only round is revealed centre stage; a draw's death
+        // match keeps the decided cards on its left.
+        if (match.singleGame) {
+            revealSlot = past.size() >= 2 ? 2 : 1;
+            return past;
+        }
         // Normal BO3: the revealed round sits in its own slot; later rounds are locked.
         revealSlot = std::clamp(match.roundNumber - 1, 0, 2);
         std::vector<SoloIntroCard> cards;
@@ -4600,8 +4725,13 @@ class CorumRankedLayer final : public CCLayerColor {
         // Once per match: rows land one by one from the left, then WIN / LOSE
         // stamps onto both cards at the same moment.
         auto const resultKey = match.matchId.empty() ? fmt::format("{}:{}", match.playerAName, match.stateVersion) : match.matchId;
-        auto const animateRows = m_resultMotionKey != resultKey;
-        m_resultMotionKey = resultKey;
+        // The LP/tier presentation overlays the result first. Hold the rows and
+        // stamps until it is dismissed; its close re-renders this screen.
+        auto const presentationAhead = scoreInput && !m_resultPresentationGate.played(match.matchId);
+        auto const overlayActive = m_rankTransitionLayer || m_resultScoreLayer || m_resultScorePending || presentationAhead;
+        auto const animateRows = !overlayActive && m_resultMotionKey != resultKey;
+        if (!overlayActive) m_resultMotionKey = resultKey;
+        auto const holdRows = overlayActive && m_resultMotionKey != resultKey;
         int rowIndex = 0;
         auto* rowsRoot = m_root;
         auto addRow = [&](std::string const& label, std::string const& map, double ownScore, double oppScore, std::string const& winner, bool deathmatch) {
@@ -4621,6 +4751,7 @@ class CorumRankedLayer final : public CCLayerColor {
             score->setAnchorPoint({1, 0.5f}); corum::ranked::ui::fitMenuLabelWidth(score, centerWidth * 0.42f, 0.27f, 0.16f); m_root->addChild(score, 5);
             m_root = outer;
             if (animateRows) { rowGroup->setPositionX(-30.0f); revealGroup(rowGroup, 0.35f + 0.28f * static_cast<float>(rowIndex), {30.0f, 0}, 0.22f); }
+            if (holdRows) rowGroup->setVisible(false);
             ++rowIndex;
             y -= 30.0f;
         };
@@ -4641,6 +4772,7 @@ class CorumRankedLayer final : public CCLayerColor {
             corum::ranked::ui::fitMenuLabelWidth(stamp, 140.0f, 1.05f, 0.6f);
             stamp->setRotation(own ? -8.0f : 8.0f);
             m_root->addChild(stamp, 12);
+            if (holdRows) stamp->setVisible(false);
             if (!animateRows) continue;
             auto const finalScale = stamp->getScale();
             stamp->setVisible(false); stamp->setScale(finalScale * 2.2f); stamp->setOpacity(0);
@@ -5704,6 +5836,12 @@ class CorumRankedLayer final : public CCLayerColor {
         if (index < 0 || static_cast<std::size_t>(index) >= maps.size()) return;
         m_pendingBan = maps[static_cast<std::size_t>(index)].canonicalLevelId;
         RankedRuntime::get().submitBan(m_pendingBan);
+    }
+
+    void onNoBan(CCObject*) {
+        if (!m_selectedBan.empty() || !m_pendingBan.empty()) return;
+        m_pendingBan = kNoBanChoice;
+        RankedRuntime::get().submitBan(std::nullopt);
     }
 
     void onQueueAgain(CCObject*) {

@@ -13,6 +13,9 @@ import {
   advanceRoundClock,
   applyDeathmatchWinner,
   applyRoundResult,
+  mapBanOf,
+  matchFormatOf,
+  roundMapCountOf,
   bannerForRound,
   calculateMmrUpdate,
   createRound,
@@ -567,7 +570,8 @@ export class MatchService {
         },
         profileAfter: rating.profileAfter ?? null,
         profileBefore: rating.profileBefore ?? null,
-        bestOf: match.source_payload?parseJson<RankedConfigSnapshot>(match.source_payload).operational?.rules?.bestOf??null:null,
+        bestOf: matchFormatOf(parseJson<MatchSeriesState>(match.series_state)) === "SINGLE" ? 1
+          : match.source_payload?parseJson<RankedConfigSnapshot>(match.source_payload).operational?.rules?.bestOf??null:null,
         ratingEvents: rating.events ?? null,
         series: parseJson<MatchSeriesState>(match.series_state),
         rounds: details.get(match.id)?.rounds??[],
@@ -628,6 +632,11 @@ export class MatchService {
              WHERE id = $1`,
             [matchId, deadline.toISOString(), now.toISOString()],
           );
+          // NO BAN tiers: the ban phase resolves at once with no bans, so the
+          // round maps are drawn and Round 1 prepares in this transaction.
+          if (!mapBanOf(parseJson<MatchSeriesState>(match.series_state))) {
+            await this.finalizeBans(transaction, await this.lockMatch(transaction, matchId), now);
+          }
         }
         return;
       }
@@ -2155,11 +2164,14 @@ export class MatchService {
     const config = this.matchConfig(match);
     if (!config.operational.timeouts) throw new Error("Missing timeout policy");
     const candidates = parseJson<RankedMapSnapshot[]>(match.candidate_maps_snapshot);
+    const series = parseJson<MatchSeriesState>(match.series_state);
+    const banEnabled = mapBanOf(series);
     const resolution = resolveBans(
       candidates,
-      match.ban_a_confirmed_at ? match.ban_a_canonical_id : null,
-      match.ban_b_confirmed_at ? match.ban_b_canonical_id : null,
+      banEnabled && match.ban_a_confirmed_at ? match.ban_a_canonical_id : null,
+      banEnabled && match.ban_b_confirmed_at ? match.ban_b_canonical_id : null,
       this.random,
+      roundMapCountOf(matchFormatOf(series)),
     );
     const readyDeadline = new Date(
       now.getTime() + resourcePrepareSeconds(config.operational.timeouts.readySeconds) * 1_000,

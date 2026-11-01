@@ -319,6 +319,9 @@ struct MatchView {
     int clearsB = 0;
     int roundWinsA = 0;
     int roundWinsB = 0;
+    // Per-tier series settings (server series.format / series.mapBan).
+    bool singleGame = false;
+    bool mapBan = true;
     int deathmatchSequence = 0;
     int deathmatchAttemptsUsedA = 0;
     int deathmatchAttemptsUsedB = 0;

@@ -30,6 +30,13 @@ var CORUM_RANKED_TIER_HEADERS = Object.freeze([
   "Promotion Wins Required",
 ]);
 
+/** Optional per-tier series settings, appended after the original columns.
+ * Match Format: BO3 (default) / SINGLE. Map Ban: TRUE (default) / FALSE (no ban phase). */
+var CORUM_RANKED_TIER_FORMAT_HEADERS = Object.freeze([
+  "Match Format",
+  "Map Ban",
+]);
+
 var CORUM_RANKED_SEED_HEADERS = Object.freeze([
   "CSMP Tier",
   "Initial Hidden MMR",
@@ -251,6 +258,9 @@ function setupCorumRankedConfig() {
   migrateRankedFixedRuleDefaults_(configSheet);
   migrateRankedPlacementBeta9Defaults_(configSheet);
   migrateRankedTierPromotionDefaults_(tiersSheet);
+  getOrCreateSheet_(spreadsheet, CORUM_RANKED_SHEETS.tiers,
+    CORUM_RANKED_TIER_HEADERS.concat(CORUM_RANKED_TIER_FORMAT_HEADERS));
+  migrateRankedTierFormatDefaults_(tiersSheet);
 
   [mapsSheet, tiersSheet, seedsSheet, allowedModsSheet, configSheet].forEach(function (sheet) {
     sheet.setFrozenRows(1);
@@ -419,6 +429,23 @@ function getCorumRankedConfigResponse_() {
   });
 }
 
+/** Fill blank format cells with BO3 / TRUE so the sheet shows the effective rule. */
+function migrateRankedTierFormatDefaults_(sheet) {
+  if (!sheet || sheet.getLastRow() < 2) return;
+  var values = sheet.getDataRange().getValues();
+  var tierColumn = findOptionalHeaderIndex_(values[0], ["Tier"]);
+  var formatColumn = findOptionalHeaderIndex_(values[0], ["Match Format"]);
+  var banColumn = findOptionalHeaderIndex_(values[0], ["Map Ban"]);
+  if ([tierColumn, formatColumn, banColumn].some(function (column) { return column === -1; })) return;
+  var changed = false;
+  for (var rowIndex = 1; rowIndex < values.length; rowIndex += 1) {
+    if (!rankedText_(values[rowIndex][tierColumn])) continue;
+    if (rankedText_(values[rowIndex][formatColumn]) === "") { values[rowIndex][formatColumn] = "BO3"; changed = true; }
+    if (rankedText_(values[rowIndex][banColumn]) === "") { values[rowIndex][banColumn] = true; changed = true; }
+  }
+  if (changed) sheet.getRange(1, 1, values.length, values[0].length).setValues(values);
+}
+
 function readCorumRankedConfig_() {
   var spreadsheet = getSpreadsheet_();
   var rawConfig = readRankedKeyValues_(spreadsheet.getSheetByName(CORUM_RANKED_SHEETS.config));
@@ -538,6 +565,8 @@ function readRankedTierBands_(sheet) {
   var deathmatchPoolColumn = findOptionalHeaderIndex_(header, ["Deathmatch Pool"]);
   var promotionGamesColumn = findOptionalHeaderIndex_(header, ["Promotion Games"]);
   var promotionWinsColumn = findOptionalHeaderIndex_(header, ["Promotion Wins Required"]);
+  var formatColumn = findOptionalHeaderIndex_(header, ["Match Format"]);
+  var banColumn = findOptionalHeaderIndex_(header, ["Map Ban"]);
   if ([tierColumn, minimumColumn, maximumColumn, mainPoolColumn, deathmatchPoolColumn,
     promotionGamesColumn, promotionWinsColumn].some(function (column) {
     return column === -1;
@@ -562,6 +591,19 @@ function readRankedTierBands_(sheet) {
       promotionGames: rankedNumber_(row[promotionGamesColumn]),
       promotionWinsRequired: rankedNumber_(row[promotionWinsColumn]),
     });
+    var band = result[result.length - 1];
+    if (formatColumn !== -1) {
+      var format = rankedText_(row[formatColumn]).toUpperCase().replace(/\s+/g, "");
+      if (format === "단판" || format === "BO1" || format === "SINGLE") band.matchFormat = "SINGLE";
+      else if (format === "" || format === "BO3") band.matchFormat = "BO3";
+      else band.matchFormat = format;
+    }
+    if (banColumn !== -1 && rankedText_(row[banColumn]) !== "") {
+      var ban = row[banColumn];
+      var banText = rankedText_(ban).toUpperCase();
+      band.mapBan = ban === true || banText === "TRUE" ? true :
+        ban === false || banText === "FALSE" || banText === "NO BAN" || banText === "노밴" ? false : banText;
+    }
   }
   return result;
 }
@@ -1228,6 +1270,12 @@ function validateRankedTiers_(tierBands, errors) {
   tierBands.forEach(function (band) {
     if (byTier[band.tier]) errors.push("Ranked Tiers에 " + band.tier + "가 중복되어 있습니다.");
     byTier[band.tier] = band;
+    if (band.matchFormat !== undefined && band.matchFormat !== "BO3" && band.matchFormat !== "SINGLE") {
+      errors.push(band.tier + "의 Match Format은 BO3 또는 SINGLE(단판)이어야 합니다.");
+    }
+    if (band.mapBan !== undefined && typeof band.mapBan !== "boolean") {
+      errors.push(band.tier + "의 Map Ban은 TRUE 또는 FALSE여야 합니다.");
+    }
   });
   expected.forEach(function (tier) {
     if (!byTier[tier]) errors.push("Ranked Tiers에 " + tier + "가 필요합니다.");

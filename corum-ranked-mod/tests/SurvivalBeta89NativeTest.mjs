@@ -19,7 +19,7 @@ test('podium tier/LP group has no fill and stays centered on its own pedestal th
  const setup=src.slice(src.indexOf('auto* stamp='),src.indexOf('\n',src.indexOf('auto* stamp=')));
  const fade=src.slice(src.indexOf('p.stamp->setVisible'),src.indexOf('\n',src.indexOf('p.stamp->setVisible')));
  const opacity=read('src/ui/ModeLobbyMotion.hpp');
- const prop=opacity.slice(opacity.indexOf('inline void propagateModeOpacity'),opacity.indexOf('\nclass ModeLobbyFade'));
+ const prop=opacity.slice(opacity.indexOf('inline void propagateModeOpacity'),opacity.indexOf('\n// Easing lives inside the fade'));
  run(`
 #include <cassert>
 #include <cmath>

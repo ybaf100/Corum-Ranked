@@ -1,3 +1,13 @@
+# v0.5.0-beta.138
+
+- Crash fix (iOS, beta.137): leaving the queue and returning to the main menu crashed in `CCEaseSineIn::update` (an ease-in fade whose inner fade action had already been freed). Lobby chrome fades no longer use per-layer CCEase wrappers: one tween on the faded group drives every surface through strong refs, and ModeLobbyFade carries its own easing.
+- Match found: a versus intro (slanted side slabs, icon slam, name/title/rating slide-in, VS slam with flash and shake, series format and ban rule) before the match-found board settles in.
+- Round overview: card frames now fade with their text on exit, so empty frames no longer linger over the rising board for about a second.
+- Match result: rows and WIN / LOSE stamps wait until the LP/tier presentation is dismissed, then play.
+- Per-tier series format from the Ranked Tiers sheet (`Match Format`: BO3 / SINGLE, `Map Ban`: TRUE / FALSE; blank = BO3 with ban). Single games show four ban candidates, one round decides the match, and a draw goes straight to Death Match. Tiers with `Map Ban = FALSE` skip the ban phase (maps drawn at random). Players can also choose NO BAN during a ban phase.
+- The new sheet columns need the updated `apps-script/RankedConfig.gs` and one `setupCorumRankedConfig()` run; until then every tier stays BO3 with a ban.
+- Actual GD/device behaviour is unverified.
+
 # v0.5.0-beta.137
 
 - Same content as beta.136 (Solo result row / WIN-LOSE stamp motion, plus everything from beta.135). beta.136 stopped at validation because a C++ domain test still expected the old "382.0" score text; the test now expects "382". beta.135 and beta.136 were never published or activated.

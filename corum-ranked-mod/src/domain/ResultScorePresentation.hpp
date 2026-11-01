@@ -269,6 +269,7 @@ public:
         if (matchId.empty() || matchId == m_played) return false;
         m_played = matchId; return true;
     }
+    bool played(std::string const& matchId) const { return !matchId.empty() && matchId == m_played; }
     void reset() { m_played.clear(); }
 private:
     std::string m_played;

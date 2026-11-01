@@ -9,10 +9,21 @@ import type {
 
 export type PoolDistribution = Readonly<Partial<Record<PoolNumber, number>>>;
 
-export const candidatePoolDistribution = (mainPool: PoolNumber): PoolDistribution => {
+export const candidatePoolDistribution = (mainPool: PoolNumber, count: 4 | 5 = 5): PoolDistribution => {
   if (!Number.isInteger(mainPool) || mainPool < 1 || mainPool > 6) {
     throw new RankedDomainError("INVALID_CONFIG", "Main Pool must be an integer from 1 through 6", {
       mainPool,
+    });
+  }
+  // Single games show four candidates: one fewer from the neighbour/main share,
+  // so every four-candidate requirement is covered by the five-candidate one.
+  if (count === 4) {
+    if (mainPool === 1) return Object.freeze({ 1: 2, 2: 1, 3: 1 });
+    if (mainPool === 6) return Object.freeze({ 4: 1, 5: 1, 6: 2 });
+    return Object.freeze({
+      [(mainPool - 1) as PoolNumber]: 1,
+      [mainPool]: 2,
+      [(mainPool + 1) as PoolNumber]: 1,
     });
   }
   if (mainPool === 1) return Object.freeze({ 1: 2, 2: 2, 3: 1 });
@@ -144,9 +155,10 @@ export const selectCandidateMaps = (
   mainPool: PoolNumber,
   maps: readonly RankedMap[],
   random: RandomSource,
+  count: 4 | 5 = 5,
 ): readonly RankedMapSnapshot[] => {
   const canonical = canonicalActiveMaps(maps);
-  const distribution = candidatePoolDistribution(mainPool);
+  const distribution = candidatePoolDistribution(mainPool, count);
   const selected: RankedMap[] = [];
 
   for (const [poolText, required] of Object.entries(distribution)) {
@@ -162,8 +174,8 @@ export const selectCandidateMaps = (
     selected.push(...sample(available, required, random));
   }
 
-  if (selected.length !== 5 || new Set(selected.map((map) => map.canonicalLevelId)).size !== 5) {
-    throw new RankedDomainError("INSUFFICIENT_POOL_MAPS", "Candidate maps must be five canonical levels", {
+  if (selected.length !== count || new Set(selected.map((map) => map.canonicalLevelId)).size !== count) {
+    throw new RankedDomainError("INSUFFICIENT_POOL_MAPS", `Candidate maps must be ${count} canonical levels`, {
       tier,
       mainPool,
     });

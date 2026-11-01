@@ -28,8 +28,26 @@ inline const CCSize kSoloIntroThumb{129.f, 46.f};
  * presentation: positions are a function of elapsed time, so a rebuilt node
  * resumes at the same frame. onBoard fires once when the board should rise. */
 class SoloRoundIntro final : public CCLayerColor {
-    struct Card { CCLayerColor* node = nullptr; int index = 0; };
+    // GD paints CCLayerColor chrome from its own opacity, so card frames and
+    // panels fade explicitly with the text (otherwise empty frames linger over
+    // the rising board until the intro is removed).
+    using Surfaces = std::vector<std::pair<CCLayerColor*, GLubyte>>;
+    struct Card { CCLayerColor* node = nullptr; int index = 0; Surfaces surfaces; };
     std::vector<Card> m_cards;
+    Surfaces m_revealSurfaces;
+    static void collectSurfaces(CCNode* node, Surfaces& out) {
+        for (auto* child : CCArrayExt<CCNode*>(node->getChildren())) {
+            if (auto* layer = typeinfo_cast<CCLayerColor*>(child)) {
+                auto const size = layer->getContentSize();
+                if (size.width > 0 && size.height > 0) out.emplace_back(layer, layer->getOpacity());
+            }
+            collectSurfaces(child, out);
+        }
+    }
+    static void fadeSurfaces(Surfaces const& surfaces, float alpha) {
+        alpha = std::clamp(alpha, 0.f, 1.f);
+        for (auto const& [layer, base] : surfaces) layer->setOpacity(static_cast<GLubyte>(std::lround(base * alpha)));
+    }
     CCLayerColor* m_reveal = nullptr;
     CCNode *m_front = nullptr, *m_back = nullptr, *m_flip = nullptr;
     CCLayerColor* m_ring = nullptr;
@@ -134,6 +152,7 @@ class SoloRoundIntro final : public CCLayerColor {
             if (exiting && slot >= 0) exitFrame(slot, y, alpha);
             card.node->setPosition({x - kSoloSlot, y});
             setModeLobbyOpacity(card.node, static_cast<GLubyte>(std::clamp(alpha, 0.f, 1.f) * 255));
+            fadeSurfaces(card.surfaces, alpha);
         }
         float y = 0, alpha = 1, scale = 1, shakeX = 0;
         if (m_shift) {
@@ -159,6 +178,7 @@ class SoloRoundIntro final : public CCLayerColor {
         m_flip->setScaleX(frame.scaleX * frame.lift); m_flip->setScaleY(frame.lift);
         m_front->setVisible(frame.front); m_back->setVisible(!frame.front);
         setModeLobbyOpacity(m_reveal, static_cast<GLubyte>(std::clamp(alpha, 0.f, 1.f) * 255));
+        fadeSurfaces(m_revealSurfaces, alpha);
         auto const phase = t >= m_time.revealed ? 3 : t >= m_time.spin ? 2 : (m_shift && t >= m_time.shift) ? 1 : 0;
         if (phase != m_lastPhase) { m_lastPhase = phase; if (m_phase) m_phase(phase); }
         if (!m_boardFired && t >= m_time.board) { m_boardFired = true; if (m_onBoard) m_onBoard(); }
@@ -184,9 +204,11 @@ public:
             if (!shift && slot == node->m_revealSlot) ++slot;
             auto* built = roundCard(card);
             node->addChild(built, 3);
-            node->m_cards.push_back({built, slot++});
+            Surfaces surfaces; collectSurfaces(built, surfaces);
+            node->m_cards.push_back({built, slot++, std::move(surfaces)});
         }
         node->buildReveal(reveal);
+        collectSurfaces(node->m_flip, node->m_revealSurfaces);
         node->apply(elapsed);
         node->scheduleUpdate();
         return node;

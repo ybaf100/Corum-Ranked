@@ -10,11 +10,12 @@ export interface BanResolution {
   readonly selectedRoundMaps: readonly RankedMapSnapshot[];
 }
 
-const validateCandidateSet = (candidateMaps: readonly RankedMapSnapshot[]): void => {
-  if (candidateMaps.length !== 5) {
-    throw new RankedDomainError("INVALID_BAN", "Ban phase requires exactly five candidate maps");
+const validateCandidateSet = (candidateMaps: readonly RankedMapSnapshot[], roundMaps: 1 | 3): void => {
+  const expected = roundMaps === 1 ? 4 : 5;
+  if (candidateMaps.length !== expected) {
+    throw new RankedDomainError("INVALID_BAN", `Ban phase requires exactly ${expected} candidate maps`);
   }
-  if (new Set(candidateMaps.map((map) => map.canonicalLevelId)).size !== 5) {
+  if (new Set(candidateMaps.map((map) => map.canonicalLevelId)).size !== expected) {
     throw new RankedDomainError("INVALID_BAN", "Ban candidates must be canonical-distinct");
   }
 };
@@ -24,8 +25,10 @@ export const resolveBans = (
   banA: BanChoice,
   banB: BanChoice,
   random: RandomSource,
+  /** BO3 plays three of five candidates; a single game plays one of four. */
+  roundMaps: 1 | 3 = 3,
 ): BanResolution => {
-  validateCandidateSet(candidateMaps);
+  validateCandidateSet(candidateMaps, roundMaps);
   const candidateIds = new Set(candidateMaps.map((map) => map.canonicalLevelId));
   for (const [side, choice] of [
     ["A", banA],
@@ -41,10 +44,10 @@ export const resolveBans = (
 
   const removedCanonicalIds = [...new Set([banA, banB].filter((id): id is string => id !== null))];
   const remaining = candidateMaps.filter((map) => !removedCanonicalIds.includes(map.canonicalLevelId));
-  if (remaining.length < 3) {
-    throw new RankedDomainError("INVALID_BAN", "Fewer than three maps remain after bans");
+  if (remaining.length < roundMaps) {
+    throw new RankedDomainError("INVALID_BAN", "Too few maps remain after bans");
   }
-  const selected = remaining.length > 3 ? sample(remaining, 3, random) : [...remaining];
+  const selected = remaining.length > roundMaps ? sample(remaining, roundMaps, random) : [...remaining];
   const ordered = shuffle(selected, random);
 
   return Object.freeze({

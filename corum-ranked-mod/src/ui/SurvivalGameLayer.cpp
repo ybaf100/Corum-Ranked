@@ -344,7 +344,7 @@ class SurvivalGameLayer final : public CCLayerColor {
         auto* wrap=CCLayerColor::create({0,0,0,255},0,0);wrap->setCascadeOpacityEnabled(true);wrap->setTag(SurvivalEliminationWrapTag);
         wrap->addChild(ui::surface(size,{size.width/2,size.height/2},ui::Red,{42,13,28},250,true));tile.root->addChild(wrap,4);
         ui::setModeLobbyOpacity(wrap,0);ui::fadeModeLobbySurfaces(wrap,.18f,true);
-        wrap->runAction(CCEaseSineOut::create(ui::ModeLobbyFade::create(.18f,255)));
+        wrap->runAction(ui::ModeLobbyFade::create(.18f,255,ui::ModeLobbyEase::SineOut));
         if(tile.icon){auto const fall=SurvivalEliminationFallMilliseconds/1000.0f;
             tile.icon->runAction(CCSequence::create(CCSpawn::create(
                 CCEaseSineIn::create(CCMoveBy::create(fall,{order%4<2?-90.0f:90.0f,-getContentSize().height})),

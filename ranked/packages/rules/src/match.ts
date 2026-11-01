@@ -2,6 +2,8 @@ import { RankedDomainError } from "./errors.js";
 import type { PlayerSide, RoundResult } from "./types.js";
 
 export type MatchSeriesPhase = "ROUND_REQUIRED" | "DEATHMATCH_REQUIRED" | "MATCH_RESULT";
+/** Per-tier series length from the Ranked Tiers sheet. Missing means BO3. */
+export type MatchFormat = "BO3" | "SINGLE";
 export type RoundBanner = "NONE" | "MATCH_POINT" | "TIEBREAKER";
 
 export interface MatchSeriesState {
@@ -9,7 +11,27 @@ export interface MatchSeriesState {
   roundWins: Record<PlayerSide, number>;
   phase: MatchSeriesPhase;
   winner: PlayerSide | null;
+  /** Absent on series created before per-tier formats: BO3 with a map ban. */
+  format?: MatchFormat;
+  mapBan?: boolean;
 }
+
+export interface MatchSeriesOptions {
+  readonly format?: MatchFormat;
+  readonly mapBan?: boolean;
+}
+
+export const matchFormatOf = (state: Pick<MatchSeriesState, "format">): MatchFormat =>
+  state.format === "SINGLE" ? "SINGLE" : "BO3";
+export const mapBanOf = (state: Pick<MatchSeriesState, "mapBan">): boolean => state.mapBan !== false;
+/** Round maps drawn for a series: one for a single game, three for BO3. */
+export const roundMapCountOf = (format: MatchFormat): 1 | 3 => format === "SINGLE" ? 1 : 3;
+/** Ban candidates shown: four for a single game, five for BO3. */
+export const candidateMapCountOf = (format: MatchFormat): 4 | 5 => format === "SINGLE" ? 4 : 5;
+const seriesOptions = (state: MatchSeriesState): Pick<MatchSeriesState, "format" | "mapBan"> => ({
+  ...(state.format !== undefined ? { format: state.format } : {}),
+  ...(state.mapBan !== undefined ? { mapBan: state.mapBan } : {}),
+});
 
 export interface MatchSeriesDecision {
   readonly state: MatchSeriesState;
@@ -65,11 +87,13 @@ export const bannerForRound = (roundNumber: 1 | 2 | 3): RoundBanner => {
   return "NONE";
 };
 
-export const createMatchSeries = (): MatchSeriesState => ({
+export const createMatchSeries = (options: MatchSeriesOptions = {}): MatchSeriesState => ({
   roundResults: [],
   roundWins: { A: 0, B: 0 },
   phase: "ROUND_REQUIRED",
   winner: null,
+  format: options.format ?? "BO3",
+  mapBan: options.mapBan ?? true,
 });
 
 export const applyRoundResult = (
@@ -88,9 +112,21 @@ export const applyRoundResult = (
     roundWins: { ...state.roundWins },
     phase: "ROUND_REQUIRED",
     winner: null,
+    ...seriesOptions(state),
   };
   if (result !== "DRAW") next.roundWins[result] += 1;
   const completedRounds = next.roundResults.length;
+
+  // A single game is decided by its only Round; a draw goes straight to Death Match.
+  if (matchFormatOf(state) === "SINGLE") {
+    if (result === "DRAW") {
+      next.phase = "DEATHMATCH_REQUIRED";
+    } else {
+      next.phase = "MATCH_RESULT";
+      next.winner = result;
+    }
+    return { state: next, nextRoundNumber: null, nextRoundBanner: null };
+  }
 
   if (completedRounds === 1) {
     return {
@@ -129,7 +165,7 @@ export const applyDeathmatchWinner = (
   if (state.phase !== "DEATHMATCH_REQUIRED") {
     throw new RankedDomainError(
       "INVALID_MATCH_TRANSITION",
-      "A deathmatch winner is valid only after a Round 3 draw",
+      "A deathmatch winner is valid only after a deciding-round draw",
     );
   }
   return {
@@ -137,5 +173,6 @@ export const applyDeathmatchWinner = (
     roundWins: { ...state.roundWins },
     phase: "MATCH_RESULT",
     winner,
+    ...seriesOptions(state),
   };
 };

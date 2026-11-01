@@ -8,6 +8,7 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import {
+  candidateMapCountOf,
   createMatchSeries,
   displayedTierForProfile,
   effectiveTierForMatch,
@@ -518,11 +519,17 @@ export class QueueService {
       config.operational.tierBands,
     );
     const effectiveBand = tierBandFor(effective.tier, config.operational.tierBands);
+    // Format and ban are per effective tier (Ranked Tiers sheet); defaults BO3 + ban.
+    const seriesOptions = {
+      format: effectiveBand.matchFormat === "SINGLE" ? "SINGLE" as const : "BO3" as const,
+      mapBan: effectiveBand.mapBan !== false,
+    };
     const candidates = selectCandidateMaps(
       effective.tier,
       effectiveBand.mainPool,
       config.maps,
       this.random,
+      candidateMapCountOf(seriesOptions.format),
     );
     const configSnapshotId = await this.persistConfigSnapshot(transaction, config);
     const matchId = this.ids.next();
@@ -581,7 +588,7 @@ export class QueueService {
         effective.averageRating,
         effective.tier,
         JSON.stringify(candidates),
-        JSON.stringify(createMatchSeries()),
+        JSON.stringify(createMatchSeries(seriesOptions)),
         readyDeadline.toISOString(),
         config.operational.rules.rulesVersion,
         now.toISOString(),

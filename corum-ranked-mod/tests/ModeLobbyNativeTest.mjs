@@ -237,29 +237,24 @@ test('mode lobby owns Cocos actions and defers full UI replacement while moving'
 });
 
 test('surface chrome fades its own GD opacity through plain node containers',()=>run(`
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <vector>
 using GLubyte=unsigned char;
 namespace cocos2d {
 struct CCNode;
-struct CCActionInterval{CCNode*target=nullptr;virtual ~CCActionInterval()=default;virtual void start(CCNode*t){target=t;}virtual void update(float)=0;};
+struct CCActionInterval{CCNode*target=nullptr;int tag=-1;virtual ~CCActionInterval()=default;bool initWithDuration(float){return true;}
+ void autorelease(){}void setTag(int t){tag=t;}virtual void update(float)=0;};
 struct CCSize{float width=0,height=0;};
 struct CCNode{virtual ~CCNode()=default;CCSize size;std::vector<CCNode*>children;std::vector<CCActionInterval*>actions;
  auto*getChildren(){return &children;}CCSize getContentSize(){return size;}
- void runAction(CCActionInterval*a){actions.push_back(a);a->start(this);}
+ void runAction(CCActionInterval*a){actions.push_back(a);a->target=this;}
+ void stopActionByTag(int t){for(auto it=actions.begin();it!=actions.end();++it)if((*it)->tag==t){delete *it;actions.erase(it);return;}}
  void step(float t){for(auto*a:actions)a->update(t);if(t==1){for(auto*a:actions)delete a;actions.clear();}}};
 struct CCLayerColor:CCNode{GLubyte opacity=255;GLubyte getOpacity(){return opacity;}void setOpacity(GLubyte a){opacity=a;}};
-struct CCFadeTo:CCActionInterval{int from=0,to=0;static auto*create(float,GLubyte alpha){auto*a=new CCFadeTo;a->to=alpha;return a;}
- void start(CCNode*t)override{CCActionInterval::start(t);from=dynamic_cast<CCLayerColor*>(t)->getOpacity();}
- void update(float t)override{dynamic_cast<CCLayerColor*>(target)->setOpacity(static_cast<GLubyte>(std::lround(from+(to-from)*t)));}};
-struct CCEaseSineOut:CCActionInterval{CCActionInterval*inner=nullptr;~CCEaseSineOut(){delete inner;}
- static auto*create(CCActionInterval*i){auto*a=new CCEaseSineOut;a->inner=i;return a;}void start(CCNode*t)override{inner->start(t);}
- void update(float t)override{inner->update(std::sin(t*1.57079632679f));}};
-struct CCEaseSineIn:CCActionInterval{CCActionInterval*inner=nullptr;~CCEaseSineIn(){delete inner;}
- static auto*create(CCActionInterval*i){auto*a=new CCEaseSineIn;a->inner=i;return a;}void start(CCNode*t)override{inner->start(t);}
- void update(float t)override{inner->update(1-std::cos(t*1.57079632679f));}};
 }
+namespace geode{template<class T>struct Ref{T*p=nullptr;Ref(T*v):p(v){}T*operator->()const{return p;}explicit operator bool()const{return p;}};}
 namespace geode::cocos{template<class T>auto const&CCArrayExt(std::vector<cocos2d::CCNode*>*v){return *v;}}
 ${strip(read('src/ui/ModeLobbySurfaceFade.hpp'))}
 int main(){using namespace cocos2d;
@@ -267,11 +262,15 @@ int main(){using namespace cocos2d;
  fill.size={86,86};fill.opacity=190;frame.size={30,1};frame.opacity=250;
  group.children={&surface,&menu};surface.children={&fill};menu.children={&button};button.children={&frame};
  corum::ranked::ui::fadeModeLobbySurfaces(&group,.18f,true);
- assert(group.opacity==0 && group.actions.empty());assert(fill.opacity==0 && frame.opacity==0);
- fill.step(.5f);frame.step(.5f);assert(fill.opacity>0 && fill.opacity<190 && frame.opacity>0 && frame.opacity<250);
- fill.step(1);frame.step(1);assert(fill.opacity==190 && frame.opacity==250);
- corum::ranked::ui::fadeModeLobbySurfaces(&group,.18f,false);
- fill.step(.5f);frame.step(.5f);assert(fill.opacity>0 && fill.opacity<190 && frame.opacity>0 && frame.opacity<250);
- fill.step(1);frame.step(1);assert(fill.opacity==0 && frame.opacity==0);
+ // One tween on the root owns every surface; no per-layer ease/inner pair.
+ assert(group.opacity==0 && group.actions.size()==1);assert(fill.actions.empty() && frame.actions.empty());
+ assert(fill.opacity==0 && frame.opacity==0);
+ group.step(.5f);assert(fill.opacity>0 && fill.opacity<190 && frame.opacity>0 && frame.opacity<250);
+ // A new fade replaces the running one instead of fighting it.
+ corum::ranked::ui::fadeModeLobbySurfaces(&group,.18f,false);assert(group.actions.size()==1);
+ auto const half=fill.opacity;group.step(.5f);assert(fill.opacity>0 && fill.opacity<half);
+ group.step(1);assert(fill.opacity==0 && frame.opacity==0 && group.actions.empty());
+ fill.opacity=190;frame.opacity=250;
+ corum::ranked::ui::fadeModeLobbySurfaces(&group,.18f,true);group.step(1);assert(fill.opacity==190 && frame.opacity==250);
 }
 `));

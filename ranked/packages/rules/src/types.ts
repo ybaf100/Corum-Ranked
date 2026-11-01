@@ -103,6 +103,9 @@ export interface TierBand {
   /** Promotion series played while moving from this tier to the next tier. */
   readonly promotionGames: number;
   readonly promotionWinsRequired: number;
+  /** Optional sheet columns; absent means BO3 with a private map ban. */
+  readonly matchFormat?: "BO3" | "SINGLE";
+  readonly mapBan?: boolean;
 }
 
 export interface RankedRulesConfig {
