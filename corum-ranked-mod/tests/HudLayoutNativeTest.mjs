@@ -109,8 +109,12 @@ ${domain}
 namespace fmt{using std::format;}
 inline char const* operator""_spr(char const* s,std::size_t){return s;}
 namespace cocos2d{
-struct CCPoint{float x=0,y=0;CCPoint operator+(CCPoint o)const{return {x+o.x,y+o.y};}CCPoint operator-(CCPoint o)const{return {x-o.x,y-o.y};}};
-struct CCSize{float width=0,height=0;};
+struct CCSize;
+// Real cocos CCPoint/CCSize cross-assign, so a braced assignment is ambiguous.
+struct CCPoint{float x=0,y=0;CCPoint()=default;CCPoint(float a,float b):x(a),y(b){}CCPoint(CCPoint const&)=default;CCPoint& operator=(CCPoint const&)=default;CCPoint& operator=(CCSize const&);
+ CCPoint operator+(CCPoint o)const{return {x+o.x,y+o.y};}CCPoint operator-(CCPoint o)const{return {x-o.x,y-o.y};}};
+struct CCSize{float width=0,height=0;CCSize()=default;CCSize(float w,float h):width(w),height(h){}CCSize(CCSize const&)=default;CCSize& operator=(CCSize const&)=default;CCSize& operator=(CCPoint const& p){width=p.x;height=p.y;return *this;}};
+inline CCPoint& CCPoint::operator=(CCSize const& s){x=s.width;y=s.height;return *this;}
 struct CCRect{CCPoint origin;CCSize size;CCRect()=default;CCRect(float x,float y,float w,float h):origin{x,y},size{w,h}{}
  float getMinX()const{return origin.x;}float getMaxX()const{return origin.x+size.width;}float getMidX()const{return origin.x+size.width/2;}
  float getMinY()const{return origin.y;}float getMaxY()const{return origin.y+size.height;}float getMidY()const{return origin.y+size.height/2;}
@@ -143,9 +147,9 @@ struct CCNode:CCObject{
 };
 struct CCNodeRGBA:CCNode{GLubyte opacity=255;static CCNodeRGBA* create(){return new CCNodeRGBA;}void setOpacity(GLubyte o){opacity=o;}GLubyte getOpacity()const{return opacity;}
  void setCascadeOpacityEnabled(bool){}void setCascadeColorEnabled(bool){}void setColor(ccColor3B){}};
-struct CCLabelBMFont:CCNodeRGBA{std::string text;CCLabelBMFont(){anchor={.5f,.5f};}
+struct CCLabelBMFont:CCNodeRGBA{std::string text;CCLabelBMFont(){anchor=CCPoint{.5f,.5f};}
  void setString(char const* s){text=s;}CCSize getContentSize()const override{return {static_cast<float>(text.size())*12,20};}};
-struct CCSprite:CCNodeRGBA{CCSprite(){anchor={.5f,.5f};content={20,20};}static CCSprite* create(char const*){return new CCSprite;}static CCSprite* createWithSpriteFrameName(char const*){return new CCSprite;}void setScaleX(float){}void setScaleY(float){}};
+struct CCSprite:CCNodeRGBA{CCSprite(){anchor=CCPoint{.5f,.5f};content=CCSize{20,20};}static CCSprite* create(char const*){return new CCSprite;}static CCSprite* createWithSpriteFrameName(char const*){return new CCSprite;}void setScaleX(float){}void setScaleY(float){}};
 struct CCLayer:CCNode{CCLayer(){ignoreAnchor=true;}void setTouchEnabled(bool){}virtual void registerWithTouchDispatcher(){}
  virtual bool ccTouchBegan(CCTouch*,CCEvent*){return false;}virtual void ccTouchMoved(CCTouch*,CCEvent*){}virtual void ccTouchEnded(CCTouch*,CCEvent*){}virtual void ccTouchCancelled(CCTouch*,CCEvent*){}
  void setLayout(std::nullptr_t){}};
@@ -154,7 +158,7 @@ struct CCDrawNode:CCNode{int polygons=0,segments=0;std::vector<ccColor4F> stroke
  void drawSegment(CCPoint,CCPoint,float,ccColor4F){++segments;}void drawPolygon(CCPoint*,unsigned,ccColor4F,float,ccColor4F stroke){++polygons;strokes.push_back(stroke);}};
 struct CCMenu:CCLayer{};
 struct CCMenuItemSpriteExtra:CCNodeRGBA{CCObject* target=nullptr;SEL_MenuHandler selector=nullptr;bool enabled=true;
- static CCMenuItemSpriteExtra* create(CCNode* face,CCObject* t,SEL_MenuHandler s){auto*i=new CCMenuItemSpriteExtra;i->target=t;i->selector=s;i->anchor={.5f,.5f};i->content=face->getContentSize();i->addChild(face);return i;}
+ static CCMenuItemSpriteExtra* create(CCNode* face,CCObject* t,SEL_MenuHandler s){auto*i=new CCMenuItemSpriteExtra;i->target=t;i->selector=s;i->anchor=CCPoint{.5f,.5f};i->content=face->getContentSize();i->addChild(face);return i;}
  void setEnabled(bool v){enabled=v;}bool isEnabled()const{return enabled;}void activate(){if(enabled)(target->*selector)(this);}};
 struct TouchDispatcher{void addPrioTargetedDelegate(CCLayer*,int,bool){}};
 struct CCDirector{TouchDispatcher dispatcher;static CCDirector* sharedDirector(){static CCDirector d;return &d;}CCSize getWinSize(){return {569,320};}TouchDispatcher* getTouchDispatcher(){return &dispatcher;}};
@@ -167,7 +171,7 @@ namespace geode{
   template<class T>void setSavedValue(std::string const& k,T v){saved[k]=v;}bool saveData(){++saves;return true;}};
  namespace log{template<class...A>void info(A&&...){}}
  struct Popup:CCLayerColor{CCLayer* m_mainLayer=nullptr;CCMenu* m_buttonMenu=nullptr;CCSprite* m_bgSprite=nullptr;CCMenuItemSpriteExtra* m_closeBtn=nullptr;bool m_noElasticity=false;bool closed=false;
-  bool init(float w,float h){m_mainLayer=new CCLayer;m_mainLayer->ignoreAnchor=false;m_mainLayer->anchor={.5f,.5f};m_mainLayer->content={w,h};m_mainLayer->position={w/2,h/2};addChild(m_mainLayer);
+  bool init(float w,float h){m_mainLayer=new CCLayer;m_mainLayer->ignoreAnchor=false;m_mainLayer->anchor=CCPoint{.5f,.5f};m_mainLayer->content=CCSize{w,h};m_mainLayer->position=CCPoint{w/2,h/2};addChild(m_mainLayer);
    m_buttonMenu=new CCMenu;m_mainLayer->addChild(m_buttonMenu);m_bgSprite=new CCSprite;m_closeBtn=new CCMenuItemSpriteExtra;return true;}
   virtual void onClose(CCObject*){closed=true;}virtual void keyBackClicked(){onClose(nullptr);}void show(){}};
  namespace prelude{using namespace geode;}
@@ -183,7 +187,7 @@ namespace corum::ranked::ui{
  inline void fitLabelWidth(CCLabelBMFont*,float,float,float){}
  inline void fitMenuLabelWidth(CCLabelBMFont*,float,float,float){}
  inline void fitFullMenuLabel(CCLabelBMFont*,float,float,float){}
- inline CCNode* surface(CCSize s,CCPoint p,ccColor3B,ccColor3B,GLubyte,bool){auto*n=new CCNode;n->content=s;n->anchor={.5f,.5f};n->position=p;return n;}
+ inline CCNode* surface(CCSize s,CCPoint p,ccColor3B,ccColor3B,GLubyte,bool){auto*n=new CCNode;n->content=s;n->anchor=CCPoint{.5f,.5f};n->position=p;return n;}
  struct PlayerIcon:CCNode{static PlayerIcon* createLocal(){return new PlayerIcon;}};
 }
 namespace corum::ranked::ui{

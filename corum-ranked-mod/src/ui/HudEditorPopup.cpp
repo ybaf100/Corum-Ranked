@@ -73,10 +73,10 @@ void includeBox(CCNode* node, CCNode* space, CCNode* root, CCRect& box, bool& an
     if (node != root && size.width > 0.0f && size.height > 0.0f) {
         for (auto corner : {CCPoint{0, 0}, CCPoint{size.width, 0}, CCPoint{0, size.height}, CCPoint{size.width, size.height}}) {
             auto const point = space->convertToNodeSpace(node->convertToWorldSpace(corner));
-            if (!any) { box = {point.x, point.y, 0, 0}; any = true; continue; }
+            if (!any) { box = CCRect{point.x, point.y, 0, 0}; any = true; continue; }
             auto const minX = std::min(box.getMinX(), point.x), minY = std::min(box.getMinY(), point.y);
             auto const maxX = std::max(box.getMaxX(), point.x), maxY = std::max(box.getMaxY(), point.y);
-            box = {minX, minY, maxX - minX, maxY - minY};
+            box = CCRect{minX, minY, maxX - minX, maxY - minY};
         }
     }
     for (auto* child : node->getChildrenExt()) includeBox(child, space, root, box, any);
@@ -342,7 +342,7 @@ CCMenuItemSpriteExtra* HudEditorPopup::toolbarButton(std::string const& text, CC
 }
 
 void HudEditorPopup::buildToolbar() {
-    m_toolbarSize = {304.0f, 118.0f};
+    m_toolbarSize = CCSize{304.0f, 118.0f};
     m_toolbar = surface(m_toolbarSize, {}, Cyan, Surface, 246, true);
     m_toolbar->setID("hud-editor-toolbar"_spr);
     m_canvas->addChild(m_toolbar, 50);
@@ -523,7 +523,7 @@ bool HudEditorPopup::beginTouch(CCPoint location) {
         auto box = elementBox(id);
         // Small labels get a finger-sized hit area.
         auto const growX = std::max(0.0f, (22.0f - box.size.width) / 2.0f), growY = std::max(0.0f, (22.0f - box.size.height) / 2.0f);
-        box = {box.getMinX() - growX, box.getMinY() - growY, box.size.width + growX * 2.0f, box.size.height + growY * 2.0f};
+        box = CCRect{box.getMinX() - growX, box.getMinY() - growY, box.size.width + growX * 2.0f, box.size.height + growY * 2.0f};
         if (!box.containsPoint(point)) continue;
         auto const area = box.size.width * box.size.height;
         if (area < bestArea) { bestArea = area; hit = id; }
@@ -535,7 +535,7 @@ bool HudEditorPopup::beginTouch(CCPoint location) {
         m_drag = Drag::Element;
         m_dragStart = point;
         auto const t = transform(hit);
-        m_dragOrigin = {t.position.x, t.position.y};
+        m_dragOrigin = CCPoint{t.position.x, t.position.y};
         m_dragBox = elementBox(hit);
         m_dragScale = t.scale;
     } else {
