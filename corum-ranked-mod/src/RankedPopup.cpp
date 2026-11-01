@@ -39,6 +39,7 @@
 #include "ui/RankedLeaderboardPopup.hpp"
 #include "ui/RankedTapScroll.hpp"
 #include "ui/RankedTierGuidePopup.hpp"
+#include "ui/HudEditorPopup.hpp"
 #include "ui/PlacementGradeBadge.hpp"
 #include "ui/PlayerIcon.hpp"
 #include "ui/RankedTranslations.hpp"
@@ -2426,6 +2427,8 @@ class CorumRankedLayer final : public CCLayerColor {
             play->setEnabled(view.stage == RuntimeStage::Ready && (view.soloEnabled || view.placement.active));
             if (!play->isEnabled()) { corum::ranked::ui::grayButtonVisual(playCircle); play->setCascadeOpacityEnabled(true); play->setOpacity(95); }
             m_menu->addChild(play);
+            addHudEditorButton({rightCenter.x + 71.0f, rightCenter.y + 18.0f},
+                view.stage == RuntimeStage::Ready && !lobbyQueueActive(), "ranked-hud-editor-button"_spr);
             auto* actionText = makeLabel(
                 view.placement.required
                     ? (view.placement.active && view.placement.state == "STAGE_RESULT"
@@ -2488,6 +2491,7 @@ class CorumRankedLayer final : public CCLayerColor {
             auto* queue = CCMenuItemSpriteExtra::create(playCircle,this,menu_selector(CorumRankedLayer::onSurvivalQueue));
             queue->setPosition({94,18}); m_menu->addChild(queue);
             queue->setEnabled(online); queue->setCascadeOpacityEnabled(true); queue->setOpacity(online?255:100);
+            addHudEditorButton({165,18},view.stage==RuntimeStage::Ready && !lobbyQueueActive(),"survival-hud-editor-button"_spr);
             auto* hint = makeLabel(tr("start-queue", "START QUEUE"),0.44f,{94,-40},online?kCyan:corum::ranked::ui::TextMuted,"black");
             corum::ranked::ui::fitMenuLabelWidth(hint,170,0.44f,0.26f); m_root->addChild(hint,5);
             auto* details = makeLabel(online?fmt::format(fmt::runtime(tr("survival-online-ready-format","2-{} PLAYERS")),view.survivalPlayerCount):tr("mode-disabled","MODE DISABLED"),0.27f,{94,-68},corum::ranked::ui::TextMuted,"semibold");
@@ -2497,6 +2501,21 @@ class CorumRankedLayer final : public CCLayerColor {
             }
         }
         m_root = savedRoot; m_menu = savedMenu;
+    }
+
+    // In-game HUD editor entry, next to the mode's start button. Editing is
+    // only offered while idle in the lobby (not queued, matched or playing).
+    void addHudEditorButton(CCPoint position, bool enabled, std::string const& id) {
+        auto* face = corum::ranked::ui::surface({34,34},{},kCyan,kDeepPanel2,250,true);
+        auto* mark = makeLabel("UI",0.34f,{17,21},corum::ranked::ui::Text,"black");
+        corum::ranked::ui::fitMenuLabelWidth(mark,28,0.34f,0.2f); face->addChild(mark,5);
+        auto* caption = makeLabel(tr("hud-editor-short","EDIT"),0.17f,{17,9},kCyan,"semibold");
+        corum::ranked::ui::fitMenuLabelWidth(caption,30,0.17f,0.1f); face->addChild(caption,5);
+        if (!enabled) corum::ranked::ui::grayButtonVisual(face);
+        auto* item = CCMenuItemSpriteExtra::create(face,this,menu_selector(CorumRankedLayer::onHudEditor));
+        item->setID(id); item->setPosition(position); item->setEnabled(enabled);
+        item->setCascadeOpacityEnabled(true); item->setOpacity(enabled?255:100);
+        m_menu->addChild(item);
     }
 
     std::string lobbyMessage(RuntimeView const& view) const {
@@ -6174,6 +6193,17 @@ class CorumRankedLayer final : public CCLayerColor {
         if (auto* popup = corum::ranked::ui::RankedLeaderboardPopup::create(m_modeTransition.selected().value_or(corum::ranked::RankedMode::SoloRanked))) {
             m_leaderboard.emplace(popup); popup->show();
         }
+    }
+
+    void onHudEditor(CCObject*) {
+        if (m_modeTransition.moving() || m_uiFadingOut || lobbyQueueActive()) return;
+        if (RankedRuntime::get().view().stage != RuntimeStage::Ready) return;
+        auto const mode = m_modeTransition.selected();
+        if (!mode) return;
+        auto* popup = *mode == corum::ranked::RankedMode::Survival
+            ? corum::ranked::ui::HudEditorPopup::create(corum::ranked::HudMode::Survival)
+            : corum::ranked::ui::HudEditorPopup::create(corum::ranked::HudMode::Solo);
+        if (popup) popup->show();
     }
 
     void onTierGuide(CCObject*) {

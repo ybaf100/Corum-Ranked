@@ -2,6 +2,8 @@
 #include "../SurvivalRuntime.hpp"
 #include "RankedVisuals.hpp"
 #include "RankedHudLabel.hpp"
+#include "../domain/HudLayout.hpp"
+#include <map>
 #include <unordered_map>
 
 namespace corum::ranked::ui {
@@ -12,7 +14,10 @@ public:
     void attachFpsLabel(cocos2d::CCLabelBMFont* label){m_fps=geode::WeakRef(label);}
     void attachProgressBar(cocos2d::CCSprite* bar,cocos2d::CCSprite* fill,float width,float height);
     void update(float dt) override;
+    // Display-only HUD customization; called once when the HUD is built.
+    void applyLayout(HudLayoutConfig const& layout);
 private:
+    cocos2d::CCNode* group(std::string_view id);
     struct Row { cocos2d::CCNode* node=nullptr;RankedHudLabel rank,name,score;float targetY=0;SurvivalStanding value;SurvivalScoreTween tween;bool visible=false; };
     bool init() override;
     void presentProgressMarkers(SurvivalMatchView const& view);
@@ -25,6 +30,8 @@ private:
     geode::WeakRef<cocos2d::CCDrawNode> m_progressLines;
     float m_progressWidth=0,m_progressHeight=0;
     int m_lastRank=0;
+    std::map<std::string,cocos2d::CCNode*,std::less<>> m_groups;
+    bool m_markersVisible=true;
     SurvivalScoreTween m_personalBest;
 };
 }

@@ -4,6 +4,7 @@
 #include "../domain/HudPresentation.hpp"
 #include "../domain/CompetitiveHudLayout.hpp"
 #include "../domain/ScoreDisplay.hpp"
+#include "HudPlacementGroup.hpp"
 #include <Geode/cocos/actions/CCActionEase.h>
 #include <cmath>
 
@@ -23,14 +24,26 @@ bool SurvivalHud::init() {
     if(!CCNode::init())return false;setID("survival-play-hud"_spr);
     auto const size=CCDirector::sharedDirector()->getWinSize();setContentSize(size);
     auto const top=layoutHud(size.width,size.height).topY;
-    m_round=rankedHudLabel(this,"",FontWeight::SemiBold,.527f,{.5f,1},{size.width/2,top-5},Gold);
-    m_timer=rankedHudLabel(this,"03:00",FontWeight::Black,CompetitiveClockScale,{.5f,1},{size.width/2,top-18},Text);
-    m_auxTimer=rankedHudLabel(this,"",FontWeight::SemiBold,.38f,{0,1},{8,top-3},TextMuted);
-    m_difference=rankedHudLabel(this,"0",FontWeight::ExtraBold,CompetitiveClockScale,{.5f,1},{size.width/2+34,top-18},Text);
-    m_rank=rankedHudLabel(this,"",FontWeight::Black,1.68f,{0,0},{12,12},Text);
-    m_waiting=rankedHudLabel(this,"",FontWeight::SemiBold,.30f,{.5f,0},{size.width/2,14},TextMuted);
-    m_cutoffLine=CCDrawNode::create();addChild(m_cutoffLine,6);
+    // Each customizable element is a full-window placement group; labels keep
+    // their authored absolute coordinates inside it.
+    m_round=rankedHudLabel(group("round"),"",FontWeight::SemiBold,.527f,{.5f,1},{size.width/2,top-5},Gold);
+    m_timer=rankedHudLabel(group("timer"),"03:00",FontWeight::Black,CompetitiveClockScale,{.5f,1},{size.width/2,top-18},Text);
+    m_auxTimer=rankedHudLabel(group("aux"),"",FontWeight::SemiBold,.38f,{0,1},{8,top-3},TextMuted);
+    m_difference=rankedHudLabel(group("difference"),"0",FontWeight::ExtraBold,CompetitiveClockScale,{.5f,1},{size.width/2+34,top-18},Text);
+    m_rank=rankedHudLabel(group("rank"),"",FontWeight::Black,1.68f,{0,0},{12,12},Text);
+    m_waiting=rankedHudLabel(group("waiting"),"",FontWeight::SemiBold,.30f,{.5f,0},{size.width/2,14},TextMuted);
+    m_cutoffLine=CCDrawNode::create();group("standings")->addChild(m_cutoffLine,6);
     scheduleUpdate();return true;
+}
+CCNode* SurvivalHud::group(std::string_view id) {
+    if(auto found=m_groups.find(id);found!=m_groups.end())return found->second;
+    auto* node=createHudPlacementGroup(this,HudMode::Survival,id,HudLayoutConfig{},id=="standings"?5:3);
+    m_groups.emplace(std::string(id),node);return node;
+}
+void SurvivalHud::applyLayout(HudLayoutConfig const& layout) {
+    auto const size=CCDirector::sharedDirector()->getWinSize();
+    for(auto const& [id,node]:m_groups)applyHudPlacement(node,resolveHudTransform(HudMode::Survival,id,layout,size.width,size.height));
+    m_markersVisible=resolveHudTransform(HudMode::Survival,"cutline",layout,size.width,size.height).visible;
 }
 void SurvivalHud::attachProgressBar(CCSprite* bar,CCSprite* fill,float width,float height) {
     if(!bar || !fill || width<=0 || height<=0)return;
@@ -68,7 +81,7 @@ void SurvivalHud::present(SurvivalMatchView const& view,std::int64_t remainingMs
             row.name=rankedHudPlayerName(row.node,"",FontWeight::Black,scale,{0,1},{0,-1},Text);
             row.score=rankedHudLabel(row.node,"",FontWeight::Black,scale,{0,1},{0,-1},Text);
             for(auto const& label:{row.rank,row.name,row.score})label.opacity(0);
-            row.node->setVisible(false);addChild(row.node,5);found=m_rows.emplace(value.id,std::move(row)).first;
+            row.node->setVisible(false);group("standings")->addChild(row.node,5);found=m_rows.emplace(value.id,std::move(row)).first;
         }
         found->second.value=value;found->second.tween.observe(value.bestProgress);found->second.tween.advance(dt);
     }
@@ -142,7 +155,7 @@ void SurvivalHud::present(SurvivalMatchView const& view,std::int64_t remainingMs
 void SurvivalHud::presentProgressMarkers(SurvivalMatchView const& view) {
     auto bar=m_progressBar.lock();auto fill=m_progressFill.lock();auto lines=m_progressLines.lock();
     if(!lines)return;
-    lines->clear();lines->setVisible(bar && fill && bar->isVisible() && fill->isVisible());
+    lines->clear();lines->setVisible(m_markersVisible && bar && fill && bar->isVisible() && fill->isVisible());
     if(!bar || !fill)return;
     auto const anchor=fill->getAnchorPoint();auto const origin=fill->getAnchorPointInPoints();
     auto draw=[&](double score,float radius,ccColor4F tint,float capDepth) {

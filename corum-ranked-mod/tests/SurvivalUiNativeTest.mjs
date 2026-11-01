@@ -198,7 +198,7 @@ struct CCSprite:CCNode{CCPoint anchor{0,.5f},size{58,8},world{0,0};float scale=2
 };
 template<class T>struct WeakRef{T* pointer=nullptr;WeakRef()=default;explicit WeakRef(T* p):pointer(p){}struct Locked{T* ptr;explicit operator bool()const{return ptr&&ptr->alive;}T* operator->(){return ptr;}T* data(){return ptr;}};auto lock()const{return Locked{pointer};}};
 namespace corum::ranked {struct SurvivalRuntime{static auto& get(){static SurvivalRuntime r;return r;}bool observing()const{return false;}};struct SurvivalMatchView{int matchPlayerCount=16;std::string ownId,phase="ROUND_1";std::optional<double> cutoff;std::vector<SurvivalStanding> standings;};}
-namespace corum::ranked::ui {struct SurvivalHud{WeakRef<CCSprite> m_progressBar,m_progressFill;WeakRef<CCDrawNode> m_progressLines;float m_progressWidth=0,m_progressHeight=0;SurvivalScoreTween m_personalBest;
+namespace corum::ranked::ui {struct SurvivalHud{bool m_markersVisible=true;WeakRef<CCSprite> m_progressBar,m_progressFill;WeakRef<CCDrawNode> m_progressLines;float m_progressWidth=0,m_progressHeight=0;SurvivalScoreTween m_personalBest;
  void attachProgressBar(CCSprite*,CCSprite*,float,float);void presentProgressMarkers(SurvivalMatchView const&);};
 ${method(source,'void SurvivalHud::attachProgressBar(')}
 ${method(source,'void SurvivalHud::presentProgressMarkers(')}
@@ -213,6 +213,7 @@ int main(){using namespace corum::ranked;using corum::ranked::ui::SurvivalHud;
  assert(lines->segments[0].tint.r==1&&lines->segments[0].tint.g<.4f&&lines->segments[2].tint.g>.8f);
  fill.size.x=198;hud.presentProgressMarkers(view);assert(std::abs(lines->segments[0].a.x-156)<.001f);
  bar.visible=false;hud.presentProgressMarkers(view);assert(!bar.visible&&!lines->visible);
+ bar.visible=true;hud.m_markersVisible=false;hud.presentProgressMarkers(view);assert(!lines->visible);hud.m_markersVisible=true;hud.presentProgressMarkers(view);assert(lines->visible);bar.visible=false;hud.presentProgressMarkers(view);
  bar.visible=true;fill.visible=false;hud.presentProgressMarkers(view);assert(!fill.visible&&!lines->visible);
  fill.visible=true;view.cutoff=0;view.standings[0].score=100;hud.presentProgressMarkers(view);
  assert(lines->segments[0].a.x==5&&lines->segments[2].a.x==205);

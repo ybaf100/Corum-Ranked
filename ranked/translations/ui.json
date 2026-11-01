@@ -2702,5 +2702,125 @@
   "history-all-records": {
     "en": "ALL RECORDS",
     "ko": "모든 기록"
+  },
+  "hud-editor-short": {
+    "en": "EDIT",
+    "ko": "편집"
+  },
+  "hud-editor-title-solo": {
+    "en": "SOLO HUD EDITOR",
+    "ko": "솔랭 UI 편집"
+  },
+  "hud-editor-title-survival": {
+    "en": "SURVIVAL HUD EDITOR",
+    "ko": "서바이벌 UI 편집"
+  },
+  "hud-editor-hint": {
+    "en": "Drag to move · tap to select · applies from the next match",
+    "ko": "드래그로 이동 · 탭으로 선택 · 다음 경기부터 적용"
+  },
+  "hud-hide": {
+    "en": "HIDE",
+    "ko": "숨기기"
+  },
+  "hud-show": {
+    "en": "SHOW",
+    "ko": "표시"
+  },
+  "hud-reset": {
+    "en": "RESET",
+    "ko": "초기화"
+  },
+  "hud-save": {
+    "en": "SAVE",
+    "ko": "저장"
+  },
+  "hud-hidden-tag": {
+    "en": "HIDDEN",
+    "ko": "숨김"
+  },
+  "hud-overlap": {
+    "en": "OVERLAP",
+    "ko": "겹침"
+  },
+  "hud-preset-default": {
+    "en": "Default",
+    "ko": "기본"
+  },
+  "hud-preset-minimal": {
+    "en": "Minimal",
+    "ko": "미니멀"
+  },
+  "hud-preset-broadcast": {
+    "en": "Broadcast",
+    "ko": "방송용"
+  },
+  "hud-preset-rank-focus": {
+    "en": "Rank focus",
+    "ko": "순위 집중"
+  },
+  "hud-preset-custom": {
+    "en": "Custom",
+    "ko": "사용자 지정"
+  },
+  "hud-element-timer": {
+    "en": "Timer",
+    "ko": "타이머"
+  },
+  "hud-element-round": {
+    "en": "Round",
+    "ko": "라운드"
+  },
+  "hud-element-state": {
+    "en": "Round state",
+    "ko": "라운드 상태"
+  },
+  "hud-element-own": {
+    "en": "My score",
+    "ko": "내 점수"
+  },
+  "hud-element-opponent": {
+    "en": "Opponent score",
+    "ko": "상대 점수"
+  },
+  "hud-element-qualifying": {
+    "en": "Qualifying",
+    "ko": "기준 진행률"
+  },
+  "hud-element-progress": {
+    "en": "Opponent progress",
+    "ko": "상대 진행률"
+  },
+  "hud-element-feed": {
+    "en": "Death feed",
+    "ko": "사망 피드"
+  },
+  "hud-element-fps": {
+    "en": "FPS",
+    "ko": "FPS"
+  },
+  "hud-element-difference": {
+    "en": "Cutoff gap",
+    "ko": "컷 차이"
+  },
+  "hud-element-standings": {
+    "en": "Standings",
+    "ko": "순위 목록"
+  },
+  "hud-element-rank": {
+    "en": "My rank",
+    "ko": "내 순위"
+  },
+  "hud-element-waiting": {
+    "en": "Waiting text",
+    "ko": "대기 문구"
+  },
+  "hud-element-aux": {
+    "en": "Death match clock",
+    "ko": "데스매치 시계"
+  },
+  "hud-element-cutline": {
+    "en": "Progress bar markers",
+    "ko": "진행 바 표시선"
   }
 }

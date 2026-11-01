@@ -49,6 +49,7 @@
 #include "ui/RankedEntryOverlay.hpp"
 #include "ui/RankedInput.hpp"
 #include "ui/PlacementGradeBadge.hpp"
+#include "ui/HudPlacementGroup.hpp"
 
 #include <Geode/Geode.hpp>
 #include <Geode/modify/PlayLayer.hpp>
@@ -174,6 +175,11 @@ public:
 
         bool nativeCompletionStarted = false;
         CCNode* hudRoot = nullptr;
+        // Customizable HUD elements (display only): one placement group per
+        // element id, built from the layout saved when the HUD is created.
+        corum::ranked::HudMode hudMode = corum::ranked::HudMode::Solo;
+        corum::ranked::HudLayoutConfig hudLayout;
+        std::map<std::string, CCNode*, std::less<>> hudGroups;
         CCLabelBMFont* fpsLabel = nullptr;
         CCLabelBMFont* ownNameLabel = nullptr;
         CCLabelBMFont* ownScoreCaption = nullptr;
@@ -822,10 +828,12 @@ public:
     void addSurvivalHud() {
         auto const size=CCDirector::sharedDirector()->getWinSize();
         m_fields->hudRoot=CCNode::create();m_fields->hudRoot->setContentSize(size);
+        beginHudGroups(corum::ranked::HudMode::Survival);
         addFpsHud(m_fields->hudRoot,corum::ranked::layoutHud(size.width,size.height).topY);
         m_fields->survivalHud=corum::ranked::ui::SurvivalHud::create();
         if(m_fields->survivalHud){
             m_fields->hudRoot->addChild(m_fields->survivalHud);
+            m_fields->survivalHud->applyLayout(m_fields->hudLayout);
             m_fields->survivalHud->attachFpsLabel(m_fields->fpsLabel);
             m_fields->survivalHud->attachProgressBar(m_progressBar,m_progressFill,m_progressWidth,m_progressHeight);
         }
@@ -2259,9 +2267,26 @@ public:
         }
     }
 
+    void beginHudGroups(corum::ranked::HudMode mode) {
+        m_fields->hudMode = mode;
+        m_fields->hudLayout = corum::ranked::ui::loadHudLayout();
+        m_fields->hudGroups.clear();
+    }
+
+    // Children keep their authored absolute coordinates inside the group.
+    CCNode* hudGroup(std::string_view id, int z = 3) {
+        if (!m_fields->hudRoot) return nullptr;
+        if (auto found = m_fields->hudGroups.find(id); found != m_fields->hudGroups.end()) return found->second;
+        auto* group = corum::ranked::ui::createHudPlacementGroup(
+            m_fields->hudRoot, m_fields->hudMode, id, m_fields->hudLayout, z);
+        m_fields->hudGroups.emplace(std::string(id), group);
+        return group;
+    }
+
     void addFpsHud(CCNode* root,float top) {
+        (void)root;
         m_fields->fpsLabel = addShadowedHudLabel(
-            root,
+            hudGroup("fps"),
             "FPS : -",
             "bigFont.fnt",
             0.51f,
@@ -2284,6 +2309,7 @@ public:
         m_fields->hudRoot->setAnchorPoint({0.0f, 0.0f});
         m_fields->hudRoot->setPosition({0.0f, 0.0f});
         m_fields->hudRoot->setContentSize(size);
+        beginHudGroups(corum::ranked::HudMode::Solo);
 
         // Gameplay stays visually open: no cards or rectangular washes. A tight
         // one-pixel text shadow gives Paperlogy enough contrast over bright maps
@@ -2291,7 +2317,7 @@ public:
         addFpsHud(m_fields->hudRoot,top);
 
         m_fields->ownNameLabel = addShadowedHudLabel(
-            m_fields->hudRoot,
+            hudGroup("own"),
             corum::ranked::i18n::text("you", "YOU"),
             "bigFont.fnt",
             0.51f,
@@ -2302,7 +2328,7 @@ public:
         limitHudWidth(m_fields->ownNameLabel, 96.0f, 0.51f, 0.21f);
 
         m_fields->ownScoreCaption = addShadowedHudLabel(
-            m_fields->hudRoot,
+            hudGroup("own"),
             corum::ranked::i18n::text("score", "SCORE"),
             "bigFont.fnt",
             0.51f,
@@ -2311,7 +2337,7 @@ public:
             corum::ranked::ui::Text
         );
         m_fields->ownScoreLabel = addShadowedHudLabel(
-            m_fields->hudRoot,
+            hudGroup("own"),
             "0",
             "black",
             0.714f,
@@ -2324,9 +2350,9 @@ public:
         m_fields->ownChecks[0] = checkIcon({left + 8.0f, top - 36.0f});
         m_fields->ownChecks[1] = checkIcon({left + 25.0f, top - 36.0f});
         m_fields->ownChecks[2] = checkIcon({left + 42.0f, top - 36.0f});
-        for (auto* icon : m_fields->ownChecks) m_fields->hudRoot->addChild(icon, 3);
+        for (auto* icon : m_fields->ownChecks) hudGroup("own")->addChild(icon, 3);
         m_fields->ownAttemptLabel = addShadowedHudLabel(
-            m_fields->hudRoot,
+            hudGroup("own"),
             "",
             "bigFont.fnt",
             0.476f,
@@ -2337,7 +2363,7 @@ public:
         setHudVisible(m_fields->ownAttemptLabel, false);
 
         m_fields->roundLabel = addShadowedHudLabel(
-            m_fields->hudRoot,
+            hudGroup("round"),
             "",
             "bigFont.fnt",
             0.527f,
@@ -2349,7 +2375,7 @@ public:
 
         // Keep the authoritative clock directly below the current round.
         m_fields->timerLabel = addShadowedHudLabel(
-            m_fields->hudRoot,
+            hudGroup("timer"),
             "",
             "black",
             corum::ranked::CompetitiveClockScale,
@@ -2359,7 +2385,7 @@ public:
         );
         m_fields->timerLabel->setID("ranked-countdown"_spr);
         m_fields->stateLabel = addShadowedHudLabel(
-            m_fields->hudRoot,
+            hudGroup("state"),
             "",
             "bigFont.fnt",
             0.442f,
@@ -2370,7 +2396,7 @@ public:
         m_fields->stateLabel->setID("ranked-round-state"_spr);
 
         m_fields->opponentNameLabel = addShadowedHudLabel(
-            m_fields->hudRoot,
+            hudGroup("opponent"),
             corum::ranked::i18n::text("opponent", "OPPONENT"),
             "bigFont.fnt",
             0.51f,
@@ -2381,7 +2407,7 @@ public:
         limitHudWidth(m_fields->opponentNameLabel, 96.0f, 0.51f, 0.21f);
 
         m_fields->opponentScoreCaption = addShadowedHudLabel(
-            m_fields->hudRoot,
+            hudGroup("opponent"),
             corum::ranked::i18n::text("score", "SCORE"),
             "bigFont.fnt",
             0.51f,
@@ -2390,7 +2416,7 @@ public:
             corum::ranked::ui::Text
         );
         m_fields->opponentScoreLabel = addShadowedHudLabel(
-            m_fields->hudRoot,
+            hudGroup("opponent"),
             "0",
             "black",
             0.714f,
@@ -2403,9 +2429,9 @@ public:
         m_fields->opponentChecks[0] = checkIcon({right - 42.0f, top - 36.0f});
         m_fields->opponentChecks[1] = checkIcon({right - 25.0f, top - 36.0f});
         m_fields->opponentChecks[2] = checkIcon({right - 8.0f, top - 36.0f});
-        for (auto* icon : m_fields->opponentChecks) m_fields->hudRoot->addChild(icon, 3);
+        for (auto* icon : m_fields->opponentChecks) hudGroup("opponent")->addChild(icon, 3);
         m_fields->opponentAttemptLabel = addShadowedHudLabel(
-            m_fields->hudRoot,
+            hudGroup("opponent"),
             "",
             "bigFont.fnt",
             0.476f,
@@ -2416,7 +2442,7 @@ public:
         setHudVisible(m_fields->opponentAttemptLabel, false);
 
         m_fields->qualifyingCaption = addShadowedHudLabel(
-            m_fields->hudRoot,
+            hudGroup("qualifying"),
             "Qualifying",
             "bigFont.fnt",
             0.51f,
@@ -2425,7 +2451,7 @@ public:
             corum::ranked::ui::Text
         );
         m_fields->qualifyingLabel = addShadowedHudLabel(
-            m_fields->hudRoot,
+            hudGroup("qualifying"),
             "-",
             "black",
             0.714f,
@@ -2442,7 +2468,7 @@ public:
             for (std::size_t rank = 0; rank < m_fields->placementTopLabels.size(); ++rank) {
                 auto const text = rank == 0 ? "1st - -" : "2nd - -";
                 m_fields->placementTopLabels[rank] = addShadowedHudLabel(
-                    m_fields->hudRoot,
+                    hudGroup("opponent"),
                     text,
                     "black",
                     0.36f,
@@ -2463,7 +2489,7 @@ public:
                     corum::ranked::RankedRuntime::get().view().placement.currentMapGrade,
                     false
                 );
-                m_fields->hudRoot->addChild(m_fields->placementGrade, 5);
+                hudGroup("qualifying")->addChild(m_fields->placementGrade, 5);
             }
         }
 
@@ -2507,7 +2533,7 @@ public:
                 m_fields->practiceIndicator->setVisible(false);
                 m_fields->opponentProgressGroup->addChild(m_fields->practiceIndicator, 3);
             }
-            m_fields->hudRoot->addChild(m_fields->opponentProgressGroup, 5);
+            hudGroup("progress", 5)->addChild(m_fields->opponentProgressGroup, 5);
         }
 
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
@@ -2732,7 +2758,7 @@ public:
             auto const y = layout.bottomY + 31.0f + static_cast<float>(index) * 16.0f;
             if (found == visuals.end()) {
                 auto* node = CCNode::create(); node->setAnchorPoint(CCPointZero);
-                node->setPosition({layout.bottomLeftX + 4.0f, y}); m_fields->hudRoot->addChild(node, 5);
+                node->setPosition({layout.bottomLeftX + 4.0f, y}); hudGroup("feed", 5)->addChild(node, 5);
                 auto const name = row.event.side == "A" ? match.playerAName : match.playerBName;
                 auto* text = addShadowedHudLabel(node, fmt::format("{} {}%", name, static_cast<int>(std::floor(std::clamp(static_cast<double>(row.event.progressPercent),0.0,100.0)))),
                     "black", 0.65f, CCPointZero, CCPointZero,
