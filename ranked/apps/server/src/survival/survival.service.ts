@@ -120,11 +120,14 @@ export class SurvivalService {
            FROM sur_round_badges b WHERE b.match_id=m.id AND b.player_id=p.player_id),'[]'::jsonb) AS badges
        FROM sur_matches m JOIN sur_match_players p ON p.match_id=m.id JOIN sur_profiles sp ON sp.player_id=p.player_id
        LEFT JOIN sur_debug_matches d ON d.match_id=m.id LEFT JOIN sur_online_players o ON o.match_id=m.id AND o.player_id=p.player_id
-       WHERE p.player_id=$1 AND m.state<>'CANCELLED'
-       AND COALESCE(o.settled_at,d.settled_at,m.finished_at,m.created_at)>sp.history_visible_since
-       AND ((m.state<>'FINAL_RESULT' AND (o.player_id=$1 OR d.human_player_id=$1)) OR m.state='FINAL_RESULT')
+       WHERE m.state<>'CANCELLED' AND (CASE WHEN $3::boolean
+         -- Debug "all records": one row per match, seen by its best-placed human.
+         THEN p.player_id=(SELECT p2.player_id FROM sur_match_players p2 WHERE p2.match_id=m.id ORDER BY p2.final_rank NULLS LAST,p2.player_id LIMIT 1)
+         ELSE p.player_id=$1
+           AND COALESCE(o.settled_at,d.settled_at,m.finished_at,m.created_at)>sp.history_visible_since
+           AND ((m.state<>'FINAL_RESULT' AND (o.player_id=$1 OR d.human_player_id=$1)) OR m.state='FINAL_RESULT') END)
        ${filter} AND ($2::uuid IS NULL OR m.id=$2)
-       ORDER BY (m.state<>'FINAL_RESULT') DESC,COALESCE(m.finished_at,m.created_at) ${order},m.id LIMIT 30`,[playerId,options.matchId??null]);
+       ORDER BY (m.state<>'FINAL_RESULT') DESC,COALESCE(m.finished_at,m.created_at) ${order},m.id LIMIT 30`,[playerId,options.matchId??null,options.everyone===true]);
     const events = options.summary?{rows:[]}:await this.database.query(`SELECT event_key,actual_delta,lp_after,tier_after,awarded_at
       FROM sur_lp_ledger WHERE player_id=$1 ORDER BY awarded_at DESC,id DESC LIMIT 30`, [playerId]);
     return { mode: "SURVIVAL", serverNow: this.clock.now().toISOString(),

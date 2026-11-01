@@ -1,3 +1,9 @@
+# v0.5.0-beta.143
+
+- Debug build: Solo END ROUND. In a Debug Bot match, the Solo board shows END ROUND under the mode chip during a live Round; after confirmation the server settles the Round immediately from committed scores (active runs end without score). Debug build sessions and Debug Bot matches only; Death Matches are unaffected.
+- Debug build: History "ALL RECORDS" toggle (bottom-left of the History list). When ON, the list and details show every record stored on the server (Solo matches from player A's side, Survival from each match's best-placed player). The server honours it only for Debug build sessions.
+- Actual GD/device behaviour is unverified.
+
 # v0.5.0-beta.142
 
 - Match found entrance did not play: entering a match waited for the lobby queue-expansion animation and the 0.3 s key debounce, so the match-found screen was first built ~2 s after MATCHED and missed the entrance window. A match now replaces the lobby without waiting for a queue motion or the debounce, and the entrance window is 3.5 s.

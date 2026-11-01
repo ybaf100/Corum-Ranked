@@ -13,6 +13,7 @@ import {
   advanceRoundClock,
   applyDeathmatchWinner,
   applyRoundResult,
+  debugEndRoundByScore,
   mapBanOf,
   matchFormatOf,
   roundMapCountOf,
@@ -525,19 +526,21 @@ export class MatchService {
        JOIN ranked_players pa ON pa.id = m.player_a_id
        JOIN ranked_players pb ON pb.id = m.player_b_id
        JOIN ranked_config_snapshots cs ON cs.id=m.config_snapshot_id
-       JOIN ranked_profiles own_profile ON own_profile.player_id = $1
-       WHERE (m.player_a_id = $1 OR m.player_b_id = $1)
+       LEFT JOIN ranked_profiles own_profile ON own_profile.player_id = $1
+       WHERE ($3::boolean OR ((m.player_a_id = $1 OR m.player_b_id = $1)
+         AND m.finished_at > own_profile.history_visible_since))
          AND m.state = 'MATCH_RESULT'
-         AND m.finished_at > own_profile.history_visible_since
        ${filter} AND ($2::uuid IS NULL OR m.id=$2)
        ORDER BY m.finished_at ${order} NULLS LAST, m.created_at ${order},m.id
        LIMIT 30`,
-      [session.playerId,options.matchId??null],
+      [session.playerId,options.matchId??null,options.everyone===true],
     );
     const details=options.summary?new Map():await soloHistoryDetails(this.database,matches.rows);
     const items = [];
     for (const match of matches.rows) {
-      const side: PlayerSide = match.player_a_id === session.playerId ? "A" : "B";
+      // Debug "all records" rows of other players are shown from player A's side.
+      const participant = match.player_a_id === session.playerId || match.player_b_id === session.playerId;
+      const side: PlayerSide = !participant || match.player_a_id === session.playerId ? "A" : "B";
       const winnerSide: PlayerSide | null =
         match.winner_id === match.player_a_id
           ? "A"
@@ -551,7 +554,7 @@ export class MatchService {
         matchId: match.id,
         detailsLoaded:!options.summary,
         createdAt: dateIso(match.created_at),
-        completed:true,inProgress:false,debug:match.match_type==="DEBUG_BOT",myName:session.gdUsername,
+        completed:true,inProgress:false,debug:match.match_type==="DEBUG_BOT",myName:participant?session.gdUsername:match.player_a_name,
         finishedAt: dateIso(match.finished_at),
         side,
         opponentName: match.opponent_name,
@@ -979,6 +982,31 @@ export class MatchService {
       await this.advanceLockedMatch(transaction, await this.lockMatch(transaction, match.id), now);
       // Wall-clock round deadlines and final Attempt permissions never change.
       return { ...matchPauseView(pauses[authorization.side]!, now.getTime()), accepted: true, side: authorization.side, serverNow: now.toISOString() };
+    });
+  }
+
+  /** Debug build + Debug Bot match only: settle the current Round immediately
+   * from committed scores (Death Matches are not affected). */
+  public async debugEndRound(matchId: string, matchToken: string, session: RankedSessionContext, roundNumber: number) {
+    const now = this.clock.now();
+    return this.database.transaction(async transaction => {
+      await this.access.authorize(transaction, matchId, session, matchToken);
+      if (session.clientBuildChannel !== "debug") throw new ConflictException("DEBUG_BUILD_REQUIRED");
+      let match = await this.lockMatch(transaction, matchId);
+      if (match.match_type !== "DEBUG_BOT") throw new ConflictException("Ending a round is only available in Debug Bot matches");
+      match = await this.advanceLockedMatch(transaction, match, now);
+      if (!this.isRoundPlaying(match.state) || match.current_deathmatch_id || roundNumber !== Number(match.current_round_number)) {
+        throw new ConflictException("END_ROUND_CONTEXT_CHANGED");
+      }
+      const round = await this.lockCurrentRound(transaction, match);
+      const domain = debugEndRoundByScore(this.roundState(round), now.getTime());
+      await transaction.query(`UPDATE ranked_attempts SET ended_at = $2, valid = FALSE,
+        invalid_reason = 'DEBUG_END_ROUND', cleared = FALSE, awarded_score = 0
+        WHERE round_id = $1 AND ended_at IS NULL`, [round.id, now.toISOString()]);
+      await transaction.query(`UPDATE ranked_attempt_start_leases SET invalidated_at = $2
+        WHERE round_id = $1 AND consumed_at IS NULL AND invalidated_at IS NULL`, [round.id, now.toISOString()]);
+      await this.persistRoundState(transaction, match, round, domain, now);
+      return this.buildPublicState(transaction, await this.lockMatch(transaction, matchId), session.playerId, now);
     });
   }
 

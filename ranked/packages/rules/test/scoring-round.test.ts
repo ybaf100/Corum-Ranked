@@ -4,6 +4,7 @@ import {
   advanceRoundClock,
   compareRoundScores,
   createRound,
+  debugEndRoundByScore,
   endRoundAttempt,
   scoreAttempt,
   startRoundAttempt,
@@ -355,5 +356,20 @@ describe("three-clear and LAST ATTEMPT rules", () => {
     expect(state.phase).toBe("ROUND_RESULT");
     expect(state.outcome).toMatchObject({ winner: "A", reason: "CLEAR_TARGET_LAST_ATTEMPT" });
     expect(endRoundAttempt(state, "B", b.attemptId, START + 320_000, 80, false, "cross-b-end").accepted).toBe(false);
+  });
+});
+
+describe("debug end round", () => {
+  it("settles immediately by committed score and voids the active run", () => {
+    let state = createRound(1, snapshot, DOCUMENT_RULES_V0_4, START);
+    const first = start(state, "A", 10, "dbg-a");
+    state = end(first.state, "A", first.attemptId, 20, 70, false, "dbg-a-end");
+    const live = start(state, "B", 30, "dbg-b");
+    const ended = debugEndRoundByScore(live.state, START + 40_000);
+    expect(ended.phase).toBe("ROUND_RESULT");
+    expect(ended.outcome?.result).toBe("A");
+    expect(ended.outcome?.reason).toBe("SCORE");
+    expect(ended.attempts.B.every((attempt) => attempt.endedAtMs !== null && !attempt.valid)).toBe(true);
+    expect(debugEndRoundByScore(ended, START + 41_000)).toBe(ended);
   });
 });

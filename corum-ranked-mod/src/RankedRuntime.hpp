@@ -500,6 +500,12 @@ public:
     void leaveQueue();
     void submitReady();
     void submitBan(std::optional<std::string> canonicalLevelId);
+    // Debug build + Debug Bot match: settle the current Round now (server-gated).
+    bool canDebugEndRound() const;
+    void debugEndRound();
+    // Debug build: the History tab lists every stored record (server-gated).
+    void setHistoryAllRecords(bool value) { m_historyAllRecords = value; }
+    bool historyAllRecords() const { return m_historyAllRecords; }
     void reportMapDownloadFailure();
     enum class SurrenderStatus { Idle, WaitingAttempt, Sending, Retrying, Accepted, Rejected };
     void surrenderCurrentMatch(bool wholeMatch);
@@ -758,6 +764,7 @@ private:
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_historyDetailRequest;
     std::uint64_t m_historyDetailGeneration=0;
     std::string m_historyOrder="NEWEST",m_historyResult="ALL",m_historyDetailMatch;
+    bool m_historyAllRecords=false;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_pollRequest;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_attemptRequest;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_attemptIntentRequest;

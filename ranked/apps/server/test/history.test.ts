@@ -112,6 +112,10 @@ describe("unified history HTTP session and query validation", () => {
     }
     expect((await get("?scope=FAKE")).status).toBe(400);
     expect((await get("?playerId=someone-else")).status).toBe(400);
-    expect(f.survival.history).toHaveBeenLastCalledWith(session.playerId,{order:undefined,result:undefined,summary:false});
+    expect(f.survival.history).toHaveBeenLastCalledWith(session.playerId,{order:undefined,result:undefined,summary:false,everyone:false});
+    // "All records" is honoured only for Debug build sessions.
+    expect((await get("?scope=SURVIVAL&all=true")).status).toBe(200);
+    expect(f.survival.history).toHaveBeenLastCalledWith(session.playerId,{order:undefined,result:undefined,summary:false,
+      everyone:(session as {clientBuildChannel?:string}).clientBuildChannel==='debug'});
   });
 });

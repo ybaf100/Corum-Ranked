@@ -41,8 +41,8 @@ export class HistoryService {
     const page=matches.slice(0,30);
     return { scope, matches:page,currentPlayers:await this.currentPlayers(page), serverNow: this.clock.now().toISOString() };
   }
-  public async detail(session:RankedSessionContext,mode:Exclude<HistoryScope,'ALL'>,matchId:string){
-    const result=mode==='SURVIVAL'?await this.survival.history(session.playerId,{matchId}):await this.solo.history(session,{matchId});
+  public async detail(session:RankedSessionContext,mode:Exclude<HistoryScope,'ALL'>,matchId:string,everyone=false){
+    const result=mode==='SURVIVAL'?await this.survival.history(session.playerId,{matchId,everyone}):await this.solo.history(session,{matchId,everyone});
     const match=result.matches.find(m=>m.matchId===matchId);
     if(!match)throw new NotFoundException('Match history is unavailable');
     return {match:{...match,mode},currentPlayers:await this.currentPlayers([match]),serverNow:this.clock.now().toISOString()};

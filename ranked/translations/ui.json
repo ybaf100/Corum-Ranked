@@ -2694,5 +2694,13 @@
   "prepare-round-one": {
     "en": "GET READY FOR ROUND 1",
     "ko": "1라운드를 준비하세요"
+  },
+  "solo-end-round-question": {
+    "en": "End this round now using the current scores?",
+    "ko": "현재 점수로 이번 라운드를 지금 종료할까요?"
+  },
+  "history-all-records": {
+    "en": "ALL RECORDS",
+    "ko": "모든 기록"
   }
 }

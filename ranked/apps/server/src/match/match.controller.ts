@@ -17,6 +17,7 @@ import {
   AttemptStartIntentDto,
   PracticePresenceDto,
   MatchPauseDto,
+  DebugEndRoundDto,
   SurrenderDto,
   ReadyMatchDto,
   NativeSceneEnteredDto,
@@ -162,6 +163,13 @@ export class MatchController {
   public async surrender(@Param("id") id: string, @Headers("x-match-token") token: string,
     @CurrentSession() session: RankedSessionContext, @Body() body: SurrenderDto) {
     return this.spectatorLive.decorateConfiguredState(await this.matches.surrender(id, token, session, body));
+  }
+
+  @Post(":id/debug/end-round")
+  public async debugEndRound(@Param("id") id: string, @Headers("x-match-token") token: string,
+    @CurrentSession() session: RankedSessionContext, @Body() body: DebugEndRoundDto) {
+    return this.spectatorLive.decorateConfiguredState(
+      await this.matches.debugEndRound(id, token, session, body.roundNumber));
   }
 
   @Post(":id/attempt/intent")

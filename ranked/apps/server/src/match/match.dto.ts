@@ -60,6 +60,11 @@ export class SurrenderDto {
   public deathmatchSequence!: number;
 }
 
+export class DebugEndRoundDto {
+  @IsInt() @Min(1) @Max(3)
+  public roundNumber!: number;
+}
+
 export class AttemptStartIntentDto {
   @IsString()
   @Length(1, 40)

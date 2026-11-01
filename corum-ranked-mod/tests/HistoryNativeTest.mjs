@@ -64,7 +64,7 @@ int parseRoundSummary(matjson::Value const&){return 1;}int parseDeathmatchSummar
 struct RankedRuntime {
  std::string m_sessionToken="session";bool m_rankedOpen=true,m_controlBusy=true;std::uint64_t m_sessionGeneration=1,m_historyGeneration=0;
  geode::async::TaskHolder<web::WebResponse> m_historyRequest,m_historyDetailRequest;
- std::uint64_t m_historyDetailGeneration=0;std::string m_historyOrder="NEWEST",m_historyResult="ALL",m_historyDetailMatch;
+ std::uint64_t m_historyDetailGeneration=0;std::string m_historyOrder="NEWEST",m_historyResult="ALL",m_historyDetailMatch;bool m_historyAllRecords=false;
  struct {bool historyDetailLoading=false;std::string historyDetailError;bool historyLoading=false;HistoryScope historyScope=HistoryScope::All;std::string historyError;
    std::uint64_t revision=0,historyRevision=0;std::vector<HistoryMatchView> history;}m_view;
  std::string endpoint(std::string url)const{return url;}void observeServerNow(matjson::Value const&){}

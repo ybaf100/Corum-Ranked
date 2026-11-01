@@ -201,6 +201,19 @@ export const createRound = (
   };
 };
 
+/** Debug Bot only: settle the round now from committed scores. Active runs end
+ * without awarding new score, exactly as at a normal score deadline. */
+export const debugEndRoundByScore = (state: RoundState, atMs: number): RoundState => {
+  assertServerTime(state, atMs);
+  if (state.outcome) return state;
+  const next = cloneRound(state);
+  for (const attempt of activeAttempts(next)) {
+    attempt.endedAtMs = atMs; attempt.valid = false; attempt.invalidReason = "DEBUG_END_ROUND";
+    attempt.cleared = false; attempt.awardedScore = 0;
+  }
+  return finishByScore(next, atMs);
+};
+
 export const advanceRoundClock = (state: RoundState, atMs: number): RoundState => {
   assertServerTime(state, atMs);
   if (state.phase === "ROUND_RESULT") return cloneRound(state);

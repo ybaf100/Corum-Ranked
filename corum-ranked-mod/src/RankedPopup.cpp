@@ -3936,6 +3936,14 @@ class CorumRankedLayer final : public CCLayerColor {
         if (modeChip) {
             auto* mode = makeTextPlate(match.singleGame ? "SOLO RANKED  " + tr("single-game", "SINGLE") : std::string("SOLO RANKED  BO3"), {78.0f, 18.0f}, {10.0f + 39.0f, size.height - 22.0f}, kBlue, 0.21f, kGold, "black");
             m_root->addChild(mode, 3);
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+            // Debug Bot only: settle the live Round now from committed scores.
+            if (RankedRuntime::get().canDebugEndRound()) {
+                auto* end = addButton(tr("survival-end-round", "END ROUND"), {10.0f + 39.0f, size.height - 45.0f},
+                    menu_selector(CorumRankedLayer::onDebugEndRound), false, 0.34f);
+                end->setID("ranked-debug-end-round"_spr);
+            }
+#endif
         }
         auto const top = size.height - 35.0f;
         m_root->addChild(makeNeonPanel({213.0f, 47.0f}, {size.width / 2.0f, top}, kBlue, {7, 17, 35}, 248), 2);
@@ -5267,6 +5275,12 @@ class CorumRankedLayer final : public CCLayerColor {
         historyButton(m_root,m_historyOrder=="OLDEST"?tr("history-oldest","OLDEST FIRST"):tr("history-newest","NEWEST FIRST"),{size.width/2-filterWidth/2-3,size.height-111},filterWidth,menu_selector(CorumRankedLayer::onHistoryOrder));
         historyButton(m_root,historyFilterText(m_historyResult),{size.width/2+filterWidth/2+3,size.height-111},filterWidth,menu_selector(CorumRankedLayer::onHistoryFilter));
         historyButton(m_root,tr("refresh","REFRESH"),{size.width/2,22},90,menu_selector(CorumRankedLayer::onHistoryRefresh));
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+        // Debug build: every record stored on the server (server checks the channel).
+        auto const everyone=RankedRuntime::get().historyAllRecords();
+        historyButton(m_root,fmt::format("{}: {}",tr("history-all-records","ALL RECORDS"),everyone?"ON":"OFF"),{size.width/2-120,22},120,
+            menu_selector(CorumRankedLayer::onHistoryAllRecords),0,everyone);
+#endif
     }
     void renderHistoryList(RuntimeView const& view) {
         auto const size=CCDirector::sharedDirector()->getWinSize();addTopBack(false);
@@ -5889,6 +5903,30 @@ class CorumRankedLayer final : public CCLayerColor {
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH) || defined(CORUM_RANKED_DEBUG_SPECTATE)
     void onDebugMenu(CCObject*) {
         corum::ranked::debug::showDebugMenuPopup(m_modeTransition.selected().value_or(corum::ranked::RankedMode::SoloRanked));
+    }
+#endif
+
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+    std::optional<WeakRef<corum::ranked::ui::RankedConfirmPopup>> m_debugEndRoundConfirm;
+    void onDebugEndRound(CCObject*) {
+        auto& runtime = RankedRuntime::get();
+        if (!runtime.canDebugEndRound()) return;
+        if (m_debugEndRoundConfirm) if (auto open = m_debugEndRoundConfirm->lock(); open && open->getParent()) return;
+        auto const matchId = runtime.view().match.matchId; auto const round = runtime.view().match.roundNumber;
+        auto* popup = corum::ranked::ui::RankedConfirmPopup::create(tr("survival-end-round", "END ROUND"),
+            tr("solo-end-round-question", "End this round now using the current scores?"),
+            [matchId, round](bool accepted) {
+                auto& current = RankedRuntime::get();
+                if (accepted && current.canDebugEndRound() && current.view().match.matchId == matchId && current.view().match.roundNumber == round)
+                    current.debugEndRound();
+            }, tr("survival-end-round", "END ROUND"));
+        if (popup) { m_debugEndRoundConfirm.emplace(popup); popup->show(); }
+    }
+    void onHistoryAllRecords(CCObject*) {
+        auto& runtime = RankedRuntime::get();
+        runtime.setHistoryAllRecords(!runtime.historyAllRecords());
+        if (m_historyListScroll) m_historyListOffset = m_historyListScroll->m_contentLayer->getPositionY();
+        onHistory(nullptr);
     }
 #endif
 

@@ -2224,6 +2224,37 @@ void RankedRuntime::submitBan(std::optional<std::string> canonicalLevelId) {
     );
 }
 
+bool RankedRuntime::canDebugEndRound() const {
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+    auto const& match = m_view.match;
+    auto const live = match.state == "ROUND_PLAYING" || match.state == "FINAL_ATTEMPT_WINDOW" ||
+        match.state == "LAST_ATTEMPT_WINDOW" || match.state == "ROUND_SETTLING";
+    return m_view.stage == RuntimeStage::Matched && match.debug && live && match.deathmatchSequence == 0 &&
+        match.roundNumber > 0 && !m_controlBusy && !m_matchToken.empty();
+#else
+    return false;
+#endif
+}
+
+void RankedRuntime::debugEndRound() {
+    if (!canDebugEndRound()) return;
+    matjson::Value body;
+    body["roundNumber"] = m_view.match.roundNumber;
+    auto request = baseRequest(m_sessionToken, m_matchToken);
+    request.bodyJSON(body);
+    m_controlBusy = true;
+    log::info("[RankedDebug] end round requested match={} round={}", m_view.match.matchId, m_view.match.roundNumber);
+    m_controlRequest.spawn(
+        request.post(endpoint("/api/ranked/matches/" + m_view.match.matchId + "/debug/end-round")),
+        [this](web::WebResponse response) {
+            m_controlBusy = false;
+            if (!successful(response)) { setTransientError(responseError(response)); return; }
+            parseMatchState(response.json().unwrapOr(matjson::Value()));
+            m_nextPollAt = std::chrono::steady_clock::now();
+        }
+    );
+}
+
 bool RankedRuntime::gameplayConceded(int round, int deathmatch) const {
     if (m_concessions.conceded(m_view.match.matchId, round, deathmatch)) return true;
     auto const& match = m_view.match;
@@ -2704,7 +2735,8 @@ void RankedRuntime::fetchHistoryScope(HistoryScope scope) {
     auto request = baseRequest(m_sessionToken);
     auto const generation = m_sessionGeneration;
     m_historyRequest.spawn(
-        request.get(endpoint(std::string("/api/ranked/history?scope=")+historyScopeKey(scope)+"&summary=true&order="+m_historyOrder+"&result="+m_historyResult)),
+        request.get(endpoint(std::string("/api/ranked/history?scope=")+historyScopeKey(scope)+"&summary=true&order="+m_historyOrder+"&result="+m_historyResult+
+            (m_historyAllRecords?"&all=true":""))),
         [this, generation, historyGeneration, scope](web::WebResponse response) {
             if (generation != m_sessionGeneration || historyGeneration != m_historyGeneration || !m_rankedOpen) return;
             m_view.historyLoading = false;
@@ -2757,7 +2789,7 @@ void RankedRuntime::fetchHistoryDetail(RankedMode mode,std::string const& matchI
     m_historyDetailMatch=matchId;m_view.historyDetailLoading=true;m_view.historyDetailError.clear();++m_view.historyRevision;++m_view.revision;
     auto request=baseRequest(m_sessionToken);
     auto const modeKey=mode==RankedMode::Survival?"SURVIVAL":"SOLO_RANKED";
-    m_historyDetailRequest.spawn(request.get(endpoint(std::string("/api/ranked/history/")+modeKey+"/"+matchId)),
+    m_historyDetailRequest.spawn(request.get(endpoint(std::string("/api/ranked/history/")+modeKey+"/"+matchId+(m_historyAllRecords?"?all=true":""))),
         [this,generation,session,list,mode,matchId](web::WebResponse response){
             if(!m_rankedOpen || generation!=m_historyDetailGeneration || session!=m_sessionGeneration || list!=m_historyGeneration)return;
             m_view.historyDetailLoading=false;
