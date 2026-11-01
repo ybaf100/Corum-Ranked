@@ -2704,24 +2704,24 @@
     "ko": "모든 기록"
   },
   "hud-editor-short": {
-    "en": "EDIT",
-    "ko": "편집"
+    "en": "SETUP",
+    "ko": "설정"
   },
   "hud-editor-title-solo": {
-    "en": "SOLO HUD EDITOR",
-    "ko": "솔랭 UI 편집"
+    "en": "SOLO HUD SETUP",
+    "ko": "솔랭 UI 설정"
   },
   "hud-editor-title-survival": {
-    "en": "SURVIVAL HUD EDITOR",
-    "ko": "서바이벌 UI 편집"
+    "en": "SURVIVAL HUD SETUP",
+    "ko": "서바이벌 UI 설정"
   },
   "hud-editor-hint": {
     "en": "Drag to move · tap to select · applies from the next match",
-    "ko": "드래그로 이동 · 탭으로 선택 · 다음 경기부터 적용"
+    "ko": "드래그로 이동 · 눌러서 선택 · 다음 경기부터 적용"
   },
   "hud-hide": {
     "en": "HIDE",
-    "ko": "숨기기"
+    "ko": "가리기"
   },
   "hud-show": {
     "en": "SHOW",
@@ -2737,11 +2737,11 @@
   },
   "hud-hidden-tag": {
     "en": "HIDDEN",
-    "ko": "숨김"
+    "ko": "가림"
   },
   "hud-overlap": {
     "en": "OVERLAP",
-    "ko": "겹침"
+    "ko": "중복"
   },
   "hud-preset-default": {
     "en": "Default",
@@ -2765,7 +2765,7 @@
   },
   "hud-element-timer": {
     "en": "Timer",
-    "ko": "타이머"
+    "ko": "남은 시간"
   },
   "hud-element-round": {
     "en": "Round",
@@ -2785,15 +2785,15 @@
   },
   "hud-element-qualifying": {
     "en": "Qualifying",
-    "ko": "기준 진행률"
+    "ko": "기준 진행도"
   },
   "hud-element-progress": {
     "en": "Opponent progress",
-    "ko": "상대 진행률"
+    "ko": "상대 진행도"
   },
   "hud-element-feed": {
     "en": "Death feed",
-    "ko": "사망 피드"
+    "ko": "데스 피드"
   },
   "hud-element-fps": {
     "en": "FPS",

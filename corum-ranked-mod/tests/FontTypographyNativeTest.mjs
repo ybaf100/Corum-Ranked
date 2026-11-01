@@ -48,6 +48,13 @@ test('reserved Regular atlas avoids unused Korean duplicates while bilingual UI 
         const glyphs=charset(fonts[weight].charset);
         for(const letter of '승급 승격 강등 기록 서바이벌 솔로 랭크 봇 수 설정 항복')assert(glyphs.has(letter.codePointAt(0)), `${weight} missing ${letter}`);
     }
+    // The packaged SD/HD/UHD atlases of the four Hangul weights share one 96 MiB
+    // RGBA budget (verify-font-package.py). 352 Hangul glyphs fit; beta.149's
+    // 360 did not. Reword with existing syllables instead of growing the set.
+    for(const weight of ['CorumSansMedium','CorumSansSemiBold','CorumSansBold','CorumSansBlack']){
+        const hangul=[...charset(fonts[weight].charset)].filter(n=>n>=0xac00&&n<=0xd7a3).length;
+        assert(hangul<=352,`${weight} has ${hangul} Hangul glyphs; the font atlas budget allows 352`);
+    }
 });
 
 test('production label helpers preserve geometry, width floors, animation scales and native fallback', () => {
