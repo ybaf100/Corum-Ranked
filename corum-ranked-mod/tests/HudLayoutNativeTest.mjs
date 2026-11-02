@@ -202,6 +202,7 @@ struct CCDrawNode:CCNode{int polygons=0,segments=0;std::vector<ccColor4F> stroke
  void setBlendFunc(ccBlendFunc b){blend=b;}
  void drawSegment(CCPoint,CCPoint,float,ccColor4F color){++segments;segmentColors.push_back(color);}void drawPolygon(CCPoint*,unsigned,ccColor4F,float,ccColor4F stroke){++polygons;strokes.push_back(stroke);}};
 struct CCMenu:CCLayer{};
+template<class T> T typeinfo_cast(CCNode* node){return dynamic_cast<T>(node);}
 struct CCMenuItemSpriteExtra:CCNodeRGBA{CCObject* target=nullptr;SEL_MenuHandler selector=nullptr;bool enabled=true;
  static CCMenuItemSpriteExtra* create(CCNode* face,CCObject* t,SEL_MenuHandler s){auto*i=new CCMenuItemSpriteExtra;i->target=t;i->selector=s;i->anchor=CCPoint{.5f,.5f};i->content=face->getContentSize();i->addChild(face);return i;}
  void setEnabled(bool v){enabled=v;}bool isEnabled()const{return enabled;}void activate(){if(enabled)(target->*selector)(this);}};
@@ -283,7 +284,9 @@ int main(){
  any=false;includeBox(clock,editor->m_canvas,clock,box,any);assert(box.getMinX()>=0&&box.getMinY()>=0);
  assert(editor->m_working.at("timer").anchor==HudAnchor::BottomLeft);
  // The timer cannot be hidden, but can be made transparent (and back).
- auto* hide=button(editor,"HIDE");assert(hide&&!hide->isEnabled());editor->onToggleVisible(nullptr);
+ auto* hide=button(editor,"HIDE");assert(hide&&!hide->isEnabled());
+ // Unavailable actions are greyed: the timer cannot be hidden.
+ assert(hide->getOpacity()==70);editor->onToggleVisible(nullptr);
  assert(editor->m_working.at("timer").visible);
  editor->m_transparentButton->activate();editor->m_transparentButton->activate();editor->m_transparentButton->activate();
  assert(std::abs(editor->m_working.at("timer").opacity-.7f)<.01f&&editor->m_transparencyLabel->text=="30%");
@@ -318,12 +321,16 @@ int main(){
  row("opponent-score")->select->activate();
  assert(editor->m_selected=="opponent-score"&&!editor->m_listOpen&&editor->m_toolbar->isVisible());
  for(auto* item:editor->m_listItems)assert(!item->isVisible());
- // Toolbar buttons fall through to the modal menu; the toolbar chrome drags.
+ // Toolbar buttons fall through to the modal menu; the dock chrome is fixed
+ // at the bottom (or the top while the selected element sits under it).
  auto* save=button(editor,"SAVE");assert(save);
  assert(!editor->beginTouch(save->getPosition()));
  auto const toolbar=editor->m_toolbar->getPosition();
- assert(editor->beginTouch(toolbar+CCPoint{0,82}));editor->moveTouch(toolbar+CCPoint{-500,82});editor->endTouch();
- assert(editor->m_toolbar->getPosition().x==156&&save->getPosition().x==156+68);
+ assert(toolbar.x==569/2.0f&&toolbar.y<60);
+ assert(editor->beginTouch(toolbar+CCPoint{0,1}));editor->moveTouch(toolbar+CCPoint{-500,1});editor->endTouch();
+ assert(editor->m_toolbar->getPosition().x==toolbar.x&&editor->m_drag==HudEditorPopup::Drag::None);
+ editor->m_selected="qualifying-value";editor->refresh();assert(editor->m_toolbar->getPosition().y>260);
+ editor->m_selected="fps";editor->refresh();assert(editor->m_toolbar->getPosition().y<60);
  // Presets replace the working layout; cancel never writes.
  editor->onPreset(button(editor,"Minimal"));assert(editor->m_working==hudPresetPlacements(HudMode::Solo,HudPreset::Minimal));
  editor->onCancel(nullptr);assert(editor->closed&&saved.empty());

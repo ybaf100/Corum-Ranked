@@ -2956,6 +2956,7 @@ class CorumRankedLayer final : public CCLayerColor {
     // CCDrawNode ignores cascaded opacity: the rings appear once the panel has
     // settled and hide before it collapses, instead of popping over the fade.
     void syncQueueRings(bool found, bool cyanRing) {
+        if (!m_queueContents) return;
         auto const settled = !m_queueAnimating && m_queueShown;
         if (m_queueRingCyan) m_queueRingCyan->setVisible(settled && cyanRing && !found);
         if (m_queueRingGold) m_queueRingGold->setVisible(settled && found);
@@ -3051,8 +3052,12 @@ class CorumRankedLayer final : public CCLayerColor {
             if (self->m_lobbyPanel) self->m_lobbyPanel->setVisible(!self->m_queueShown);
             if (!self->m_queueShown && self->m_queueContents) {
                 self->m_queueContents->removeFromParentAndCleanup(true); self->m_queueContents = nullptr; self->m_queueMenu = nullptr;
-                self->m_queueSlots.clear(); self->m_queuePlayers = self->m_queueWait = self->m_queueMinimum = self->m_queueHint = nullptr;
+                self->m_queueSlots.clear(); self->m_queuePlayers = self->m_queueWait = self->m_queueMinimum = self->m_queueHint = self->m_queueHeading = nullptr;
                 self->m_queueLeave = self->m_queueFill = nullptr;
+                // beta.152 crash: the rings died with the contents but their
+                // pointers survived into the next open's syncQueueRings().
+                self->m_queueRingCyan = self->m_queueRingGold = self->m_queueSweep = self->m_queueOpponentBox = nullptr;
+                self->m_queueCenter = self->m_queueOpponentMark = self->m_queueOpponentLabel = nullptr;
             }
             self->syncLobbyInput(); self->placeLobbyFooter(); self->refreshLobbyHover();
         };

@@ -50,3 +50,12 @@ test('client sends one ballot, shows only the voted count, and holds MATCH FOUND
  // The opponent stays anonymous in the queue window until the versus intro.
  assert.match(lobby,/m_queueOpponentMark = makeLabel\("\?"/);
 });
+
+test('beta.152 crash: closing the queue forgets every arena node before the next open reads it',()=>{
+ const lobby=read('src/RankedPopup.cpp');
+ const close=lobby.slice(lobby.indexOf('if (!self->m_queueShown && self->m_queueContents) {'));
+ const block=close.slice(0,close.indexOf('}'));
+ for(const name of ['m_queueRingCyan','m_queueRingGold','m_queueSweep','m_queueOpponentBox','m_queueCenter','m_queueOpponentMark','m_queueOpponentLabel','m_queueHeading'])
+  assert.match(block,new RegExp('self->'+name+' = '),name);
+ assert.match(lobby,/void syncQueueRings\(bool found, bool cyanRing\) \{\n        if \(!m_queueContents\) return;/);
+});
