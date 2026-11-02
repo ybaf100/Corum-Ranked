@@ -53,7 +53,8 @@ class PublishedClientBarrierTest(unittest.TestCase):
             with patch.object(barrier, 'fetch', side_effect=[json.dumps(altered).encode(), package]), self.assertRaisesRegex(ValueError, 'source SHA'):
                 barrier.verify_channel('https://cdn.test', VERSION, channel, 'a'*40)
 
-    def test_waits_for_missing_channel_without_redownloading_verified_release(self):
+    def test_waits_for_the_debug_channel_only_while_release_builds_are_paused(self):
+        self.assertEqual(barrier.ROLLOUT_CHANNELS, ("debug",))
         calls = []
         def verify(base, version, channel):
             calls.append(channel)
@@ -62,8 +63,12 @@ class PublishedClientBarrierTest(unittest.TestCase):
             return {"channel": channel}
         with patch.object(barrier, "verify_channel", side_effect=verify), patch.object(barrier.time, "sleep"):
             result = barrier.wait_for_clients("https://cdn.test", VERSION, 10)
-        self.assertEqual(set(result), {"release", "debug"})
-        self.assertEqual(calls, ["release", "debug", "debug"])
+        self.assertEqual(set(result), {"debug"})
+        self.assertEqual(calls, ["debug", "debug"])
+
+    def test_supported_platforms_exclude_paused_macos(self):
+        self.assertEqual(barrier.PLATFORMS, {"hwanhee1.corum_ranked.dll", "hwanhee1.corum_ranked.ios.dylib",
+                                             "hwanhee1.corum_ranked.android32.so", "hwanhee1.corum_ranked.android64.so"})
 
     def test_missing_publication_times_out_and_corruption_fails_without_retry(self):
         error = urllib.error.HTTPError("https://cdn.test", 404, "missing", {}, None)

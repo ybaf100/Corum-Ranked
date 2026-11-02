@@ -70,7 +70,7 @@ if __name__ == "__main__":
         args.package = packages[0]
     binaries = {"ios": "hwanhee1.corum_ranked.ios.dylib"}
     if not args.ios_only:
-        binaries.update(mac="hwanhee1.corum_ranked.dylib",win="hwanhee1.corum_ranked.dll",
+        binaries.update(win="hwanhee1.corum_ranked.dll",
                         android32="hwanhee1.corum_ranked.android32.so",
                         android64="hwanhee1.corum_ranked.android64.so")
     with zipfile.ZipFile(args.package) as package:

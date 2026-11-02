@@ -29,21 +29,28 @@ int main(){
   assert(hudDefaultPivot(mode,spec.id,569,320));
   auto t=resolveHudTransform(mode,spec.id,HudLayoutConfig{},569,320);assert(t.identity());
  }
+ assert(hudElements(HudMode::Solo).size()==18);
  // Exactly one element per mode is unhideable: the timer.
  for(auto mode:{HudMode::Solo,HudMode::Survival}){int locked=0;for(auto const& s:hudElements(mode))if(!s.hideable){++locked;assert(s.id=="timer");}assert(locked==1);}
  // A top-right element keeps its distance to the right edge on a wider screen.
  auto at=hudPlacementAt({500,280},{480,270},569,320,1.0f,true);
  assert(at.moved&&at.anchor==HudAnchor::TopRight&&near(at.dx,-69)&&near(at.dy,-40));
- auto wide=resolveHudTransform(HudMode::Solo,"opponent",&at,700,320);assert(near(wide.position.x,631)&&near(wide.position.y,280));
+ auto wide=resolveHudTransform(HudMode::Solo,"opponent-name",&at,700,320);assert(near(wide.position.x,631)&&near(wide.position.y,280));
  // Center zone uses the screen center; bottom-left uses the origin.
  auto center=hudPlacementAt({300,170},{290,160},569,320,1.0f,true);assert(center.anchor==HudAnchor::Center);
  auto ipad=resolveHudTransform(HudMode::Solo,"state",&center,512,384);assert(near(ipad.position.x,256+300-284.5f)&&near(ipad.position.y,192+10));
  auto low=hudPlacementAt({20,20},{40,30},569,320,1.0f,true);assert(low.anchor==HudAnchor::BottomLeft&&near(low.dx,20)&&near(low.dy,20));
- // Out-of-range offsets are clamped inside the window; scale snaps to 10% steps.
+ // Out-of-range offsets are clamped inside the window; scale is 50-200 % in 5 % steps.
  HudPlacement wild{.moved=true,.anchor=HudAnchor::TopLeft,.dx=9000,.dy=-9000,.scale=7.0f,.visible=true};
- auto clamped=resolveHudTransform(HudMode::Solo,"own",&wild,569,320);assert(near(clamped.position.x,569)&&near(clamped.position.y,0)&&near(clamped.scale,1.6f));
- assert(near(clampHudScale(.63f),.6f)&&near(clampHudScale(1.04f),1.0f)&&near(clampHudScale(NAN),1.0f)&&near(clampHudScale(.1f),.6f));
- assert(snapHud(13)==16&&snapHud(11)==8&&snapHud(-5)==-8);
+ auto clamped=resolveHudTransform(HudMode::Solo,"own-name",&wild,569,320);assert(near(clamped.position.x,569)&&near(clamped.position.y,0)&&near(clamped.scale,2.0f));
+ assert(near(clampHudScale(.63f),.65f)&&near(clampHudScale(1.02f),1.0f)&&near(clampHudScale(NAN),1.0f)&&near(clampHudScale(.1f),.5f));
+ // Opacity: 10-100 % in 10 % steps, independent of hiding.
+ assert(near(clampHudOpacity(.34f),.3f)&&near(clampHudOpacity(0),.1f)&&near(clampHudOpacity(2),1)&&near(clampHudOpacity(NAN),1));
+ assert(hudOpacityByte(1)==255&&hudOpacityByte(.5f)==128&&hudOpacityByte(0)==26);
+ HudPlacement faded{.opacity=.4f};auto fade=resolveHudTransform(HudMode::Solo,"timer",&faded,569,320);
+ assert(fade.visible&&near(fade.opacity,.4f)&&!fade.identity());
+ assert(snapHud(13)==16&&snapHud(11)==8&&snapHud(-5)==-8&&snapHud(13.4f,1)==13&&snapHud(7,0)==7);
+ assert(hudMutuallyExclusive(HudMode::Solo,"own-attempt","own-checks")&&!hudMutuallyExclusive(HudMode::Solo,"own-score","own-checks"));
  // The timer cannot be hidden, even by a hand-edited save.
  HudPlacement hidden{.visible=false};
  assert(resolveHudTransform(HudMode::Solo,"timer",&hidden,569,320).visible);
@@ -54,33 +61,51 @@ int main(){
  auto cut=resolveHudTransform(HudMode::Survival,"cutline",&moved,569,320);assert(cut.identity()==false&&!cut.visible&&cut.scale==1.0f&&cut.position==cut.pivot);
  // Round trip; unknown ids/anchors/versions fall back to the defaults.
  HudLayoutConfig config;config.solo["timer"]=hudMovedPlacement(HudAnchor::Top,0,-32,1.2f);config.solo["feed"]=hudHiddenPlacement();
- config.survival["standings"]=hudScaledPlacement(.8f);
+ config.solo["own-score"]=HudPlacement{.opacity=.6f};config.survival["standings"]=hudScaledPlacement(.8f);
  auto text=hudLayoutJson(config).dump();auto back=parseHudLayoutText(text);
- assert(back.solo.size()==2&&back.survival.size()==1);
+ assert(back.solo.size()==3&&back.survival.size()==1);
  assert(back.solo.at("timer").moved&&back.solo.at("timer").anchor==HudAnchor::Top&&near(back.solo.at("timer").dy,-32)&&near(back.solo.at("timer").scale,1.2f));
- assert(!back.solo.at("feed").visible&&near(back.survival.at("standings").scale,.8f));
+ assert(!back.solo.at("feed").visible&&near(back.survival.at("standings").scale,.8f)&&near(back.solo.at("own-score").opacity,.6f));
  auto messy=parseHudLayoutText(R"({"version":1,"solo":{"future":{"scale":1.2},"timer":{"visible":false},"own":{"anchor":"nowhere","dx":5,"dy":5},"round":"x","fps":{"dx":"1"}},"survival":[]})");
  assert(messy.solo.empty()&&messy.survival.empty());
  assert(parseHudLayoutText(R"({"version":2,"solo":{"feed":{"visible":false}}})").solo.empty());
  assert(parseHudLayoutText("not json").solo.empty()&&parseHudLayoutText("").solo.empty());
+ // beta.150 block saves split into per-label placements with the same result.
+ auto legacy=parseHudLayoutText(R"({"version":1,"solo":{"own":{"anchor":"bottom-left","dx":50,"dy":96,"scale":1.5},"opponent":{"visible":false},"qualifying":{"scale":1.2}}})");
+ assert(legacy.solo.size()==12&&!legacy.solo.contains("own"));
+ auto score=legacy.solo.at("own-score");assert(score.moved&&score.anchor==HudAnchor::BottomLeft&&near(score.dx,50+1.5f*82)&&near(score.dy,96-1.5f*16)&&near(score.scale,1.5f));
+ for(float w:{569.f,700.f})for(auto id:{"opponent-name","opponent-caption","opponent-score","opponent-checks","opponent-attempt"}){
+  auto t=resolveHudTransform(HudMode::Solo,id,legacy,w,320);assert(!t.visible&&t.position==t.pivot&&t.scale==1.0f);
+ }
+ auto value=resolveHudTransform(HudMode::Solo,"qualifying-value",legacy,569,320),caption=resolveHudTransform(HudMode::Solo,"qualifying-caption",legacy,569,320);
+ assert(caption.position==caption.pivot&&near(value.position.x,14+1.2f*82)&&near(value.position.y,12-1.2f*3)&&near(value.scale,1.2f));
+ // A new per-label entry wins over its legacy block.
+ auto mixed=parseHudLayoutText(R"({"version":1,"solo":{"own":{"visible":false},"own-name":{"scale":1.1}}})");
+ assert(mixed.solo.at("own-name").visible&&!mixed.solo.at("own-score").visible);
  // Presets reference only known elements and keep the timer visible.
  for(auto mode:{HudMode::Solo,HudMode::Survival})for(auto preset:HudPresets)for(auto const& [id,p]:hudPresetPlacements(mode,preset)){
   auto const* spec=hudElement(mode,id);assert(spec);assert(spec->hideable||p.visible);
   auto t=resolveHudTransform(mode,id,&p,569,320);assert(t.position.x>=0&&t.position.x<=569&&t.position.y>=0&&t.position.y<=320);
  }
  assert(hudPresetPlacements(HudMode::Solo,HudPreset::Default).empty());
+ assert(hudPresetPlacements(HudMode::Solo,HudPreset::Focus).size()==12);
 }
 `);
 });
 
 test('Solo and Survival HUDs build each customizable element inside a placement group',()=>{
  const play=read('src/PlayLayer.cpp'),survival=read('src/ui/SurvivalHud.cpp'),groups=read('src/ui/HudPlacementGroup.hpp');
- for(const id of ['fps','own','opponent','round','timer','state','qualifying','progress','feed'])
+ for(const id of ['fps','own-name','own-caption','own-score','own-checks','own-attempt','opponent-name','opponent-caption',
+   'opponent-score','opponent-checks','opponent-attempt','round','timer','state','qualifying-caption','qualifying-value','progress','feed'])
   assert.match(play,new RegExp(`hudGroup\\("${id}"`),`solo ${id}`);
  for(const id of ['aux','standings','round','timer','difference','rank','waiting'])
   assert.match(survival,new RegExp(`group\\("${id}"\\)`),`survival ${id}`);
  assert.match(survival,/HudMode::Survival,"cutline"/);
  assert.match(groups,/setAnchorPoint\(\{transform\.pivot\.x\/size\.width,transform\.pivot\.y\/size\.height\}\)/);
+ // Opacity reaches labels added after the group (feed rows, standings, icons).
+ assert.match(play,/refreshHudGroups\(\);\n        addChild\(m_fields->hudRoot, 1000\);/);
+ assert.match(play,/refreshHudOpacity\(hudGroup\("feed", 5\)\)/);
+ assert.match(survival,/refreshHudOpacity\(group\("standings"\)\)/);
  const popup=read('src/RankedPopup.cpp');
  assert.match(popup,/ranked-hud-editor-button/);assert.match(popup,/survival-hud-editor-button/);
  assert.match(popup,/HudEditorPopup::create\(corum::ranked::HudMode::Solo\)/);
@@ -145,11 +170,18 @@ struct CCNode:CCObject{
  CCRect boundingBox()const{auto c=getContentSize();auto a=toParent({0,0}),b=toParent({c.width,c.height});return {std::min(a.x,b.x),std::min(a.y,b.y),std::abs(b.x-a.x),std::abs(b.y-a.y)};}
  virtual void onExit(){}
 };
-struct CCNodeRGBA:CCNode{GLubyte opacity=255;static CCNodeRGBA* create(){return new CCNodeRGBA;}void setOpacity(GLubyte o){opacity=o;}GLubyte getOpacity()const{return opacity;}
- void setCascadeOpacityEnabled(bool){}void setCascadeColorEnabled(bool){}void setColor(ccColor3B){}};
+// cocos2d-x 2.2 opacity cascade: displayed = real * parent displayed / 255.
+struct CCRGBAProtocol{virtual~CCRGBAProtocol()=default;virtual void setOpacity(GLubyte)=0;virtual GLubyte getOpacity()=0;virtual GLubyte getDisplayedOpacity()=0;
+ virtual void updateDisplayedOpacity(GLubyte)=0;virtual void setCascadeOpacityEnabled(bool)=0;virtual bool isCascadeOpacityEnabled()=0;};
+struct CCNodeRGBA:CCNode,CCRGBAProtocol{GLubyte opacity=255,displayed=255;bool cascade=false;static CCNodeRGBA* create(){return new CCNodeRGBA;}
+ void setOpacity(GLubyte o)override{opacity=displayed=o;if(cascade){GLubyte p=255;if(auto*r=dynamic_cast<CCRGBAProtocol*>(parent);r&&r->isCascadeOpacityEnabled())p=r->getDisplayedOpacity();updateDisplayedOpacity(p);}}
+ GLubyte getOpacity()override{return opacity;}GLubyte getDisplayedOpacity()override{return displayed;}
+ void updateDisplayedOpacity(GLubyte p)override{displayed=static_cast<GLubyte>(opacity*p/255);if(cascade)for(auto*c:children)if(auto*r=dynamic_cast<CCRGBAProtocol*>(c))r->updateDisplayedOpacity(displayed);}
+ void setCascadeOpacityEnabled(bool v)override{cascade=v;}bool isCascadeOpacityEnabled()override{return cascade;}
+ void setCascadeColorEnabled(bool){}void setColor(ccColor3B){}};
 struct CCLabelBMFont:CCNodeRGBA{std::string text;CCLabelBMFont(){anchor=CCPoint{.5f,.5f};}
  void setString(char const* s){text=s;}CCSize getContentSize()const override{return {static_cast<float>(text.size())*12,20};}};
-struct CCSprite:CCNodeRGBA{CCSprite(){anchor=CCPoint{.5f,.5f};content=CCSize{20,20};}static CCSprite* create(char const*){return new CCSprite;}static CCSprite* createWithSpriteFrameName(char const*){return new CCSprite;}void setScaleX(float){}void setScaleY(float){}};
+struct CCSprite:CCNodeRGBA{CCSprite(){anchor=CCPoint{.5f,.5f};content=CCSize{20,20};}static CCSprite* create(char const*){return new CCSprite;}static CCSprite* createWithSpriteFrameName(char const*){return new CCSprite;}void setScaleX(float){}void setScaleY(float){}float rotation=0;void setRotation(float r){rotation=r;}};
 struct CCLayer:CCNode{CCLayer(){ignoreAnchor=true;}void setTouchEnabled(bool){}virtual void registerWithTouchDispatcher(){}
  virtual bool ccTouchBegan(CCTouch*,CCEvent*){return false;}virtual void ccTouchMoved(CCTouch*,CCEvent*){}virtual void ccTouchEnded(CCTouch*,CCEvent*){}virtual void ccTouchCancelled(CCTouch*,CCEvent*){}
  void setLayout(std::nullptr_t){}};
@@ -206,44 +238,85 @@ static CCMenuItemSpriteExtra* button(HudEditorPopup* p,std::string const& text){
 int main(){
  auto& saved=geode::Mod::get()->saved;
  auto* editor=HudEditorPopup::create(HudMode::Solo);assert(editor);
+ assert(editor->m_groups.size()==18&&editor->m_listRows.size()==18);
  auto const timer=hudDefaultPivot(HudMode::Solo,"timer",569,320).value();
- // Tap the clock, drag it 37,-41: the lower-left corner snaps to the 8 px grid.
- assert(editor->beginTouch({timer.x,timer.y-6}));editor->moveTouch({timer.x+37,timer.y-47});editor->endTouch();
+ // Tap the clock, drag it 69,-20 (clear of the round state label): the
+ // lower-left corner snaps to the 8 px grid.
+ assert(editor->beginTouch({timer.x,timer.y-6}));editor->moveTouch({timer.x+69,timer.y-26});editor->endTouch();
  auto* clock=editor->m_groups.at("timer");
  CCRect box;bool any=false;includeBox(clock,editor->m_canvas,clock,box,any);assert(any);
  assert(std::fmod(box.getMinX(),8.0f)==0&&std::fmod(box.getMinY(),8.0f)==0);
  assert(editor->m_working.at("timer").moved&&editor->m_working.at("timer").anchor==HudAnchor::Top);
+ // Grid off: drags move by 1 px; the arrows nudge exactly 1 px.
+ editor->onGrid(nullptr);assert(editor->m_grid==1);
+ auto const before=box;assert(editor->beginTouch(box.origin+CCPoint{2,2}));editor->moveTouch(box.origin+CCPoint{5,2});editor->endTouch();
+ any=false;includeBox(clock,editor->m_canvas,clock,box,any);assert(std::abs(box.getMinX()-before.getMinX()-3)<.01f);
+ auto const nudgeFrom=box.getMinY();
+ for(auto* arrow:editor->m_nudgeButtons)if(arrow->getTag()==1)arrow->activate();
+ any=false;includeBox(clock,editor->m_canvas,clock,box,any);assert(std::abs(box.getMinY()-nudgeFrom-1)<.01f);
+ editor->onGrid(nullptr);assert(editor->m_grid==8);
  // Dragging far off screen keeps the whole element inside the window.
  assert(editor->beginTouch(box.origin+CCPoint{2,2}));editor->moveTouch({-900,-900});editor->endTouch();
  any=false;includeBox(clock,editor->m_canvas,clock,box,any);assert(box.getMinX()>=0&&box.getMinY()>=0);
  assert(editor->m_working.at("timer").anchor==HudAnchor::BottomLeft);
- // The timer cannot be hidden; the HIDE button is disabled and ignored.
+ // The timer cannot be hidden, but can be made transparent (and back).
  auto* hide=button(editor,"HIDE");assert(hide&&!hide->isEnabled());editor->onToggleVisible(nullptr);
  assert(editor->m_working.at("timer").visible);
- // Next element (round) can be hidden and resized within 60-160 %.
+ editor->m_transparentButton->activate();editor->m_transparentButton->activate();editor->m_transparentButton->activate();
+ assert(std::abs(editor->m_working.at("timer").opacity-.7f)<.01f&&editor->m_transparencyLabel->text=="30%");
+ assert(clock->getOpacity()==hudOpacityByte(.7f));
+ // The group opacity cascades through plain/RGBA rows to every label.
+ for(auto* child:clock->children)if(auto*label=dynamic_cast<CCLabelBMFont*>(child))assert(label->getDisplayedOpacity()<=hudOpacityByte(.7f));
+ for(int i=0;i<12;i++)editor->m_transparentButton->activate();
+ assert(std::abs(editor->m_working.at("timer").opacity-.1f)<.01f&&!editor->m_transparentButton->isEnabled());
+ for(int i=0;i<12;i++)editor->m_opaqueButton->activate();
+ assert(std::abs(editor->m_working.at("timer").opacity-1)<.01f&&!editor->m_opaqueButton->isEnabled());
+ // Next element (round) can be hidden and resized within 50-200 % in 5 % steps.
  editor->onNext(nullptr);assert(editor->m_selected=="round");assert(hide->isEnabled());hide->activate();
  assert(!editor->m_working.at("round").visible&&editor->m_groups.at("round")->isVisible()&&editor->m_groups.at("round")->getOpacity()<100);
- for(int i=0;i<12;i++)editor->onLarger(nullptr);assert(std::abs(editor->m_working.at("round").scale-1.6f)<.001f);
- for(int i=0;i<12;i++)editor->onSmaller(nullptr);assert(std::abs(editor->m_working.at("round").scale-.6f)<.001f);
+ editor->onLarger(nullptr);assert(std::abs(editor->m_working.at("round").scale-1.05f)<.001f&&editor->m_scaleLabel->text=="105%");
+ for(int i=0;i<30;i++)editor->onLarger(nullptr);assert(std::abs(editor->m_working.at("round").scale-2.0f)<.001f);
+ for(int i=0;i<40;i++)editor->onSmaller(nullptr);assert(std::abs(editor->m_working.at("round").scale-.5f)<.001f);
+ // Own score is its own element, separate from the name and checks.
+ auto const scorePivot=hudDefaultPivot(HudMode::Solo,"own-score",569,320).value();
+ assert(editor->beginTouch({scorePivot.x+8,scorePivot.y-8}));editor->endTouch();assert(editor->m_selected=="own-score");
+ // Clear checks and death-match attempts share a spot without an overlap warning.
+ while(editor->m_selected!="own-attempt")editor->onNext(nullptr);
+ assert(editor->m_tag->text.find("OVERLAP")==std::string::npos);
+ // The element list selects and toggles; the canvas is inert while it is open.
+ auto* list=button(editor,"LIST");assert(list);list->activate();
+ assert(editor->m_listOpen&&editor->m_list->isVisible()&&!editor->m_toolbar->isVisible());
+ for(auto* item:editor->m_listItems)assert(item->isVisible());
+ assert(editor->beginTouch({timer.x,timer.y-6})&&editor->m_drag==HudEditorPopup::Drag::None);
+ auto row=[&](std::string const& id){return std::find_if(editor->m_listRows.begin(),editor->m_listRows.end(),[&](auto const& r){return r.id==id;});};
+ assert(!row("timer")->toggle->isEnabled()&&row("feed")->toggle->isEnabled());
+ row("feed")->toggle->activate();assert(!editor->m_working.at("feed").visible&&row("feed")->toggleCaption->text=="HIDDEN");
+ assert(!editor->beginTouch(row("feed")->toggle->getPosition()));
+ row("opponent-score")->select->activate();
+ assert(editor->m_selected=="opponent-score"&&!editor->m_listOpen&&editor->m_toolbar->isVisible());
+ for(auto* item:editor->m_listItems)assert(!item->isVisible());
  // Toolbar buttons fall through to the modal menu; the toolbar chrome drags.
  auto* save=button(editor,"SAVE");assert(save);
  assert(!editor->beginTouch(save->getPosition()));
  auto const toolbar=editor->m_toolbar->getPosition();
- assert(editor->beginTouch(toolbar+CCPoint{0,52}));editor->moveTouch(toolbar+CCPoint{-500,52});editor->endTouch();
- assert(editor->m_toolbar->getPosition().x==152&&save->getPosition().x==152+66);
+ assert(editor->beginTouch(toolbar+CCPoint{0,82}));editor->moveTouch(toolbar+CCPoint{-500,82});editor->endTouch();
+ assert(editor->m_toolbar->getPosition().x==156&&save->getPosition().x==156+68);
  // Presets replace the working layout; cancel never writes.
  editor->onPreset(button(editor,"Minimal"));assert(editor->m_working==hudPresetPlacements(HudMode::Solo,HudPreset::Minimal));
  editor->onCancel(nullptr);assert(editor->closed&&saved.empty());
  // SAVE persists only this mode and keeps the other mode's layout.
- HudLayoutConfig before;before.survival["rank"]=hudScaledPlacement(.7f);saveHudLayout(before);
- auto* second=HudEditorPopup::create(HudMode::Solo);second->onPreset(button(second,"Broadcast"));save=button(second,"SAVE");save->activate();
+ HudLayoutConfig before2;before2.survival["rank"]=hudScaledPlacement(.7f);saveHudLayout(before2);
+ auto* second=HudEditorPopup::create(HudMode::Solo);second->onPreset(button(second,"Broadcast"));
+ second->m_selected="own-name";second->onMoreTransparent(nullptr);save=button(second,"SAVE");save->activate();
  assert(second->closed);auto const stored=loadHudLayout();
- assert(stored.solo==hudPresetPlacements(HudMode::Solo,HudPreset::Focus)&&stored.survival==before.survival);
+ auto expected=hudPresetPlacements(HudMode::Solo,HudPreset::Focus);expected["own-name"].opacity=.9f;
+ assert(stored.solo.size()==expected.size()&&std::abs(stored.solo.at("own-name").opacity-.9f)<.01f&&stored.survival==before2.survival);
  // The survival editor previews every element and the markers are visibility-only.
  auto* survival=HudEditorPopup::create(HudMode::Survival);
  for(auto const& spec:hudElements(HudMode::Survival)){CCRect b;bool found=false;includeBox(survival->m_groups.at(std::string(spec.id)),survival->m_canvas,survival->m_groups.at(std::string(spec.id)),b,found);assert(found);}
  while(survival->m_selected!="cutline")survival->onNext(nullptr);
- assert(!button(survival,"-")->isEnabled()&&!button(survival,"+")->isEnabled());
+ assert(!survival->m_smallerButton->isEnabled()&&!survival->m_largerButton->isEnabled());
+ for(auto* arrow:survival->m_nudgeButtons)assert(!arrow->isEnabled());
  survival->keyBackClicked();assert(survival->closed);
 }
 `);

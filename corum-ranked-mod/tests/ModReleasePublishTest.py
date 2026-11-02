@@ -42,13 +42,12 @@ class MemoryR2(publisher.R2Client):
 
 
 class ModReleasePublishTest(unittest.TestCase):
-    def test_debug_publication_waits_for_every_required_off_platform(self):
-        workflow = (ROOT.parent / '.github/workflows/build-ranked-debug.yml').read_text()
-        publish = workflow.split('  publish-download:', 1)[1]
+    def test_debug_publication_waits_for_validation_and_the_complete_debug_build(self):
+        workflow = (ROOT.parent / '.github/workflows/ranked-release.yml').read_text()
+        publish = workflow.split('  publish-debug:', 1)[1].split('\n  activate:', 1)[0]
         dependency = re.search(r'^    needs: \[([^\]]+)\]', publish, re.M)
         self.assertIsNotNone(dependency)
-        self.assertEqual({name.strip() for name in dependency[1].split(',')},
-                         {'metadata', 'package', 'tests', 'ios-debug-off', 'additional-debug-off', 'full-validation'})
+        self.assertEqual({name.strip() for name in dependency[1].split(',')}, {'policy', 'validation', 'debug'})
         # Default Actions needs semantics must reject failure in any required job.
         self.assertNotIn('always()', publish)
 
@@ -177,11 +176,17 @@ class ModReleasePublishTest(unittest.TestCase):
         self.assertIn('publish-mod-r2.py', workflow)
         self.assertNotIn('gh release', workflow)
         self.assertNotIn('RANKED_RELEASE_TOKEN', workflow)
-        for name in ('build-ranked-debug.yml', 'build-ranked-mod.yml'):
-            caller = (WORKFLOW.parent / name).read_text()
-            self.assertIn("vars.RANKED_PUBLISH_R2 == 'true'", caller)
-            self.assertIn("github.ref == 'refs/heads/main'", caller)
-            self.assertNotIn('RANKED_PUBLISH_RELEASES', caller)
+        # Debug publication is gated by the main coordinator; the paused
+        # Release workflow keeps its own manual gate.
+        coordinator = (WORKFLOW.parent / 'ranked-release.yml').read_text()
+        self.assertIn('PUBLISH: ${{ vars.RANKED_PUBLISH_R2 }}', coordinator)
+        self.assertIn("github.ref == 'refs/heads/main'", coordinator)
+        self.assertIn("needs.policy.outputs.publish == 'true'", coordinator.split('  publish-debug:', 1)[1])
+        manual = (WORKFLOW.parent / 'build-ranked-mod.yml').read_text()
+        self.assertIn("vars.RANKED_PUBLISH_R2 == 'true'", manual)
+        self.assertIn("github.ref == 'refs/heads/main'", manual)
+        for name in ('build-ranked-debug.yml', 'build-ranked-mod.yml', 'ranked-release.yml'):
+            self.assertNotIn('RANKED_PUBLISH_RELEASES', (WORKFLOW.parent / name).read_text())
 
 
 if __name__ == '__main__':

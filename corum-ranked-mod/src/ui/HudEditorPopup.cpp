@@ -10,8 +10,10 @@
 #include <Geode/Geode.hpp>
 #include <algorithm>
 #include <cmath>
+#include <array>
 #include <limits>
 #include <tuple>
+#include <utility>
 
 using namespace geode::prelude;
 
@@ -195,7 +197,8 @@ void HudEditorPopup::buildBackground() {
     }
 }
 
-// Mirrors PlayLayer::addRankedHud (fonts, scales, anchors and coordinates).
+// Mirrors PlayLayer::addRankedHud (fonts, scales, anchors and coordinates),
+// one group per customizable label.
 void HudEditorPopup::buildSoloPreview() {
     auto const layout = layoutHud(m_size.width, m_size.height);
     auto const top = layout.topY, left = layout.topLeftX + 8.0f, right = layout.topRightX - 8.0f;
@@ -205,17 +208,17 @@ void HudEditorPopup::buildSoloPreview() {
     };
     add(group("fps"), "FPS : 60", FontWeight::SemiBold, 0.51f, {0, 1}, {7.0f, top - 0.5f}, Text);
 
-    auto* own = group("own");
-    add(own, i18n::text("you", "YOU"), FontWeight::SemiBold, 0.51f, {0, 1}, {left, top - 4.0f}, Cyan).fit(96.0f, 0.51f, 0.21f);
-    add(own, i18n::text("score", "SCORE"), FontWeight::SemiBold, 0.51f, {0, 1}, {left, top - 22.0f}, Text);
-    add(own, "182.0", FontWeight::Black, 0.714f, {0, 1}, {left + 82.0f, top - 20.0f}, Text).fit(76.0f, 0.714f, 0.26f);
-    auto* opponent = group("opponent");
-    add(opponent, i18n::text("opponent", "OPPONENT"), FontWeight::SemiBold, 0.51f, {1, 1}, {right, top - 4.0f}, Red).fit(96.0f, 0.51f, 0.21f);
-    add(opponent, i18n::text("score", "SCORE"), FontWeight::SemiBold, 0.51f, {1, 1}, {right - 88.0f, top - 22.0f}, Text);
-    add(opponent, "140.0", FontWeight::Black, 0.714f, {1, 1}, {right, top - 20.0f}, Text).fit(76.0f, 0.714f, 0.26f);
+    add(group("own-name"), i18n::text("you", "YOU"), FontWeight::SemiBold, 0.51f, {0, 1}, {left, top - 4.0f}, Cyan).fit(96.0f, 0.51f, 0.21f);
+    add(group("own-caption"), i18n::text("score", "SCORE"), FontWeight::SemiBold, 0.51f, {0, 1}, {left, top - 22.0f}, Text);
+    add(group("own-score"), "182.0", FontWeight::Black, 0.714f, {0, 1}, {left + 82.0f, top - 20.0f}, Text).fit(76.0f, 0.714f, 0.26f);
+    add(group("own-attempt"), "Attempts : 2/3", FontWeight::SemiBold, 0.476f, {0, 1}, {left, top - 40.0f}, Gold);
+    add(group("opponent-name"), i18n::text("opponent", "OPPONENT"), FontWeight::SemiBold, 0.51f, {1, 1}, {right, top - 4.0f}, Red).fit(96.0f, 0.51f, 0.21f);
+    add(group("opponent-caption"), i18n::text("score", "SCORE"), FontWeight::SemiBold, 0.51f, {1, 1}, {right - 88.0f, top - 22.0f}, Text);
+    add(group("opponent-score"), "140.0", FontWeight::Black, 0.714f, {1, 1}, {right, top - 20.0f}, Text).fit(76.0f, 0.714f, 0.26f);
+    add(group("opponent-attempt"), "Attempts : 1/3", FontWeight::SemiBold, 0.476f, {1, 1}, {right, top - 40.0f}, Gold);
     for (int index = 0; index < 3; ++index) {
-        for (auto [parent, x, done] : {std::tuple{static_cast<CCNode*>(own), left + 8.0f + 17.0f * index, index < 2},
-                                       std::tuple{static_cast<CCNode*>(opponent), right - 42.0f + 17.0f * index, index < 1}}) {
+        for (auto [parent, x, done] : {std::tuple{static_cast<CCNode*>(group("own-checks")), left + 8.0f + 17.0f * index, index < 2},
+                                       std::tuple{static_cast<CCNode*>(group("opponent-checks")), right - 42.0f + 17.0f * index, index < 1}}) {
             if (auto* check = CCSprite::createWithSpriteFrameName("GJ_checkOn_001.png")) {
                 check->setScale(0.30f);
                 check->setPosition({x, top - 36.0f});
@@ -229,9 +232,9 @@ void HudEditorPopup::buildSoloPreview() {
     add(group("timer"), "02:39", FontWeight::Black, CompetitiveClockScale, {0.5f, 1}, {w / 2.0f, top - 18.0f}, Text);
     add(group("state"), "MATCH POINT", FontWeight::SemiBold, 0.442f, {0.5f, 1}, {w / 2.0f, top - 47.0f}, Gold);
 
-    auto* qualifying = group("qualifying");
-    auto caption = add(qualifying, "Qualifying", FontWeight::SemiBold, 0.51f, {0, 0}, {layout.bottomLeftX + 4.0f, layout.bottomY + 4.0f}, Text);
-    add(qualifying, "20%", FontWeight::Black, 0.714f, {0, 0},
+    auto caption = add(group("qualifying-caption"), "Qualifying", FontWeight::SemiBold, 0.51f, {0, 0},
+        {layout.bottomLeftX + 4.0f, layout.bottomY + 4.0f}, Text);
+    add(group("qualifying-value"), "20%", FontWeight::Black, 0.714f, {0, 0},
         {caption.foreground->getPositionX() + caption.foreground->getScaledContentSize().width + 10.0f, layout.bottomY + 1.0f}, Text);
 
     auto* progress = fadingNode();
@@ -341,48 +344,199 @@ CCMenuItemSpriteExtra* HudEditorPopup::toolbarButton(std::string const& text, CC
     return item;
 }
 
+// 1 px nudges. GJ_arrow_01 points left; rotation is clockwise.
+CCMenuItemSpriteExtra* HudEditorPopup::arrowButton(float rotation, CCPoint offset, int tag) {
+    CCSize const size {22.0f, 22.0f};
+    auto* face = surface(size, {}, Blue, SurfaceRaised, 250, true);
+    if (auto* arrow = CCSprite::createWithSpriteFrameName("GJ_arrow_01_001.png")) {
+        auto const content = arrow->getContentSize();
+        auto const fit = std::max(content.width, content.height);
+        arrow->setScale(fit > 0.0f ? 14.0f / fit : 0.3f);
+        arrow->setRotation(rotation);
+        arrow->setPosition({size.width / 2.0f, size.height / 2.0f});
+        face->addChild(arrow, 5);
+    }
+    auto* item = CCMenuItemSpriteExtra::create(face, this, menu_selector(HudEditorPopup::onNudge));
+    item->setTag(tag);
+    m_buttonMenu->addChild(item);
+    m_toolbarItems.push_back({item, offset});
+    m_nudgeButtons.push_back(item);
+    return item;
+}
+
+CCLabelBMFont* HudEditorPopup::toolbarCaption(std::string const& text, CCPoint offset, float width, ccColor3B color, float scale) {
+    auto const half = CCPoint{m_toolbarSize.width / 2.0f, m_toolbarSize.height / 2.0f};
+    auto* caption = menuLabel(text, scale, half + offset, color, FontWeight::ExtraBold);
+    fitMenuLabelWidth(caption, width, scale, scale * 0.6f);
+    m_toolbar->addChild(caption, 5);
+    return caption;
+}
+
+// Panel rows (y from the centre): title +72, hint +58, element +38,
+// size/transparency +12, fine move/grid -14, presets -40, cancel/save -66.
 void HudEditorPopup::buildToolbar() {
-    m_toolbarSize = CCSize{304.0f, 118.0f};
+    m_toolbarSize = CCSize{312.0f, 170.0f};
     m_toolbar = surface(m_toolbarSize, {}, Cyan, Surface, 246, true);
     m_toolbar->setID("hud-editor-toolbar"_spr);
     m_canvas->addChild(m_toolbar, 50);
-    auto const half = CCPoint{m_toolbarSize.width / 2.0f, m_toolbarSize.height / 2.0f};
-    auto* title = menuLabel(m_mode == HudMode::Solo
-            ? i18n::text("hud-editor-title-solo", "SOLO HUD EDITOR")
-            : i18n::text("hud-editor-title-survival", "SURVIVAL HUD EDITOR"),
-        0.30f, {half.x - 40.0f, half.y + 46.0f}, Cyan, FontWeight::Black);
-    fitMenuLabelWidth(title, 200.0f, 0.30f, 0.18f);
-    m_toolbar->addChild(title, 5);
-    m_presetLabel = menuLabel("", 0.20f, {half.x + 108.0f, half.y + 46.0f}, Gold, FontWeight::ExtraBold);
-    m_toolbar->addChild(m_presetLabel, 5);
-    auto* hint = menuLabel(i18n::text("hud-editor-hint", "Drag to move · tap to select · applies from the next match"),
-        0.17f, {half.x, half.y + 31.0f}, TextMuted, FontWeight::SemiBold);
-    fitMenuLabelWidth(hint, 288.0f, 0.17f, 0.11f);
-    m_toolbar->addChild(hint, 5);
+    toolbarCaption(m_mode == HudMode::Solo
+            ? i18n::text("hud-editor-title-solo", "SOLO HUD SETUP")
+            : i18n::text("hud-editor-title-survival", "SURVIVAL HUD SETUP"),
+        {-44.0f, 72.0f}, 200.0f, Cyan, 0.30f);
+    m_presetLabel = toolbarCaption("", {110.0f, 72.0f}, 80.0f, Gold, 0.20f);
+    toolbarCaption(i18n::text("hud-editor-hint", "Drag to move · tap to select · fine move 1px · applies from the next match"),
+        {0.0f, 58.0f}, 296.0f, TextMuted, 0.17f);
 
-    toolbarButton("<", {22, 22}, {-136.0f, 10.0f}, menu_selector(HudEditorPopup::onPrevious), Blue);
-    m_elementName = menuLabel("", 0.24f, {half.x - 88.0f, half.y + 10.0f}, Text, FontWeight::ExtraBold);
-    m_toolbar->addChild(m_elementName, 5);
-    toolbarButton(">", {22, 22}, {-40.0f, 10.0f}, menu_selector(HudEditorPopup::onNext), Blue);
-    m_smallerButton = toolbarButton("-", {22, 22}, {-6.0f, 10.0f}, menu_selector(HudEditorPopup::onSmaller), Blue);
-    m_scaleLabel = menuLabel("", 0.24f, {half.x + 22.0f, half.y + 10.0f}, Gold, FontWeight::Black);
-    m_toolbar->addChild(m_scaleLabel, 5);
-    m_largerButton = toolbarButton("+", {22, 22}, {50.0f, 10.0f}, menu_selector(HudEditorPopup::onLarger), Blue);
-    m_visibleButton = toolbarButton(i18n::text("hud-hide", "HIDE"), {76, 22}, {108.0f, 10.0f},
+    toolbarButton("<", {22, 22}, {-142.0f, 38.0f}, menu_selector(HudEditorPopup::onPrevious), Blue);
+    m_elementName = toolbarCaption("", {-90.0f, 40.0f}, 78.0f, Text, 0.24f);
+    m_indexLabel = toolbarCaption("", {-90.0f, 29.0f}, 60.0f, TextMuted, 0.15f);
+    toolbarButton(">", {22, 22}, {-38.0f, 38.0f}, menu_selector(HudEditorPopup::onNext), Blue);
+    toolbarButton(i18n::text("hud-list", "LIST"), {58, 22}, {22.0f, 38.0f}, menu_selector(HudEditorPopup::onList), Gold);
+    m_visibleButton = toolbarButton(i18n::text("hud-hide", "HIDE"), {84, 22}, {108.0f, 38.0f},
         menu_selector(HudEditorPopup::onToggleVisible), Red, &m_visibleCaption);
+
+    toolbarCaption(i18n::text("hud-size", "SIZE"), {-136.0f, 12.0f}, 30.0f, TextMuted, 0.19f);
+    m_smallerButton = toolbarButton("-", {22, 22}, {-104.0f, 12.0f}, menu_selector(HudEditorPopup::onSmaller), Blue);
+    m_scaleLabel = toolbarCaption("", {-74.0f, 12.0f}, 34.0f, Gold, 0.24f);
+    m_largerButton = toolbarButton("+", {22, 22}, {-44.0f, 12.0f}, menu_selector(HudEditorPopup::onLarger), Blue);
+    toolbarCaption(i18n::text("hud-transparency", "TRANSPARENCY"), {18.0f, 12.0f}, 52.0f, TextMuted, 0.19f);
+    m_opaqueButton = toolbarButton("-", {22, 22}, {62.0f, 12.0f}, menu_selector(HudEditorPopup::onLessTransparent), Blue);
+    m_transparencyLabel = toolbarCaption("", {94.0f, 12.0f}, 34.0f, Gold, 0.24f);
+    m_transparentButton = toolbarButton("+", {22, 22}, {126.0f, 12.0f}, menu_selector(HudEditorPopup::onMoreTransparent), Blue);
+
+    toolbarCaption(i18n::text("hud-fine-move", "FINE MOVE"), {-128.0f, -14.0f}, 46.0f, TextMuted, 0.19f);
+    arrowButton(0.0f, {-90.0f, -14.0f}, 0);
+    arrowButton(90.0f, {-64.0f, -14.0f}, 1);
+    arrowButton(-90.0f, {-38.0f, -14.0f}, 2);
+    arrowButton(180.0f, {-12.0f, -14.0f}, 3);
+    m_gridButton = toolbarButton(i18n::text("hud-grid-on", "GRID 8PX"), {120, 22}, {84.0f, -14.0f},
+        menu_selector(HudEditorPopup::onGrid), Cyan, &m_gridCaption);
 
     auto const presets = HudPresets;
     for (std::size_t index = 0; index < presets.size(); ++index) {
         toolbarButton(i18n::text(std::string(hudPresetKey(m_mode, presets[index])), std::string(hudPresetFallback(m_mode, presets[index]))),
-            {68, 22}, {-111.0f + 72.0f * static_cast<float>(index), -18.0f}, menu_selector(HudEditorPopup::onPreset), Cyan,
+            {68, 22}, {-114.0f + 74.0f * static_cast<float>(index), -40.0f}, menu_selector(HudEditorPopup::onPreset), Cyan,
             nullptr, static_cast<int>(index));
     }
-    toolbarButton(i18n::text("hud-reset", "RESET"), {68, 22}, {111.0f, -18.0f}, menu_selector(HudEditorPopup::onReset), Orange);
-    toolbarButton(i18n::text("cancel", "CANCEL"), {120, 24}, {-66.0f, -44.0f}, menu_selector(HudEditorPopup::onCancel), Blue);
-    toolbarButton(i18n::text("hud-save", "SAVE"), {120, 24}, {66.0f, -44.0f}, menu_selector(HudEditorPopup::onSave), Green);
+    toolbarButton(i18n::text("hud-reset", "RESET"), {68, 22}, {114.0f, -40.0f}, menu_selector(HudEditorPopup::onReset), Orange);
+    toolbarButton(i18n::text("cancel", "CANCEL"), {124, 24}, {-68.0f, -66.0f}, menu_selector(HudEditorPopup::onCancel), Blue);
+    toolbarButton(i18n::text("hud-save", "SAVE"), {124, 24}, {68.0f, -66.0f}, menu_selector(HudEditorPopup::onSave), Green);
 
     auto const x = m_mode == HudMode::Solo ? m_size.width / 2.0f : m_size.width / 2.0f + 44.0f;
     placeToolbar({x, m_size.height / 2.0f - 6.0f});
+    buildList();
+}
+
+// Two columns of element rows over the canvas: tap a row to select the
+// element, tap its right-hand button to show/hide it.
+void HudEditorPopup::buildList() {
+    auto const elements = hudElements(m_mode);
+    auto const perColumn = (elements.size() + 1) / 2;
+    CCSize const panel {324.0f, 40.0f + 22.0f * static_cast<float>(perColumn)};
+    m_list = surface(panel, {m_size.width / 2.0f, m_size.height / 2.0f}, Gold, Surface, 250, true);
+    m_list->setID("hud-editor-list"_spr);
+    m_list->setVisible(false);
+    m_canvas->addChild(m_list, 60);
+    auto* title = menuLabel(i18n::text("hud-list-title", "ELEMENTS"), 0.28f, {panel.width / 2.0f - 30.0f, panel.height - 14.0f},
+        Gold, FontWeight::Black);
+    fitMenuLabelWidth(title, 200.0f, 0.28f, 0.16f);
+    m_list->addChild(title, 5);
+    auto add = [&](CCNode* face, SEL_MenuHandler selector, int tag, CCPoint at) {
+        auto* item = CCMenuItemSpriteExtra::create(face, this, selector);
+        item->setTag(tag);
+        item->setPosition(at);
+        item->setVisible(false);
+        item->setEnabled(false);
+        m_buttonMenu->addChild(item);
+        m_listItems.push_back(item);
+        return item;
+    };
+    auto const origin = CCPoint{m_size.width / 2.0f - panel.width / 2.0f, m_size.height / 2.0f - panel.height / 2.0f};
+    auto* closeFace = surface({58, 18}, {}, Blue, SurfaceRaised, 250, true);
+    auto* closeText = menuLabel(i18n::text("close", "CLOSE"), 0.22f, {29, 9}, Text, FontWeight::ExtraBold);
+    fitFullMenuLabel(closeText, 50, 14, 0.22f);
+    closeFace->addChild(closeText, 5);
+    add(closeFace, menu_selector(HudEditorPopup::onList), 0, origin + CCPoint{panel.width - 36.0f, panel.height - 14.0f});
+    for (std::size_t index = 0; index < elements.size(); ++index) {
+        auto const column = index / perColumn, row = index % perColumn;
+        auto const x = origin.x + 8.0f + static_cast<float>(column) * 158.0f;
+        auto const y = origin.y + panel.height - 36.0f - static_cast<float>(row) * 22.0f;
+        ListRow entry;
+        entry.id = std::string(elements[index].id);
+        auto* face = surface({112, 19}, {}, Blue, SurfaceRaised, 250, false);
+        entry.name = menuLabel("", 0.2f, {5, 9.5f}, Text, FontWeight::ExtraBold);
+        entry.name->setAnchorPoint({0.0f, 0.5f});
+        face->addChild(entry.name, 5);
+        entry.state = menuLabel("", 0.16f, {108, 9.5f}, TextMuted, FontWeight::SemiBold);
+        entry.state->setAnchorPoint({1.0f, 0.5f});
+        face->addChild(entry.state, 5);
+        entry.select = add(face, menu_selector(HudEditorPopup::onListSelect), static_cast<int>(index), {x + 56.0f, y});
+        auto* toggleFace = surface({38, 19}, {}, Red, SurfaceRaised, 250, false);
+        entry.toggleCaption = menuLabel("", 0.18f, {19, 9.5f}, Text, FontWeight::ExtraBold);
+        toggleFace->addChild(entry.toggleCaption, 5);
+        entry.toggle = add(toggleFace, menu_selector(HudEditorPopup::onListToggle), static_cast<int>(index), {x + 135.0f, y});
+        m_listRows.push_back(entry);
+    }
+}
+
+void HudEditorPopup::setListOpen(bool open) {
+    m_listOpen = open;
+    m_drag = Drag::None;
+    if (m_list) m_list->setVisible(open);
+    for (auto* item : m_listItems) { item->setVisible(open); item->setEnabled(open); }
+    // The toolbar stays put but is inert under the list.
+    for (auto const& entry : m_toolbarItems) entry.item->setVisible(!open);
+    if (m_toolbar) m_toolbar->setVisible(!open);
+    refresh();
+}
+
+void HudEditorPopup::refreshList() {
+    for (auto const& row : m_listRows) {
+        auto const* spec = hudElement(m_mode, row.id);
+        auto const t = transform(row.id);
+        auto const selected = row.id == m_selected;
+        row.name->setString(elementName(m_mode, row.id).c_str());
+        row.name->setColor(selected ? Cyan : (t.visible ? Text : TextMuted));
+        fitMenuLabelWidth(row.name, 62.0f, 0.2f, 0.11f);
+        std::string state;
+        if (t.scale != 1.0f) state = fmt::format("{}%", static_cast<int>(std::lround(t.scale * 100.0f)));
+        if (t.opacity < 0.999f) {
+            if (!state.empty()) state += " ";
+            state += fmt::format("{}{}%", i18n::text("hud-transparency-short", "T"), static_cast<int>(std::lround((1.0f - t.opacity) * 100.0f)));
+        }
+        row.state->setString(state.c_str());
+        fitMenuLabelWidth(row.state, 42.0f, 0.16f, 0.1f);
+        row.toggleCaption->setString((t.visible ? i18n::text("hud-show", "SHOW") : i18n::text("hud-hidden-tag", "HIDDEN")).c_str());
+        row.toggleCaption->setColor(t.visible ? Green : Red);
+        fitMenuLabelWidth(row.toggleCaption, 32.0f, 0.18f, 0.1f);
+        auto const hideable = spec && spec->hideable;
+        if (m_listOpen) row.toggle->setEnabled(hideable);
+        row.toggle->setCascadeOpacityEnabled(true);
+        row.toggle->setOpacity(hideable ? 255 : 90);
+    }
+}
+
+void HudEditorPopup::onList(CCObject*) {
+    setListOpen(!m_listOpen);
+}
+
+void HudEditorPopup::onListSelect(CCObject* sender) {
+    auto const index = sender ? sender->getTag() : -1;
+    if (index < 0 || index >= static_cast<int>(m_listRows.size())) return;
+    m_selected = m_listRows[static_cast<std::size_t>(index)].id;
+    setListOpen(false);
+}
+
+void HudEditorPopup::onListToggle(CCObject* sender) {
+    auto const index = sender ? sender->getTag() : -1;
+    if (index < 0 || index >= static_cast<int>(m_listRows.size())) return;
+    auto const& id = m_listRows[static_cast<std::size_t>(index)].id;
+    auto const* spec = hudElement(m_mode, id);
+    if (!spec || !spec->hideable) return;
+    auto value = placement(id);
+    value.visible = !value.visible;
+    storePlacement(id, value);
+    refresh();
 }
 
 void HudEditorPopup::placeToolbar(CCPoint center) {
@@ -415,9 +569,27 @@ CCRect HudEditorPopup::elementBox(std::string const& id) const {
     if (found != m_groups.end()) includeBox(found->second, m_canvas, found->second, box, any);
     if (!any) {
         auto const t = transform(id);
-        return {t.position.x - 6.0f, t.position.y - 6.0f, 12.0f, 12.0f};
+        return CCRect{t.position.x - 6.0f, t.position.y - 6.0f, 12.0f, 12.0f};
     }
     return box;
+}
+
+// Moves the selected element by a window delta, keeping it fully on screen.
+void HudEditorPopup::moveSelected(float dx, float dy) {
+    auto const* spec = hudElement(m_mode, m_selected);
+    if (!spec || !spec->movable) return;
+    auto const box = elementBox(m_selected);
+    auto clampShift = [](float minimum, float extent, float limit, float move) {
+        if (extent > limit) return 0.0f;
+        return std::clamp(minimum + move, 0.0f, limit - extent) - minimum;
+    };
+    auto const sx = clampShift(box.getMinX(), box.size.width, m_size.width, dx);
+    auto const sy = clampShift(box.getMinY(), box.size.height, m_size.height, dy);
+    auto const current = placement(m_selected);
+    auto const t = transform(m_selected);
+    storePlacement(m_selected, hudPlacementAt({t.position.x + sx, t.position.y + sy},
+        {box.getMidX() + sx, box.getMidY() + sy}, m_size.width, m_size.height, current.scale, current.visible, current.opacity));
+    refresh();
 }
 
 // Keeps a scaled element fully on screen by moving it (never by resizing).
@@ -438,18 +610,18 @@ void HudEditorPopup::keepInside(std::string const& id) {
     auto const current = placement(id);
     auto const t = transform(id);
     storePlacement(id, hudPlacementAt({t.position.x + dx, t.position.y + dy},
-        {box.getMidX() + dx, box.getMidY() + dy}, m_size.width, m_size.height, current.scale, current.visible));
+        {box.getMidX() + dx, box.getMidY() + dy}, m_size.width, m_size.height, current.scale, current.visible, current.opacity));
     if (auto found = m_groups.find(id); found != m_groups.end()) applyHudPlacement(found->second, transform(id));
 }
 
 void HudEditorPopup::refresh() {
     for (auto const& [id, node] : m_groups) {
-        auto const t = transform(id);
-        applyHudPlacement(node, t);
         // Hidden elements stay visible (dimmed) in the editor so they can be
-        // selected and shown again.
-        node->setVisible(true);
-        node->setOpacity(t.visible ? 255 : 60);
+        // selected and shown again; visible ones preview their real opacity.
+        auto t = transform(id);
+        if (!t.visible) t.opacity = std::min(t.opacity, 0.25f);
+        t.visible = true;
+        applyHudPlacement(node, t);
     }
     auto const selected = transform(m_selected);
     auto const selectedBox = elementBox(m_selected);
@@ -459,7 +631,7 @@ void HudEditorPopup::refresh() {
         auto const id = std::string(spec.id);
         auto const t = transform(id);
         auto const box = elementBox(id);
-        if (id != m_selected && t.visible && selected.visible) {
+        if (id != m_selected && t.visible && selected.visible && !hudMutuallyExclusive(m_mode, id, m_selected)) {
             auto const left = std::max(box.getMinX(), selectedBox.getMinX()), right = std::min(box.getMaxX(), selectedBox.getMaxX());
             auto const bottom = std::max(box.getMinY(), selectedBox.getMinY()), top = std::min(box.getMaxY(), selectedBox.getMaxY());
             if (right - left > 2.0f && top - bottom > 2.0f) overlap = true;
@@ -472,7 +644,10 @@ void HudEditorPopup::refresh() {
 
     auto const* spec = hudElement(m_mode, m_selected);
     auto const name = elementName(m_mode, m_selected);
-    auto text = fmt::format("{} · {}%", name, static_cast<int>(std::lround(selected.scale * 100.0f)));
+    auto const percent = static_cast<int>(std::lround(selected.scale * 100.0f));
+    auto const transparency = static_cast<int>(std::lround((1.0f - selected.opacity) * 100.0f));
+    auto text = fmt::format("{} · {}%", name, percent);
+    if (transparency > 0) text += fmt::format(" · {} {}%", i18n::text("hud-transparency", "TRANSPARENCY"), transparency);
     if (!selected.visible) text += " · " + i18n::text("hud-hidden-tag", "HIDDEN");
     if (overlap) text += " · " + i18n::text("hud-overlap", "OVERLAP");
     m_tag->setString(text.c_str());
@@ -483,25 +658,37 @@ void HudEditorPopup::refresh() {
     auto const tagX = std::clamp(selectedBox.getMinX(), 2.0f, std::max(2.0f, m_size.width - m_tag->getScaledContentSize().width - 2.0f));
     m_tag->setPosition({tagX, above ? selectedBox.getMaxY() + 3.0f : selectedBox.getMinY() - 3.0f});
 
+    auto const elements = hudElements(m_mode);
+    auto const index = static_cast<std::size_t>(std::find_if(elements.begin(), elements.end(),
+        [&](auto const& candidate) { return candidate.id == m_selected; }) - elements.begin());
     m_elementName->setString(name.c_str());
-    fitMenuLabelWidth(m_elementName, 70.0f, 0.24f, 0.14f);
-    m_scaleLabel->setString(fmt::format("{}%", static_cast<int>(std::lround(selected.scale * 100.0f))).c_str());
+    fitMenuLabelWidth(m_elementName, 78.0f, 0.24f, 0.13f);
+    m_indexLabel->setString(fmt::format("{} / {}", index + 1, elements.size()).c_str());
+    m_scaleLabel->setString(fmt::format("{}%", percent).c_str());
+    m_transparencyLabel->setString(fmt::format("{}%", transparency).c_str());
     auto const hideable = spec && spec->hideable, movable = spec && spec->movable;
     m_visibleCaption->setString((selected.visible ? i18n::text("hud-hide", "HIDE") : i18n::text("hud-show", "SHOW")).c_str());
-    fitMenuLabelWidth(m_visibleCaption, 68.0f, 0.26f, 0.14f);
-    for (auto [item, enabled] : {std::pair{m_visibleButton, hideable},
-                                 std::pair{m_smallerButton, movable && selected.scale > HudMinimumScale + 0.001f},
-                                 std::pair{m_largerButton, movable && selected.scale < HudMaximumScale - 0.001f}}) {
+    fitMenuLabelWidth(m_visibleCaption, 76.0f, 0.26f, 0.14f);
+    m_gridCaption->setString((m_grid > 1.0f ? i18n::text("hud-grid-on", "GRID 8PX") : i18n::text("hud-grid-off", "GRID OFF")).c_str());
+    fitMenuLabelWidth(m_gridCaption, 112.0f, 0.26f, 0.14f);
+    auto enable = [](CCMenuItemSpriteExtra* item, bool enabled) {
         item->setEnabled(enabled);
         item->setCascadeOpacityEnabled(true);
         item->setOpacity(enabled ? 255 : 90);
-    }
+    };
+    enable(m_visibleButton, hideable);
+    enable(m_smallerButton, movable && selected.scale > HudMinimumScale + 0.001f);
+    enable(m_largerButton, movable && selected.scale < HudMaximumScale - 0.001f);
+    enable(m_transparentButton, selected.opacity > HudMinimumOpacity + 0.001f);
+    enable(m_opaqueButton, selected.opacity < 0.999f);
+    for (auto* nudge : m_nudgeButtons) enable(nudge, movable);
     std::string preset = i18n::text("hud-preset-custom", "Custom");
     for (auto candidate : HudPresets)
         if (hudPresetPlacements(m_mode, candidate) == m_working)
             preset = i18n::text(std::string(hudPresetKey(m_mode, candidate)), std::string(hudPresetFallback(m_mode, candidate)));
     m_presetLabel->setString(preset.c_str());
     fitMenuLabelWidth(m_presetLabel, 80.0f, 0.20f, 0.12f);
+    refreshList();
 }
 
 bool HudEditorPopup::beginTouch(CCPoint location) {
@@ -509,7 +696,11 @@ bool HudEditorPopup::beginTouch(CCPoint location) {
     auto const menuPoint = m_buttonMenu->convertToNodeSpace(location);
     for (auto const& entry : m_toolbarItems)
         if (entry.item->isVisible() && entry.item->boundingBox().containsPoint(menuPoint)) return false;
+    for (auto* item : m_listItems)
+        if (item->isVisible() && item->boundingBox().containsPoint(menuPoint)) return false;
     auto const point = m_canvas->convertToNodeSpace(location);
+    // While the list is open the canvas is not editable; swallow other taps.
+    if (m_listOpen) { m_drag = Drag::None; return true; }
     if (m_toolbar && m_toolbar->boundingBox().containsPoint(point)) {
         m_drag = Drag::Toolbar;
         m_dragStart = point;
@@ -550,10 +741,11 @@ void HudEditorPopup::moveTouch(CCPoint location) {
     auto const point = m_canvas->convertToNodeSpace(location);
     auto const delta = point - m_dragStart;
     if (m_drag == Drag::Toolbar) { placeToolbar(m_dragOrigin + delta); return; }
-    // Snap the element's lower-left corner to the 8 px grid, then keep the
-    // whole element inside the window.
-    auto shiftAxis = [](float minimum, float extent, float limit, float move) {
-        auto target = snapHud(minimum + move);
+    // Snap the element's lower-left corner to the grid (8 px, or 1 px with
+    // the grid off), then keep the whole element inside the window.
+    auto const grid = m_grid;
+    auto shiftAxis = [grid](float minimum, float extent, float limit, float move) {
+        auto target = snapHud(minimum + move, grid);
         if (extent <= limit) target = std::clamp(target, 0.0f, limit - extent);
         else target = minimum;
         return target - minimum;
@@ -562,7 +754,8 @@ void HudEditorPopup::moveTouch(CCPoint location) {
     auto const shiftY = shiftAxis(m_dragBox.getMinY(), m_dragBox.size.height, m_size.height, delta.y);
     auto const current = placement(m_selected);
     storePlacement(m_selected, hudPlacementAt({m_dragOrigin.x + shiftX, m_dragOrigin.y + shiftY},
-        {m_dragBox.getMidX() + shiftX, m_dragBox.getMidY() + shiftY}, m_size.width, m_size.height, m_dragScale, current.visible));
+        {m_dragBox.getMidX() + shiftX, m_dragBox.getMidY() + shiftY}, m_size.width, m_size.height, m_dragScale,
+        current.visible, current.opacity));
     refresh();
 }
 
@@ -610,6 +803,34 @@ void HudEditorPopup::onLarger(CCObject*) {
     storePlacement(m_selected, value);
     refresh();
     keepInside(m_selected);
+    refresh();
+}
+
+void HudEditorPopup::onMoreTransparent(CCObject*) {
+    auto value = placement(m_selected);
+    value.opacity = clampHudOpacity(value.opacity - HudOpacityStep);
+    storePlacement(m_selected, value);
+    refresh();
+}
+
+void HudEditorPopup::onLessTransparent(CCObject*) {
+    auto value = placement(m_selected);
+    value.opacity = clampHudOpacity(value.opacity + HudOpacityStep);
+    storePlacement(m_selected, value);
+    refresh();
+}
+
+// Tags: 0 left, 1 up, 2 down, 3 right.
+void HudEditorPopup::onNudge(CCObject* sender) {
+    auto const tag = sender ? sender->getTag() : -1;
+    if (tag < 0 || tag > 3) return;
+    static constexpr std::array<std::pair<float, float>, 4> directions {{{-1, 0}, {0, 1}, {0, -1}, {1, 0}}};
+    auto const [x, y] = directions[static_cast<std::size_t>(tag)];
+    moveSelected(x * HudFineStep, y * HudFineStep);
+}
+
+void HudEditorPopup::onGrid(CCObject*) {
+    m_grid = m_grid > HudFineStep ? HudFineStep : HudSnapGrid;
     refresh();
 }
 

@@ -16,8 +16,8 @@ import zipfile
 
 MAX_PACKAGE_BYTES = 128 * 1024 * 1024
 MOD_ID = "hwanhee1.corum_ranked"
-NATIVE_BINARIES = {MOD_ID + suffix for suffix in (
-    ".dll", ".dylib", ".android64.so", ".android32.so", ".ios.dylib")}
+# Windows, iOS, Android32 and Android64 only for now (macOS builds paused).
+NATIVE_BINARIES = {MOD_ID + suffix for suffix in (".dll", ".android32.so", ".android64.so", ".ios.dylib")}
 
 
 class PublishError(RuntimeError):

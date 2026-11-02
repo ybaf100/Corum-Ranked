@@ -13,34 +13,14 @@ on:
         value: ${{ jobs.metadata.outputs.version }}
       artifact:
         value: ${{ jobs.metadata.outputs.artifact_name }}
+  # Runs from ranked-release.yml on main, or manually. No branch/PR builds.
   workflow_dispatch:
-  push:
-    branches:
-      - "**"
-    paths:
-      - "corum-ranked-mod/**"
-      - "ranked/translations/**"
-      - "ranked/tools/**"
-      - "ranked/packages/**"
-      - "ranked/package*.json"
-      - "ranked/apps/server/src/session/client-version.ts"
-      - ".github/workflows/**"
-  pull_request:
-    paths:
-      - "corum-ranked-mod/**"
-      - "ranked/translations/**"
-      - "ranked/tools/**"
-      - "ranked/packages/**"
-      - "ranked/package*.json"
-      - "ranked/apps/server/src/session/client-version.ts"
-      - ".github/workflows/**"
 
 permissions:
   contents: read
 
 jobs:
   metadata:
-    if: inputs.prepare_only || github.ref != 'refs/heads/main' || github.event_name != 'push'
     name: Validate Ranked debug manifest
     runs-on: ubuntu-latest
     outputs:
@@ -130,12 +110,10 @@ jobs:
       fail-fast: false
       matrix:
         config:
+          # Windows, iOS, Android32 and Android64 only for now (macOS paused).
           - name: Windows
             os: windows-latest
             target: Win64
-          - name: macOS
-            os: macos-latest
-            target: MacOS
           - name: iOS
             os: macos-latest
             target: iOS
@@ -167,76 +145,6 @@ jobs:
           path: ${{ steps.native.outputs.build-output }}/*.geode
           if-no-files-found: error
 
-  ios-debug-off:
-    name: Validate iOS Debug OFF ${{ needs.metadata.outputs.version }}
-    needs:
-      - metadata
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Compile official iOS configuration
-        env:
-          SCCACHE_C_CUSTOM_CACHE_BUSTER: ${{ hashFiles('corum-ranked-mod/CMakeLists.txt', '.github/workflows/build-ranked-mod.yml', '.github/workflows/build-ranked-debug.yml') }}-geode-${{ needs.metadata.outputs.geode_sdk }}-bindings-70986055-${{ runner.os }}-iOS-Release-debugOFF-lto-codegen-v1
-        id: build
-        uses: geode-sdk/build-geode-mod@a0f7676e6fcd1a584f6d0c1c800239008412defc
-        with:
-          cli: v3.9.0
-          sdk: given
-          bindings-ref: 70986055f526da15318779703f0e904be822f162
-          path: corum-ranked-mod
-          target: iOS
-          combine: false
-          configure-args: -DSKIP_BUILDING_CODEGEN=OFF -DCORUM_RANKED_DEBUG_BOT_MATCH=OFF -DCORUM_RANKED_DEBUG_SPECTATE=OFF
-      - name: Verify packaged iOS detours and Debug exclusion
-        env:
-          BUILD_OUTPUT: ${{ steps.build.outputs.build-output }}
-          MOD_VERSION: ${{ needs.metadata.outputs.version }}
-          RANKED_DOWNLOAD_BASE_URL: ${{ vars.RANKED_DOWNLOAD_BASE_URL }}
-        shell: bash
-        run: |
-          python3 corum-ranked-mod/tests/verify-visibility-package.py \
-            "$BUILD_OUTPUT" "$MOD_VERSION" --ios-only
-          python3 corum-ranked-mod/tests/verify-font-package.py "$BUILD_OUTPUT"
-          find "$BUILD_OUTPUT" -name '*.geode' -exec python3 corum-ranked-mod/tests/verify-asset-package.py --mod {} \;
-      - uses: actions/upload-artifact@v7
-        with:
-          name: Corum-Ranked-${{ needs.metadata.outputs.version }}-iOS-Debug-OFF
-          path: ${{ steps.build.outputs.build-output }}/*.geode
-          if-no-files-found: error
-
-  additional-debug-off:
-    name: Validate ${{ matrix.config.name }} Debug OFF ${{ needs.metadata.outputs.version }}
-    needs: [metadata]
-    strategy:
-      fail-fast: false
-      matrix:
-        config:
-          - {name: Windows, os: windows-latest, target: Win64}
-          - {name: macOS, os: macos-latest, target: MacOS}
-          - {name: Android32, os: ubuntu-latest, target: Android32}
-          - {name: Android64, os: ubuntu-latest, target: Android64}
-    runs-on: ${{ matrix.config.os }}
-    steps:
-      - uses: actions/checkout@v7
-      - name: Compile official configuration
-        env:
-          SCCACHE_C_CUSTOM_CACHE_BUSTER: ${{ hashFiles('corum-ranked-mod/CMakeLists.txt', '.github/workflows/build-ranked-mod.yml', '.github/workflows/build-ranked-debug.yml') }}-geode-${{ needs.metadata.outputs.geode_sdk }}-bindings-70986055-${{ runner.os }}-${{ matrix.config.target || 'iOS' }}-Release-debugOFF-lto-codegen-v1
-        id: build
-        uses: geode-sdk/build-geode-mod@a0f7676e6fcd1a584f6d0c1c800239008412defc
-        with:
-          cli: v3.9.0
-          sdk: given
-          bindings-ref: 70986055f526da15318779703f0e904be822f162
-          path: corum-ranked-mod
-          target: ${{ matrix.config.target }}
-          combine: false
-          configure-args: -DSKIP_BUILDING_CODEGEN=OFF -DCORUM_RANKED_DEBUG_BOT_MATCH=OFF -DCORUM_RANKED_DEBUG_SPECTATE=OFF
-      - uses: actions/upload-artifact@v7
-        with:
-          name: Corum-Ranked-${{ needs.metadata.outputs.version }}-${{ matrix.config.name }}-Debug-OFF
-          path: ${{ steps.build.outputs.build-output }}/*.geode
-          if-no-files-found: error
-
   package:
     name: Package Debug ${{ needs.metadata.outputs.version }}
     runs-on: ubuntu-latest
@@ -252,7 +160,7 @@ jobs:
       - uses: geode-sdk/cli/.github/actions/setup@9e3c4a0657fca324e0d39d10375b67e01657b775
         with:
           version: v3.9.0
-      - name: Merge only the selected channel's five Native packages
+      - name: Merge only the selected channel's Native packages
         id: build
         env:
           MOD_VERSION: ${{ needs.metadata.outputs.version }}
@@ -290,7 +198,6 @@ jobs:
               )
           expected_binaries = {
               "hwanhee1.corum_ranked.dll",
-              "hwanhee1.corum_ranked.dylib",
               "hwanhee1.corum_ranked.ios.dylib",
               "hwanhee1.corum_ranked.android32.so",
               "hwanhee1.corum_ranked.android64.so",
@@ -347,22 +254,3 @@ jobs:
           name: Corum-Ranked-Assets-${{ steps.pack.outputs.tag }}
           path: asset-pack-dist/*
           if-no-files-found: error
-
-  publish-download:
-    if: ${{ !inputs.prepare_only && github.ref == 'refs/heads/main' && (vars.RANKED_PUBLISH_R2 == 'true' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[deploy-lightsail]') || contains(github.event.head_commit.message, '[publish-r2]'))) && !contains(github.event.head_commit.message, '[build only]') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
-    needs: [metadata, package, tests, ios-debug-off, additional-debug-off, full-validation]
-    uses: ./.github/workflows/publish-ranked-download.yml
-    with:
-      channel: debug
-      version: ${{ needs.metadata.outputs.version }}
-      artifact: ${{ needs.metadata.outputs.artifact_name }}
-    secrets:
-      r2_access_key_id: ${{ secrets.RANKED_R2_ACCESS_KEY_ID }}
-      r2_secret_access_key: ${{ secrets.RANKED_R2_SECRET_ACCESS_KEY }}
-
-  full-validation:
-    needs: metadata
-    if: ${{ !inputs.prepare_only }}
-    uses: ./.github/workflows/ranked-ci.yml
-    with:
-      coordinated: true

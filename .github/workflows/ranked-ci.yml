@@ -7,28 +7,6 @@ on:
         type: boolean
         default: false
   workflow_dispatch:
-  push:
-    branches:
-      - "**"
-    paths:
-      - "ranked/**"
-      - "corum-ranked-mod/**"
-      - "apps-script/Code.gs"
-      - "apps-script/RankedConfig.gs"
-      - "apps-script/SurvivalConfig.gs"
-      - "apps-script/validate-survival-config.mjs"
-      - "apps-script/validate-ranked-config.mjs"
-      - ".github/workflows/**"
-  pull_request:
-    paths:
-      - "ranked/**"
-      - "corum-ranked-mod/**"
-      - "apps-script/Code.gs"
-      - "apps-script/RankedConfig.gs"
-      - "apps-script/SurvivalConfig.gs"
-      - "apps-script/validate-survival-config.mjs"
-      - "apps-script/validate-ranked-config.mjs"
-      - ".github/workflows/**"
 
 permissions:
   contents: read

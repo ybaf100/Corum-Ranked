@@ -1,6 +1,10 @@
 import { RankedDomainError } from "@corum-ranked/rules";
 
 export type RankedBuildChannel = "debug" | "release";
+/** Channels whose immutable package must be public before admission advances.
+ * Release builds are paused (pre-launch): main publishes the Debug channel only.
+ * Restore "release" here when Release publication returns to the pipeline. */
+export const RANKED_ROLLOUT_CHANNELS: readonly RankedBuildChannel[] = ["debug"];
 export interface RankedModUpdate {
   readonly version: string;
   readonly sha256: string;

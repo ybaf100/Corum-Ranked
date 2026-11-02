@@ -18,5 +18,5 @@ test('every Ranked platform build pairs the manifest SDK with pinned bindings an
    assert.match(block,/configure-args:.*-DCORUM_RANKED_DEBUG_SPECTATE=(?:ON|OFF)\b/);
   }
  }
- assert.equal(builds,4,'Release matrix, Debug matrix, iOS OFF and other-platform OFF must all be covered');
+ assert.equal(builds,2,'Release (manual) and Debug matrices must both be covered');
 });

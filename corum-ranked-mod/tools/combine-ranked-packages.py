@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Merge exactly one channel's five Native artifacts with the pinned Geode CLI.
+"""Merge exactly one channel's Native artifacts with the pinned Geode CLI.
 
 The upstream combine action downloads all artifacts with fixed names. A shared
 release run must instead isolate Release/Debug inputs before invoking the same
@@ -13,8 +13,9 @@ import subprocess
 import zipfile
 
 MOD = 'hwanhee1.corum_ranked'
-TARGETS = {'Win64': '.dll', 'MacOS': '.dylib', 'iOS': '.ios.dylib',
-           'Android32': '.android32.so', 'Android64': '.android64.so'}
+# Supported platforms for now: Windows, iOS, Android32 and Android64 (macOS
+# builds are paused to save CI minutes).
+TARGETS = {'Win64': '.dll', 'iOS': '.ios.dylib', 'Android32': '.android32.so', 'Android64': '.android64.so'}
 BINARIES = {MOD + suffix for suffix in TARGETS.values()}
 
 

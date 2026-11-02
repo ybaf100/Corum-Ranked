@@ -2,9 +2,9 @@ name: Build Corum Ranked Mod
 
 # Keep bindings and Codegen on one tested revision; the moving Codegen release
 # can generate types incompatible with the manifest's Geode SDK.
-# Main releases are coordinated by ranked-release.yml. Both channels and full
-# validation must finish before publication; platform compilation is parallel.
-# Standalone manual runs retain the same validation and immutable R2 gates.
+# Release builds are paused (pre-launch): this workflow is manual only and is
+# not part of the main pipeline. Manual runs keep full validation and the
+# immutable R2 gate.
 on:
   workflow_call:
     inputs:
@@ -16,25 +16,6 @@ on:
         value: ${{ jobs.metadata.outputs.version }}
       artifact:
         value: ${{ jobs.metadata.outputs.artifact_name }}
-  push:
-    branches: [main]
-    paths:
-      - "corum-ranked-mod/**"
-      - "ranked/translations/**"
-      - "ranked/tools/**"
-      - "ranked/packages/**"
-      - "ranked/package*.json"
-      - "ranked/apps/server/src/session/client-version.ts"
-      - ".github/workflows/**"
-  pull_request:
-    paths:
-      - "corum-ranked-mod/**"
-      - "ranked/translations/**"
-      - "ranked/tools/**"
-      - "ranked/packages/**"
-      - "ranked/package*.json"
-      - "ranked/apps/server/src/session/client-version.ts"
-      - ".github/workflows/**"
   workflow_dispatch:
 
 permissions:
@@ -42,7 +23,6 @@ permissions:
 
 jobs:
   metadata:
-    if: inputs.prepare_only || github.ref != 'refs/heads/main' || github.event_name != 'push'
     name: Validate Ranked release manifest
     runs-on: ubuntu-latest
     outputs:
@@ -79,12 +59,10 @@ jobs:
       fail-fast: false
       matrix:
         config:
+          # Windows, iOS, Android32 and Android64 only for now (macOS paused).
           - name: Windows
             os: windows-latest
             target: Win64
-          - name: macOS
-            os: macos-latest
-            target: MacOS
           - name: iOS
             os: macos-latest
             target: iOS
@@ -131,7 +109,7 @@ jobs:
       - uses: geode-sdk/cli/.github/actions/setup@9e3c4a0657fca324e0d39d10375b67e01657b775
         with:
           version: v3.9.0
-      - name: Merge only the selected channel's five Native packages
+      - name: Merge only the selected channel's Native packages
         id: build
         env:
           MOD_VERSION: ${{ needs.metadata.outputs.version }}

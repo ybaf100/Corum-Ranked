@@ -29,14 +29,13 @@ jobs:
           with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
               out.write(f'publish={str(publish).lower()}\ndeploy={str(deploy).lower()}\n')
           PY
+  # validate -> debug build -> debug publication -> Lightsail production.
+  # Release builds and Debug-OFF validation are paused (pre-launch); the
+  # Release workflow stays available through workflow_dispatch only.
   validation:
     uses: ./.github/workflows/ranked-ci.yml
     with:
       coordinated: true
-  release:
-    uses: ./.github/workflows/build-ranked-mod.yml
-    with:
-      prepare_only: true
   debug:
     uses: ./.github/workflows/build-ranked-debug.yml
     with:
@@ -58,19 +57,8 @@ jobs:
           path: image.tar.gz*
           retention-days: 3
           if-no-files-found: error
-  publish-release:
-    needs: [policy, validation, release, debug]
-    if: needs.policy.outputs.publish == 'true'
-    uses: ./.github/workflows/publish-ranked-download.yml
-    with:
-      channel: release
-      version: ${{ needs.release.outputs.version }}
-      artifact: ${{ needs.release.outputs.artifact }}
-    secrets:
-      r2_access_key_id: ${{ secrets.RANKED_R2_ACCESS_KEY_ID }}
-      r2_secret_access_key: ${{ secrets.RANKED_R2_SECRET_ACCESS_KEY }}
   publish-debug:
-    needs: [policy, validation, release, debug]
+    needs: [policy, validation, debug]
     if: needs.policy.outputs.publish == 'true'
     uses: ./.github/workflows/publish-ranked-download.yml
     with:
@@ -81,13 +69,12 @@ jobs:
       r2_access_key_id: ${{ secrets.RANKED_R2_ACCESS_KEY_ID }}
       r2_secret_access_key: ${{ secrets.RANKED_R2_SECRET_ACCESS_KEY }}
   activate:
-    needs: [policy, validation, release, debug, image, publish-release, publish-debug]
+    needs: [policy, validation, debug, image, publish-debug]
     if: >-
       always() && needs.policy.outputs.deploy == 'true' &&
-      needs.validation.result == 'success' && needs.release.result == 'success' &&
+      needs.validation.result == 'success' &&
       needs.debug.result == 'success' && needs.image.result == 'success' &&
-      (needs.policy.outputs.publish != 'true' ||
-      (needs.publish-release.result == 'success' && needs.publish-debug.result == 'success'))
+      (needs.policy.outputs.publish != 'true' || needs.publish-debug.result == 'success')
     uses: ./.github/workflows/deploy-ranked-lightsail.yml
     with:
       coordinated: true

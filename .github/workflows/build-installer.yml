@@ -4,8 +4,7 @@ on:
   workflow_call:
   workflow_dispatch:
   push:
-    branches:
-      - "**"
+    branches: [main]
     paths:
       - "installer/**"
       - "corum-integration-mod/mod.json"

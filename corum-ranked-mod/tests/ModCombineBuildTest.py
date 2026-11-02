@@ -40,7 +40,7 @@ class CombineBuildTest(unittest.TestCase):
             for name, data in files.items():
                 archive.writestr(name, data)
 
-    def test_selected_channel_has_all_five_platforms_and_preserves_original_artifacts(self):
+    def test_selected_channel_has_every_supported_platform_and_preserves_original_artifacts(self):
         originals = {p: p.read_bytes() for p in self.source.glob('*/*.geode')}
         final = merge.combine(self.source, 'release', self.version, self.root / 'combined', self.run_cli)
         self.assertEqual(list(final.parent.glob('*.geode')), [final])

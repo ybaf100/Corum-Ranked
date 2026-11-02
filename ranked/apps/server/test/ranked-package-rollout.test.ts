@@ -24,6 +24,18 @@ describe('public immutable packages gate new admission',()=>{
    debug=false;expect((await service.getPublishedClientUpdates()).debug?.version).toBe(target);expect(service.currentRequiredVersion()).toBe(target);
   }finally{vi.restoreAllMocks();}
  });
+ it('promotes on the Debug package alone while Release builds are paused',async()=>{
+  const remote=vi.fn<typeof fetch>(async(url,init)=>{
+   const channel=String(url).includes('/debug-')?'debug':'release';
+   if(channel==='release')return new Response(null,{status:404});
+   if(init?.method==='HEAD')return new Response(null,{headers:{'content-length':'12345'}});
+   const version=String(url).includes(previous)?previous:target;
+   return Response.json({[channel]:{version,sha256:'a'.repeat(64),sizeBytes:12345,downloadUrl:rankedModDownloadUrl(base,channel,version)}});
+  });
+  const service=new RankedModUpdateService({...environmentFixture(),rankedDownloadBaseUrl:base},remote);
+  const updates=await service.getPublishedClientUpdates();
+  expect(service.currentRequiredVersion()).toBe(target);expect(updates.debug?.version).toBe(target);expect(updates.release).toBeUndefined();
+ });
  it('does not promote a descriptor whose package byte count is wrong',async()=>{
   const remote=vi.fn<typeof fetch>(async(url,init)=>init?.method==='HEAD'?new Response(null,{headers:{'content-length':'1'}}):Response.json({[String(url).includes('/debug-')?'debug':'release']:{version:String(url).includes(previous)?previous:target,sha256:'a'.repeat(64),sizeBytes:12345}}));
   const service=new RankedModUpdateService({...environmentFixture(),rankedDownloadBaseUrl:base},remote);

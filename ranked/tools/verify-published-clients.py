@@ -9,8 +9,11 @@ import urllib.error
 import urllib.request
 import zipfile
 
-PLATFORMS = {"hwanhee1.corum_ranked.dll", "hwanhee1.corum_ranked.dylib", "hwanhee1.corum_ranked.ios.dylib",
+# Windows, iOS, Android32 and Android64 only for now (macOS builds paused).
+PLATFORMS = {"hwanhee1.corum_ranked.dll", "hwanhee1.corum_ranked.ios.dylib",
              "hwanhee1.corum_ranked.android32.so", "hwanhee1.corum_ranked.android64.so"}
+# Release builds are paused; activation waits for the Debug package only.
+ROLLOUT_CHANNELS = ("debug",)
 
 
 def fetch(url):
@@ -61,8 +64,8 @@ def wait_for_clients(base, version, timeout, expected_sha=None):
         raise ValueError("Expected exact source SHA")
     deadline = time.monotonic() + timeout
     verified = {}
-    while len(verified) < 2:
-        for channel in ("release", "debug"):
+    while len(verified) < len(ROLLOUT_CHANNELS):
+        for channel in ROLLOUT_CHANNELS:
             if channel in verified:
                 continue
             try:
@@ -73,10 +76,10 @@ def wait_for_clients(base, version, timeout, expected_sha=None):
                     raise
             except (urllib.error.URLError, TimeoutError):
                 pass
-        if len(verified) == 2:
+        if len(verified) == len(ROLLOUT_CHANNELS):
             return verified
         if time.monotonic() >= deadline:
-            raise TimeoutError("Both verified client channels are required before activation")
+            raise TimeoutError("Every verified rollout channel is required before activation")
         time.sleep(5)
 
 

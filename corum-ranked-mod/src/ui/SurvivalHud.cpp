@@ -76,12 +76,13 @@ void SurvivalHud::present(SurvivalMatchView const& view,std::int64_t remainingMs
     for(std::size_t i=0;i<view.standings.size();++i) {
         auto const& value=view.standings[i];auto found=m_rows.find(value.id);
         if(found==m_rows.end()) {
-            Row row;row.node=CCNode::create();row.targetY=top-static_cast<float>(i)*gap;row.node->setPosition({8,row.targetY});
+            Row row;row.node=CCNodeRGBA::create();row.targetY=top-static_cast<float>(i)*gap;row.node->setPosition({8,row.targetY});
             row.rank=rankedHudLabel(row.node,"",FontWeight::Black,scale,{0,1},{0,-1},Text);
             row.name=rankedHudPlayerName(row.node,"",FontWeight::Black,scale,{0,1},{0,-1},Text);
             row.score=rankedHudLabel(row.node,"",FontWeight::Black,scale,{0,1},{0,-1},Text);
             for(auto const& label:{row.rank,row.name,row.score})label.opacity(0);
-            row.node->setVisible(false);group("standings")->addChild(row.node,5);found=m_rows.emplace(value.id,std::move(row)).first;
+            row.node->setVisible(false);group("standings")->addChild(row.node,5);refreshHudOpacity(group("standings"));
+            found=m_rows.emplace(value.id,std::move(row)).first;
         }
         found->second.value=value;found->second.tween.observe(value.bestProgress);found->second.tween.advance(dt);
     }

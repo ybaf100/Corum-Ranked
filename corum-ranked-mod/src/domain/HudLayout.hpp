@@ -36,13 +36,24 @@ struct HudElementSpec {
     bool movable = true;
 };
 
-inline constexpr std::array<HudElementSpec, 9> SoloHudElements {{
+// Solo is edited per label: names, score captions, scores, clear checks and
+// death match attempts are separate elements on both sides.
+inline constexpr std::array<HudElementSpec, 18> SoloHudElements {{
     {"timer", "hud-element-timer", "Timer", false, true},
     {"round", "hud-element-round", "Round", true, true},
     {"state", "hud-element-state", "Round state", true, true},
-    {"own", "hud-element-own", "My score", true, true},
-    {"opponent", "hud-element-opponent", "Opponent score", true, true},
-    {"qualifying", "hud-element-qualifying", "Qualifying", true, true},
+    {"own-name", "hud-element-own-name", "My name", true, true},
+    {"own-caption", "hud-element-own-caption", "My score caption", true, true},
+    {"own-score", "hud-element-own-score", "My score", true, true},
+    {"own-checks", "hud-element-own-checks", "My clear checks", true, true},
+    {"own-attempt", "hud-element-own-attempt", "My attempts left", true, true},
+    {"opponent-name", "hud-element-opponent-name", "Opponent name", true, true},
+    {"opponent-caption", "hud-element-opponent-caption", "Opponent score caption", true, true},
+    {"opponent-score", "hud-element-opponent-score", "Opponent score", true, true},
+    {"opponent-checks", "hud-element-opponent-checks", "Opponent clear checks", true, true},
+    {"opponent-attempt", "hud-element-opponent-attempt", "Opponent attempts left", true, true},
+    {"qualifying-caption", "hud-element-qualifying-caption", "Qualifying caption", true, true},
+    {"qualifying-value", "hud-element-qualifying-value", "Qualifying value", true, true},
     {"progress", "hud-element-progress", "Opponent progress", true, true},
     {"feed", "hud-element-feed", "Death feed", true, true},
     {"fps", "hud-element-fps", "FPS", true, true},
@@ -71,10 +82,13 @@ inline HudElementSpec const* hudElement(HudMode mode, std::string_view id) {
     return nullptr;
 }
 
-inline constexpr float HudMinimumScale = 0.6f;
-inline constexpr float HudMaximumScale = 1.6f;
-inline constexpr float HudScaleStep = 0.1f;
+inline constexpr float HudMinimumScale = 0.5f;
+inline constexpr float HudMaximumScale = 2.0f;
+inline constexpr float HudScaleStep = 0.05f;
+inline constexpr float HudMinimumOpacity = 0.1f;
+inline constexpr float HudOpacityStep = 0.1f;
 inline constexpr float HudSnapGrid = 8.0f;
+inline constexpr float HudFineStep = 1.0f;
 inline constexpr float HudOffsetLimit = 4096.0f;
 
 inline float clampHudScale(float scale) {
@@ -83,8 +97,28 @@ inline float clampHudScale(float scale) {
     return static_cast<float>(steps) * HudScaleStep;
 }
 
-inline float snapHud(float value) {
-    return std::round(value / HudSnapGrid) * HudSnapGrid;
+// Opacity of a visible element; hiding is the separate visible flag.
+inline float clampHudOpacity(float opacity) {
+    if (!std::isfinite(opacity)) return 1.0f;
+    auto const steps = std::round(std::clamp(opacity, HudMinimumOpacity, 1.0f) / HudOpacityStep);
+    return static_cast<float>(steps) * HudOpacityStep;
+}
+
+inline unsigned char hudOpacityByte(float opacity) {
+    return static_cast<unsigned char>(std::lround(clampHudOpacity(opacity) * 255.0f));
+}
+
+inline float snapHud(float value, float grid = HudSnapGrid) {
+    if (!(grid > 0.0f)) return value;
+    return std::round(value / grid) * grid;
+}
+
+// Elements that are never shown at the same time may share a spot without an
+// overlap warning (clear checks are replaced by attempts in a death match).
+inline bool hudMutuallyExclusive(HudMode mode, std::string_view a, std::string_view b) {
+    if (mode != HudMode::Solo) return false;
+    auto pair = [&](std::string_view x, std::string_view y) { return (a == x && b == y) || (a == y && b == x); };
+    return pair("own-checks", "own-attempt") || pair("opponent-checks", "opponent-attempt");
 }
 
 // Authored pivot of each element at the given window size. These mirror the
@@ -95,12 +129,23 @@ inline std::optional<HudPoint> hudDefaultPivot(HudMode mode, std::string_view id
     if (id == "fps") return HudPoint{7.0f, top - 0.5f};
     if (mode == HudMode::Solo) {
         auto const left = 42.0f + 8.0f, right = width - 42.0f - 8.0f;
-        if (id == "own") return HudPoint{left, top - 4.0f};
-        if (id == "opponent") return HudPoint{right, top - 4.0f};
+        if (id == "own-name") return HudPoint{left, top - 4.0f};
+        if (id == "own-caption") return HudPoint{left, top - 22.0f};
+        if (id == "own-score") return HudPoint{left + 82.0f, top - 20.0f};
+        if (id == "own-checks") return HudPoint{left + 25.0f, top - 36.0f};
+        if (id == "own-attempt") return HudPoint{left, top - 40.0f};
+        if (id == "opponent-name") return HudPoint{right, top - 4.0f};
+        if (id == "opponent-caption") return HudPoint{right - 88.0f, top - 22.0f};
+        if (id == "opponent-score") return HudPoint{right, top - 20.0f};
+        if (id == "opponent-checks") return HudPoint{right - 25.0f, top - 36.0f};
+        if (id == "opponent-attempt") return HudPoint{right, top - 40.0f};
         if (id == "round") return HudPoint{width / 2.0f, top - 1.0f};
         if (id == "timer") return HudPoint{width / 2.0f, top - 18.0f};
         if (id == "state") return HudPoint{width / 2.0f, top - 47.0f};
-        if (id == "qualifying") return HudPoint{14.0f, 12.0f};
+        if (id == "qualifying-caption") return HudPoint{14.0f, 12.0f};
+        // The value follows the caption's measured width; this pivot is the
+        // nominal start of the value (scale centre), not its exact anchor.
+        if (id == "qualifying-value") return HudPoint{14.0f + 82.0f, 9.0f};
         if (id == "progress") return HudPoint{width - 10.0f - 42.0f, 22.0f};
         if (id == "feed") return HudPoint{14.0f, 39.0f};
         return std::nullopt;
@@ -152,6 +197,7 @@ struct HudPlacement {
     float dy = 0.0f;
     float scale = 1.0f;
     bool visible = true;
+    float opacity = 1.0f;
     bool operator==(HudPlacement const&) const = default;
 };
 
@@ -170,14 +216,16 @@ struct HudTransform {
     HudPoint position;
     float scale = 1.0f;
     bool visible = true;
-    bool identity() const { return pivot == position && scale == 1.0f && visible; }
+    float opacity = 1.0f;
+    bool identity() const { return pivot == position && scale == 1.0f && visible && opacity == 1.0f; }
 };
 
 // Pivot `position` (where the authored pivot lands) for an element whose
 // customized box is centered at `boxCenter`. The zone of the box center
 // picks the anchor so corner elements stay in their corner on other aspect
 // ratios (iPad, ultrawide).
-inline HudPlacement hudPlacementAt(HudPoint position, HudPoint boxCenter, float width, float height, float scale, bool visible) {
+inline HudPlacement hudPlacementAt(HudPoint position, HudPoint boxCenter, float width, float height, float scale, bool visible,
+    float opacity = 1.0f) {
     auto const anchor = hudZone(boxCenter, width, height);
     auto const reference = hudAnchorPoint(anchor, width, height);
     return {
@@ -187,6 +235,7 @@ inline HudPlacement hudPlacementAt(HudPoint position, HudPoint boxCenter, float 
         .dy = std::clamp(position.y - reference.y, -HudOffsetLimit, HudOffsetLimit),
         .scale = clampHudScale(scale),
         .visible = visible,
+        .opacity = clampHudOpacity(opacity),
     };
 }
 
@@ -197,6 +246,7 @@ inline HudTransform resolveHudTransform(HudMode mode, std::string_view id, HudPl
     if (!spec || !placement) return result;
     result.scale = spec->movable ? clampHudScale(placement->scale) : 1.0f;
     result.visible = spec->hideable ? placement->visible : true;
+    result.opacity = clampHudOpacity(placement->opacity);
     if (spec->movable && placement->moved && std::isfinite(placement->dx) && std::isfinite(placement->dy)) {
         auto const reference = hudAnchorPoint(placement->anchor, width, height);
         result.position = {
@@ -224,6 +274,7 @@ inline matjson::Value hudPlacementsJson(HudMode mode, HudPlacements const& place
         auto entry = matjson::Value::object();
         entry["scale"] = static_cast<double>(clampHudScale(placement.scale));
         entry["visible"] = spec->hideable ? placement.visible : true;
+        entry["opacity"] = static_cast<double>(clampHudOpacity(placement.opacity));
         if (placement.moved && spec->movable) {
             entry["anchor"] = std::string(hudAnchorName(placement.anchor));
             entry["dx"] = static_cast<double>(std::round(placement.dx * 10.0f) / 10.0f);
@@ -242,31 +293,85 @@ inline matjson::Value hudLayoutJson(HudLayoutConfig const& config) {
     return result;
 }
 
+inline HudPlacement parseHudPlacement(matjson::Value const& entry, bool hideable, bool movable) {
+    HudPlacement placement;
+    auto const scale = entry["scale"].asDouble();
+    placement.scale = scale.isOk() ? clampHudScale(static_cast<float>(scale.unwrap())) : 1.0f;
+    auto const visible = entry["visible"].asBool();
+    placement.visible = hideable ? visible.unwrapOr(true) : true;
+    auto const opacity = entry["opacity"].asDouble();
+    placement.opacity = opacity.isOk() ? clampHudOpacity(static_cast<float>(opacity.unwrap())) : 1.0f;
+    auto const anchorName = entry["anchor"].asString();
+    auto const dx = entry["dx"].asDouble(), dy = entry["dy"].asDouble();
+    if (movable && anchorName.isOk() && dx.isOk() && dy.isOk() &&
+        std::isfinite(dx.unwrap()) && std::isfinite(dy.unwrap())) {
+        if (auto const anchor = parseHudAnchor(anchorName.unwrap())) {
+            placement.moved = true;
+            placement.anchor = *anchor;
+            placement.dx = std::clamp(static_cast<float>(dx.unwrap()), -HudOffsetLimit, HudOffsetLimit);
+            placement.dy = std::clamp(static_cast<float>(dy.unwrap()), -HudOffsetLimit, HudOffsetLimit);
+        }
+    }
+    return placement;
+}
+
 inline HudPlacements parseHudPlacements(HudMode mode, matjson::Value const& value) {
     HudPlacements result;
     if (!value.isObject()) return result;
     for (auto const& [id, entry] : value) {
         auto const spec = hudElement(mode, id);
         if (!spec || !entry.isObject()) continue;
-        HudPlacement placement;
-        auto const scale = entry["scale"].asDouble();
-        placement.scale = scale.isOk() ? clampHudScale(static_cast<float>(scale.unwrap())) : 1.0f;
-        auto const visible = entry["visible"].asBool();
-        placement.visible = spec->hideable ? visible.unwrapOr(true) : true;
-        auto const anchorName = entry["anchor"].asString();
-        auto const dx = entry["dx"].asDouble(), dy = entry["dy"].asDouble();
-        if (spec->movable && anchorName.isOk() && dx.isOk() && dy.isOk() &&
-            std::isfinite(dx.unwrap()) && std::isfinite(dy.unwrap())) {
-            if (auto const anchor = parseHudAnchor(anchorName.unwrap())) {
-                placement.moved = true;
-                placement.anchor = *anchor;
-                placement.dx = std::clamp(static_cast<float>(dx.unwrap()), -HudOffsetLimit, HudOffsetLimit);
-                placement.dy = std::clamp(static_cast<float>(dy.unwrap()), -HudOffsetLimit, HudOffsetLimit);
-            }
-        }
+        auto const placement = parseHudPlacement(entry, spec->hideable, spec->movable);
         if (placement != HudPlacement{}) result.emplace(std::string(id), placement);
     }
     return result;
+}
+
+// beta.150 saved Solo blocks ("own", "opponent", "qualifying") as one
+// element each. Split them into the per-label elements with the exact same
+// on-screen result: every part keeps the block's anchor, scale and
+// visibility, offset by its pivot distance from the block pivot (scaled).
+struct HudLegacyPart { std::string_view id; HudPoint delta; };
+struct HudLegacyBlock {
+    std::string_view id;
+    HudAnchor anchor;
+    HudPoint pivotOffset;  // the block pivot relative to its anchor point
+    std::array<HudLegacyPart, 5> parts;
+    std::size_t count;
+};
+inline constexpr std::array<HudLegacyBlock, 3> HudLegacySoloBlocks {{
+    {"own", HudAnchor::TopLeft, {50.0f, -11.0f}, {{
+        {"own-name", {0, 0}}, {"own-caption", {0, -18}}, {"own-score", {82, -16}},
+        {"own-checks", {25, -32}}, {"own-attempt", {0, -36}}}}, 5},
+    {"opponent", HudAnchor::TopRight, {-50.0f, -11.0f}, {{
+        {"opponent-name", {0, 0}}, {"opponent-caption", {-88, -18}}, {"opponent-score", {0, -16}},
+        {"opponent-checks", {-25, -32}}, {"opponent-attempt", {0, -36}}}}, 5},
+    {"qualifying", HudAnchor::BottomLeft, {14.0f, 12.0f}, {{
+        {"qualifying-caption", {0, 0}}, {"qualifying-value", {82, -3}}, {}, {}, {}}}, 2},
+}};
+
+inline void migrateLegacySoloBlocks(matjson::Value const& value, HudPlacements& result) {
+    if (!value.isObject()) return;
+    for (auto const& block : HudLegacySoloBlocks) {
+        auto const& entry = value[block.id];
+        if (!entry.isObject()) continue;
+        auto legacy = parseHudPlacement(entry, true, true);
+        if (legacy == HudPlacement{}) continue;
+        if (!legacy.moved) {
+            legacy.moved = true;
+            legacy.anchor = block.anchor;
+            legacy.dx = block.pivotOffset.x;
+            legacy.dy = block.pivotOffset.y;
+        }
+        for (std::size_t index = 0; index < block.count; ++index) {
+            auto const& part = block.parts[index];
+            if (result.contains(part.id)) continue;
+            auto placement = legacy;
+            placement.dx += legacy.scale * part.delta.x;
+            placement.dy += legacy.scale * part.delta.y;
+            result.emplace(std::string(part.id), placement);
+        }
+    }
 }
 
 // Unknown versions, keys and malformed values fall back to the default
@@ -275,6 +380,7 @@ inline HudLayoutConfig parseHudLayout(matjson::Value const& value) {
     HudLayoutConfig result;
     if (!value.isObject() || value["version"].asInt().unwrapOr(0) != HudLayoutVersion) return result;
     result.solo = parseHudPlacements(HudMode::Solo, value["solo"]);
+    migrateLegacySoloBlocks(value["solo"], result.solo);
     result.survival = parseHudPlacements(HudMode::Survival, value["survival"]);
     return result;
 }
@@ -309,7 +415,7 @@ inline std::string_view hudPresetFallback(HudMode mode, HudPreset preset) {
 }
 
 inline HudPlacement hudMovedPlacement(HudAnchor anchor, float dx, float dy, float scale = 1.0f) {
-    return {.moved = true, .anchor = anchor, .dx = dx, .dy = dy, .scale = scale, .visible = true};
+    return {.moved = true, .anchor = anchor, .dx = dx, .dy = dy, .scale = scale, .visible = true, .opacity = 1.0f};
 }
 
 inline HudPlacement hudHiddenPlacement() {
@@ -326,14 +432,22 @@ inline HudPlacements hudPresetPlacements(HudMode mode, HudPreset preset) {
     if (preset == HudPreset::Default) return result;
     if (mode == HudMode::Solo) {
         if (preset == HudPreset::Minimal) {
-            for (auto id : {"fps", "qualifying", "state", "progress", "feed", "round"})
+            for (auto id : {"fps", "qualifying-caption", "qualifying-value", "state", "progress", "feed", "round",
+                    "own-caption", "opponent-caption"})
                 result.emplace(id, hudHiddenPlacement());
             return result;
         }
         // Broadcast: scores move to the lower corners, the clock grows and the
         // top band stays clear for a facecam/overlay.
-        result.emplace("own", hudMovedPlacement(HudAnchor::BottomLeft, 50.0f, 96.0f));
-        result.emplace("opponent", hudMovedPlacement(HudAnchor::BottomRight, -50.0f, 96.0f));
+        for (auto const& block : HudLegacySoloBlocks) {
+            if (block.id == "qualifying") continue;
+            auto const own = block.id == "own";
+            for (std::size_t index = 0; index < block.count; ++index) {
+                auto const& part = block.parts[index];
+                result.emplace(std::string(part.id), hudMovedPlacement(own ? HudAnchor::BottomLeft : HudAnchor::BottomRight,
+                    (own ? 50.0f : -50.0f) + part.delta.x, 96.0f + part.delta.y));
+            }
+        }
         result.emplace("timer", hudScaledPlacement(1.2f));
         result.emplace("feed", hudHiddenPlacement());
         return result;

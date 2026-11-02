@@ -2716,8 +2716,8 @@
     "ko": "서바이벌 UI 설정"
   },
   "hud-editor-hint": {
-    "en": "Drag to move · tap to select · applies from the next match",
-    "ko": "드래그로 이동 · 눌러서 선택 · 다음 경기부터 적용"
+    "en": "Drag to move · tap to select · fine move 1px · applies from the next match",
+    "ko": "드래그로 이동 · 눌러서 선택 · 미세 이동 1px · 다음 경기부터 적용"
   },
   "hud-hide": {
     "en": "HIDE",
@@ -2775,18 +2775,6 @@
     "en": "Round state",
     "ko": "라운드 상태"
   },
-  "hud-element-own": {
-    "en": "My score",
-    "ko": "내 점수"
-  },
-  "hud-element-opponent": {
-    "en": "Opponent score",
-    "ko": "상대 점수"
-  },
-  "hud-element-qualifying": {
-    "en": "Qualifying",
-    "ko": "기준 진행도"
-  },
   "hud-element-progress": {
     "en": "Opponent progress",
     "ko": "상대 진행도"
@@ -2822,5 +2810,85 @@
   "hud-element-cutline": {
     "en": "Progress bar markers",
     "ko": "진행 바 표시선"
+  },
+  "hud-element-own-name": {
+    "en": "My name",
+    "ko": "내 이름"
+  },
+  "hud-element-own-caption": {
+    "en": "My score caption",
+    "ko": "내 점수 제목"
+  },
+  "hud-element-own-score": {
+    "en": "My score",
+    "ko": "내 점수"
+  },
+  "hud-element-own-checks": {
+    "en": "My clear checks",
+    "ko": "내 클리어 표시"
+  },
+  "hud-element-own-attempt": {
+    "en": "My attempts left",
+    "ko": "내 남은 시도"
+  },
+  "hud-element-opponent-name": {
+    "en": "Opponent name",
+    "ko": "상대 이름"
+  },
+  "hud-element-opponent-caption": {
+    "en": "Opponent score caption",
+    "ko": "상대 점수 제목"
+  },
+  "hud-element-opponent-score": {
+    "en": "Opponent score",
+    "ko": "상대 점수"
+  },
+  "hud-element-opponent-checks": {
+    "en": "Opponent clear checks",
+    "ko": "상대 클리어 표시"
+  },
+  "hud-element-opponent-attempt": {
+    "en": "Opponent attempts left",
+    "ko": "상대 남은 시도"
+  },
+  "hud-element-qualifying-caption": {
+    "en": "Qualifying caption",
+    "ko": "기준 진행도 제목"
+  },
+  "hud-element-qualifying-value": {
+    "en": "Qualifying value",
+    "ko": "기준 진행도 수치"
+  },
+  "hud-size": {
+    "en": "SIZE",
+    "ko": "크기"
+  },
+  "hud-transparency": {
+    "en": "TRANSPARENCY",
+    "ko": "투명도"
+  },
+  "hud-fine-move": {
+    "en": "FINE MOVE",
+    "ko": "미세 이동"
+  },
+  "hud-grid-on": {
+    "en": "GRID 8PX",
+    "ko": "격자 8px"
+  },
+  "hud-grid-off": {
+    "en": "GRID OFF",
+    "ko": "격자 끄기"
+  },
+  "hud-list": {
+    "en": "LIST",
+    "ko": "목록"
+  },
+  "hud-list-title": {
+    "en": "ELEMENTS",
+    "ko": "요소 목록"
+  },
+  "hud-transparency-short": {
+    "en": "T",
+    "ko": "투명 "
   }
 }

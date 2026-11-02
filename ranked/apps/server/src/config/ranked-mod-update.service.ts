@@ -4,6 +4,7 @@ import { SERVER_ENVIRONMENT, type ServerEnvironment } from "./server-environment
 import {
   parseRankedModUpdates,
   rankedModDownloadUrl,
+  RANKED_ROLLOUT_CHANNELS,
   type RankedBuildChannel,
   type RankedModUpdate,
   type RankedModUpdates,
@@ -48,7 +49,7 @@ export class RankedModUpdateService implements OnApplicationBootstrap {
     if(!this.environment?.rankedModUpdates?.[channel] && !this.published && normalizeRankedClientVersion(client)===normalizeRankedClientVersion(REQUIRED_RANKED_CLIENT_VERSION))return REQUIRED_RANKED_CLIENT_VERSION;
     return this.currentRequiredVersion(channel);
   }
-  /** Switch admission only after BOTH immutable packages are publicly readable.
+  /** Switch admission only after every rollout channel package is publicly readable.
    * In-flight sessions retain their admitted version independently of this gate. */
   public async getPublishedClientUpdates():Promise<RankedModUpdates>{
     if(!this.published && this.environment?.rankedDownloadBaseUrl && Date.now()>=this.rolloutRetryAt){
@@ -59,7 +60,7 @@ export class RankedModUpdateService implements OnApplicationBootstrap {
   private async checkRollout():Promise<void>{
     this.rolloutRetryAt=Date.now()+FAILED_LOOKUP_RETRY_MS;
     const updates=await this.getClientUpdates();
-    const ready=await Promise.all((["debug","release"] as const).map(async channel=>{
+    const ready=await Promise.all(RANKED_ROLLOUT_CHANNELS.map(async channel=>{
       if(this.environment?.rankedModUpdates?.[channel])return true; // explicit operator pins remain authoritative
       const metadata=updates[channel];if(!metadata)return false;
       const base=this.environment!.rankedDownloadCdnBaseUrl??this.environment!.rankedDownloadBaseUrl!;
@@ -67,7 +68,7 @@ export class RankedModUpdateService implements OnApplicationBootstrap {
         return response.ok && Number(response.headers.get("content-length"))===metadata.sizeBytes;
       }catch{return false;}
     }));
-    if(ready.every(Boolean)){this.published=true;this.logger.log(`Both Ranked packages are public; admission advanced to ${REQUIRED_RANKED_CLIENT_VERSION}`);}
+    if(ready.every(Boolean)){this.published=true;this.logger.log(`Ranked ${RANKED_ROLLOUT_CHANNELS.join("/")} package is public; admission advanced to ${REQUIRED_RANKED_CLIENT_VERSION}`);}
   }
   public getClientUpdates():Promise<RankedModUpdates>{return this.updatesFor(REQUIRED_RANKED_CLIENT_VERSION);}
   private async updatesFor(version:string): Promise<RankedModUpdates> {

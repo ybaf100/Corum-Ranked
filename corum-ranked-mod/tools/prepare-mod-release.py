@@ -10,7 +10,8 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 MOD_ID = "hwanhee1.corum_ranked"
-BINARIES = {MOD_ID + extension for extension in (".dll", ".dylib", ".ios.dylib", ".android32.so", ".android64.so")}
+# Windows, iOS, Android32 and Android64 only for now (macOS builds paused).
+BINARIES = {MOD_ID + extension for extension in (".dll", ".ios.dylib", ".android32.so", ".android64.so")}
 MARKER = "corum-build-channel.json"
 
 

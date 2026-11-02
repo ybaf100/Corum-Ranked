@@ -28,27 +28,39 @@ def actual_activation(results, publish='true', deploy='true'):
 
 
 class ReleaseWorkflowTest(unittest.TestCase):
-    def test_platform_builds_start_after_metadata_independently_of_native_tests(self):
+    def test_debug_builds_four_platforms_after_metadata_without_debug_off_jobs(self):
         jobs = workflow('build-ranked-debug.yml')['jobs']
-        for name in ('build', 'ios-debug-off', 'additional-debug-off'):
-            self.assertEqual(dependencies(jobs[name]), ['metadata'])
+        self.assertEqual(dependencies(jobs['build']), ['metadata'])
+        self.assertEqual({c['target'] for c in jobs['build']['strategy']['matrix']['config']},
+                         {'Win64', 'iOS', 'Android32', 'Android64'})
+        for name in ('ios-debug-off', 'additional-debug-off', 'publish-download', 'full-validation'):
+            self.assertNotIn(name, jobs)
         self.assertEqual(jobs['tests']['uses'], './.github/workflows/ranked-native.yml')
         suite = (W / 'ranked-native.yml').read_text()
         self.assertIn('node --test --test-concurrency=2 corum-ranked-mod/tests/*.mjs', suite)
         self.assertIn('SpectatorRemotePolicyTest.cpp', suite)
 
-    def test_both_publications_require_the_complete_debug_release_and_server_workflows(self):
+    def test_pipeline_is_validate_debug_build_debug_publish_then_lightsail(self):
         jobs = workflow('ranked-release.yml')['jobs']
-        for name in ('publish-release', 'publish-debug'):
-            self.assertEqual(set(dependencies(jobs[name])), {'policy', 'validation', 'release', 'debug'})
-            self.assertNotIn('always()', jobs[name]['if'])
-        debug = workflow('build-ranked-debug.yml')['jobs']
-        self.assertTrue({'tests', 'ios-debug-off', 'additional-debug-off', 'full-validation'} <= set(dependencies(debug['publish-download'])))
-        self.assertEqual(len(debug['build']['strategy']['matrix']['config']), 5)
-        self.assertEqual(len(debug['additional-debug-off']['strategy']['matrix']['config']), 4)
+        self.assertNotIn('release', jobs)
+        self.assertNotIn('publish-release', jobs)
+        self.assertEqual(set(dependencies(jobs['publish-debug'])), {'policy', 'validation', 'debug'})
+        self.assertNotIn('always()', jobs['publish-debug']['if'])
+        self.assertEqual(set(dependencies(jobs['activate'])), {'policy', 'validation', 'debug', 'image', 'publish-debug'})
 
-    def test_failed_or_missing_channel_and_test_results_cannot_activate(self):
-        names = ('validation', 'release', 'debug', 'image', 'publish-release', 'publish-debug')
+    def test_workflows_run_on_main_or_manually_only(self):
+        for path in W.glob('*.yml'):
+            triggers = workflow(path.name).get('on', {})
+            with self.subTest(workflow=path.name):
+                self.assertNotIn('pull_request', triggers)
+                push = triggers.get('push') if isinstance(triggers, dict) else None
+                if isinstance(push, dict) and 'branches' in push:
+                    self.assertEqual(push['branches'], ['main'])
+        for name in ('build-ranked-debug.yml', 'build-ranked-mod.yml', 'ranked-ci.yml', 'deploy-ranked-lightsail.yml'):
+            self.assertNotIn('push', workflow(name)['on'])
+
+    def test_failed_or_missing_debug_and_test_results_cannot_activate(self):
+        names = ('validation', 'debug', 'image', 'publish-debug')
         success = dict.fromkeys(names, 'success')
         self.assertTrue(actual_activation(success))
         for name in names:

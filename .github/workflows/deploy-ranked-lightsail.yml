@@ -12,12 +12,7 @@ on:
       prepared_image:
         type: string
         default: ''
-  push:
-    branches: [main]
-    paths:
-      - 'ranked/**'
-      - 'corum-ranked-mod/**'
-      - '.github/workflows/deploy-ranked-lightsail.yml'
+  # main pushes deploy through ranked-release.yml; this file is otherwise manual.
   workflow_dispatch:
     inputs:
       mode:
@@ -176,13 +171,3 @@ jobs:
           RANKED_DOWNLOAD_BASE_URL: ${{ vars.RANKED_DOWNLOAD_BASE_URL || 'https://pub-11442f32945446a49b9da0a5e69f2451.r2.dev' }}
         run: python3 ranked/tools/verify-production-release.py --expected-sha "$GITHUB_SHA"
 
-  prepare-image:
-    # Staged client releases validate Docker immediately without SSH or activation.
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && contains(github.event.head_commit.message, '[publish-r2]') && contains(github.event.head_commit.message, '[no-deploy]')
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - name: Checkout staged source
-        uses: actions/checkout@v4
-      - name: Prepare server image without production access
-        run: docker build --pull --build-arg "CORUM_SOURCE_SHA=${GITHUB_SHA}" --label "org.opencontainers.image.revision=${GITHUB_SHA}" -f ranked/Dockerfile.lightsail -t "corum-ranked-preflight:${GITHUB_SHA}" ranked

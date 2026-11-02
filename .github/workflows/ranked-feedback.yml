@@ -1,8 +1,6 @@
 name: Ranked quick feedback
 on:
-  pull_request:
-  push:
-    branches-ignore: [main]
+  # Branch/PR runs disabled: main runs the full pipeline; use this manually.
   workflow_dispatch:
 permissions:
   contents: read
