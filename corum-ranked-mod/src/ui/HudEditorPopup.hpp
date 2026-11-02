@@ -81,6 +81,11 @@ private:
     void onReset(cocos2d::CCObject*);
     void onCancel(cocos2d::CCObject*);
     void onSave(cocos2d::CCObject*);
+    void onCollapse(cocos2d::CCObject*);
+    void onExpand(cocos2d::CCObject*);
+    void setToolsCollapsed(bool collapsed);
+    // Tools fade while an element is dragged; the grid shows only then.
+    void setDragging(bool dragging);
 
     HudMode m_mode = HudMode::Solo;
     HudLayoutConfig m_saved;
@@ -88,6 +93,9 @@ private:
     cocos2d::CCSize m_size;
     cocos2d::CCNode* m_canvas = nullptr;
     cocos2d::CCDrawNode* m_outlines = nullptr;
+    cocos2d::CCDrawNode* m_gridLines = nullptr;
+    CCMenuItemSpriteExtra* m_expandButton = nullptr;
+    bool m_toolsCollapsed = false;
     cocos2d::CCLabelBMFont* m_tag = nullptr;
     std::map<std::string, cocos2d::CCNodeRGBA*, std::less<>> m_groups;
     std::string m_selected;

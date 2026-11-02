@@ -1,18 +1,20 @@
 import {randomInt} from "node:crypto";
 import {Logger,type OnApplicationBootstrap,type OnApplicationShutdown} from "@nestjs/common";
-import {survivalMapAllowed,survivalMapRange,type SurvivalVerifiedMap,type SurvivalDifficultyGroup,type SurvivalMapPhase} from "@corum-ranked/rules";
+import {survivalMapAllowed,survivalMapRange,SURVIVAL_DIFFICULTY_CHOICES,type SurvivalVerifiedMap,type SurvivalDifficultyGroup,type SurvivalMapPhase} from "@corum-ranked/rules";
 import type {DatabasePort,SqlExecutor} from "../database/database.port.js";
 import type {ServerClock} from "../common/runtime.module.js";
 import {SurvivalMapError,type SurvivalMapProvider,type SurvivalMapRequest} from "./survival-map.provider.js";
 
-const TTL_MS=6*60*60_000,TARGET=3,ANTICIPATED_TARGET=5,ANTICIPATION_MS=20*60_000,MAX_ANTICIPATED=6,MAX_BUCKETS=32,RECENT_WINDOW=30;
+// Five verified maps per difficulty slice (easy/normal/hard of each allowed
+// range); a consumed one is replaced in the background.
+const TTL_MS=6*60*60_000,TARGET=5,ANTICIPATED_TARGET=5,ANTICIPATION_MS=20*60_000,MAX_ANTICIPATED=6,MAX_BUCKETS=32,RECENT_WINDOW=30;
 /** Unbiased index in [0,n). Tests inject a deterministic picker. */
 export type SurvivalCandidatePicker=(count:number)=>number;
 const cryptoPicker:SurvivalCandidatePicker=count=>randomInt(count);
 /** Coarse ID strata used only to measure catalog skew; never a quota. */
 export function survivalIdBandOf(levelId:number):string {return levelId<70_000_000?"40m-70m":levelId<100_000_000?"70m-100m":"100m+";}
 export function survivalCandidateBucket(request:SurvivalMapRequest):string {
-  const range=survivalMapRange(request.group,request.phase);
+  const range=survivalMapRange(request.group,request.phase,request.slice);
   // 16/64 and R3/R4 share a bucket only when every eligibility predicate agrees.
   return JSON.stringify([Math.max(40_000_000,request.minimumLevelId),range.minimumStars,range.maximumStars,range.demons]);
 }
@@ -46,7 +48,7 @@ export class SurvivalMapPool implements SurvivalMapProvider,OnApplicationBootstr
   private exclusions():number[]{return [...new Set([...this.held,...this.recent])];}
   private target(bucket:Bucket):number{return bucket.anticipatedUntil>this.now()?ANTICIPATED_TARGET:TARGET;}
   private valid(map:SurvivalVerifiedMap,request:SurvivalMapRequest):boolean{
-    return !!map && survivalMapAllowed(map,request.group,request.phase,request.minimumLevelId) &&
+    return !!map && survivalMapAllowed(map,request.group,request.phase,request.minimumLevelId,request.slice) &&
       typeof map.geometrySha256==='string' && /^[a-f0-9]{64}$/.test(map.geometrySha256) &&
       Number.isSafeInteger(map.geometryBytes) && map.geometryBytes>0 && map.geometryBytes<=32*1024*1024 &&
       Number.isSafeInteger(map.levelVersion) && map.levelVersion>0 && Number.isFinite(Date.parse(map.verifiedAt));
@@ -64,7 +66,8 @@ export class SurvivalMapPool implements SurvivalMapProvider,OnApplicationBootstr
     let minimum=40_000_000;try{minimum=typeof this.minimumLevelId==="function"?this.minimumLevelId():this.minimumLevelId;}catch{}
     for(const group of ["RED_BRONZE","SILVER","GOLD"] as SurvivalDifficultyGroup[])
       for(const phase of ["ROUND_1","ROUND_2","ROUND_3","ROUND_4","FINAL","TIEBREAK"] as SurvivalMapPhase[])
-        await this.register({group,phase,minimumLevelId:minimum,excludedLevelIds:[]});
+        for(const slice of SURVIVAL_DIFFICULTY_CHOICES)await this.register({group,phase,slice,minimumLevelId:minimum,excludedLevelIds:[]});
+    await this.adoptUnslicedCandidates();
     const recent=await this.db.query<{level_id:string}>(`SELECT level_id FROM sur_map_selection_history ORDER BY id DESC LIMIT ${RECENT_WINDOW}`);
     this.recent=recent.rows.map(row=>Number(row.level_id)).reverse();
     const rows=(await this.db.query<CandidateRow>("SELECT bucket_key,level_id,metadata,expires_at FROM sur_map_candidates WHERE status='READY' AND expires_at>$1",[this.clock.now().toISOString()])).rows;
@@ -78,7 +81,7 @@ export class SurvivalMapPool implements SurvivalMapProvider,OnApplicationBootstr
   private async register(request:SurvivalMapRequest):Promise<string>{
     const key=survivalCandidateBucket(request);if(this.buckets.has(key))return key;
     if(this.buckets.size>=MAX_BUCKETS)throw new SurvivalMapError("NO_ELIGIBLE_MAP","Candidate bucket budget exceeded");
-    const clean={group:request.group,phase:request.phase,minimumLevelId:request.minimumLevelId,excludedLevelIds:[]};
+    const clean={group:request.group,phase:request.phase,...(request.slice?{slice:request.slice}:{}),minimumLevelId:request.minimumLevelId,excludedLevelIds:[]};
     // Persist before publishing the in-memory bucket: a failed INSERT must not
     // leave a key that every later refill trusts but PostgreSQL never stored.
     await this.ensureBucketRow(this.db,key,clean);
@@ -92,6 +95,27 @@ export class SurvivalMapPool implements SurvivalMapProvider,OnApplicationBootstr
   private async ensureBucketRow(executor:SqlExecutor,key:string,request:SurvivalMapRequest):Promise<void>{
     await executor.query(`INSERT INTO sur_map_candidate_buckets(bucket_key,request) VALUES($1,$2::jsonb)
       ON CONFLICT(bucket_key) DO NOTHING`,[key,JSON.stringify(request)]);
+  }
+  /** Verified READY candidates of the former whole-range buckets stay useful:
+   * move each into the registered slice bucket that admits it (cache rows only;
+   * nothing is deleted). Unmatched rows simply age out by TTL. */
+  private async adoptUnslicedCandidates():Promise<void>{
+    const now=this.clock.now().toISOString(),registered=[...this.buckets.keys()];
+    const rows=(await this.db.query<CandidateRow>(`SELECT bucket_key,level_id,metadata,expires_at FROM sur_map_candidates
+      WHERE status='READY' AND expires_at>$1 AND NOT(bucket_key=ANY($2::text[]))`,[now,registered])).rows;
+    let moved=0;
+    for(const row of rows){
+      const target=[...this.buckets].find(([,bucket])=>this.valid(row.metadata,bucket.request));
+      if(!target)continue;
+      const result=await this.db.transaction(async tx=>{
+        await tx.query("SELECT pg_advisory_xact_lock(hashtext('survival-candidate-reserve-v1'))");
+        await this.ensureBucketRow(tx,target[0],target[1].request);
+        return tx.query(`UPDATE sur_map_candidates SET bucket_key=$3 WHERE bucket_key=$1 AND level_id=$2 AND status='READY'
+          AND NOT EXISTS(SELECT 1 FROM sur_map_candidates o WHERE o.bucket_key=$3 AND o.level_id=$2) RETURNING level_id`,[row.bucket_key,row.level_id,target[0]]);
+      });
+      if(result.rows.length)moved++;
+    }
+    if(rows.length)this.logger.log(`adopted ${moved}/${rows.length} whole-range candidates into difficulty slices`);
   }
   private async capacity(tx:SqlExecutor,key:string):Promise<number>{
     const bucket=this.buckets.get(key),limit=bucket?this.target(bucket):TARGET;
@@ -225,7 +249,8 @@ export class SurvivalMapPool implements SurvivalMapProvider,OnApplicationBootstr
     if(!map){this.buckets.get(key)!.ready=0;this.priority=key;this.refill(key);await this.jobs.get(key);map=await take();}
     if(!map){const error=this.buckets.get(key)!.lastError;
       throw new SurvivalMapError(error?.code??"NO_ELIGIBLE_MAP",`No READY verified candidate; recent thirty remain excluded${error?": "+error.message:""}`,error?.failures??[],error?.http??null,Math.max(30_000,error?.retryAfterMs??0));}
-    const bucket=this.buckets.get(key)!;bucket.ready=Math.max(0,bucket.ready-1);if(bucket.ready<Math.min(2,this.target(bucket)) || bucket.ready<this.target(bucket)-1)this.refill(key);
+    // Every drawn candidate is replaced in the background right away.
+    const bucket=this.buckets.get(key)!;bucket.ready=Math.max(0,bucket.ready-1);if(bucket.ready<this.target(bucket))this.refill(key);
     return map;
   }
   /** A running match will likely need this bucket next: keep up to five READY

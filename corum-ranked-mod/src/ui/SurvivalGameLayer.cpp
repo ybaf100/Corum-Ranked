@@ -23,6 +23,7 @@
 #include "../domain/SurvivalNativeOptions.hpp"
 #include "../SurvivalOptionsPreferences.hpp"
 #include "SurvivalMapSelectionLayer.hpp"
+#include "SurvivalDifficultyVote.hpp"
 #include <array>
 #include "../RankedMapDetails.hpp"
 #include <Geode/binding/PlayLayer.hpp>
@@ -45,6 +46,7 @@ class SurvivalGameLayer final : public CCLayerColor {
     CCNode* m_pager=nullptr;CCLabelBMFont* m_pageLabel=nullptr;
     std::size_t m_cardPage=0,m_cardPages=1;
     ui::SurvivalMapSelectionLayer* m_selection=nullptr;
+    ui::SurvivalDifficultyVote* m_vote=nullptr;
     ui::SurvivalOutcomePanel* m_outcome=nullptr;
     LoadingSpinner* m_spinner=nullptr;
     CCLabelBMFont* m_boardClock=nullptr;
@@ -91,7 +93,9 @@ class SurvivalGameLayer final : public CCLayerColor {
         m_boardClock->setAnchorPoint({1,.5f});m_boardClock->setID("survival-board-clock"_spr);addChild(m_boardClock,10);
         m_map=ui::menuLabel("",.27f,{size.width/2,size.height-48},ui::TextMuted,ui::FontWeight::SemiBold);addChild(m_map);
         m_status=ui::menuLabel("",.28f,{size.width/2,80},ui::TextMuted,ui::FontWeight::SemiBold);addChild(m_status);
-        m_grid=CCNode::create();addChild(m_grid,5);
+        // Anchored at the top centre so the difficulty vote can shrink the board
+        // upwards; with the full window size the child coordinates are unchanged.
+        m_grid=CCNode::create();m_grid->setContentSize(size);m_grid->setAnchorPoint({.5f,1});m_grid->setPosition({size.width/2,size.height});addChild(m_grid,5);
         m_spinner=LoadingSpinner::create(20);m_spinner->setPosition({size.width/2-113,size.height-49});m_spinner->setVisible(false);addChild(m_spinner,8);
         m_introUntil=std::chrono::steady_clock::now()+std::chrono::milliseconds(SurvivalRosterMilliseconds);
         auto* menu=CCMenu::create();menu->setPosition(CCPointZero);addChild(menu,20);
@@ -112,6 +116,8 @@ class SurvivalGameLayer final : public CCLayerColor {
         // Debug builds: end the live round from the standings board.
         m_endRound=button(menu,text("survival-end-round","END ROUND"),{68,size.height-22},116,21,ui::Red);m_endRound->setVisible(false);
 #endif
+        m_vote=ui::SurvivalDifficultyVote::create(size,[](std::string const& ballot){SurvivalRuntime::get().voteDifficulty(ballot);});
+        if(!m_vote)return false;addChild(m_vote,12);
         m_selection=ui::SurvivalMapSelectionLayer::create([weak=WeakRef(this)](int tag){if(auto owner=weak.lock())owner->handleAction(tag);});
         if(!m_selection)return false;m_selection->setVisible(false);addChild(m_selection,15);
         m_outcome=ui::SurvivalOutcomePanel::create([weak=WeakRef(this)](int tag){if(auto owner=weak.lock())owner->handleAction(tag);});
@@ -521,6 +527,17 @@ public:
             else if(nextRound)status=text("survival-next-map-wait","NEXT MAP SOON...");
         }
         m_status->setString(status.c_str());ui::fitMenuLabelWidth(m_status,getContentSize().width-24,.28f,.20f);
+        // Hidden difficulty vote during the intro: only "n of N voted" is public.
+        auto const voteStage=survivalVoteStage(view.vote.present,view.vote.resolved,intro,view.vote.myBallot,runtime.voteOpensInMs());
+        m_vote->present(voteStage,view.vote.myBallot,runtime.voteClosesInMs(),view.vote.voted,view.vote.total,dt);
+        {auto const shrink=m_vote->boardShrink();auto const ease=shrink*shrink*(3-2*shrink);
+            m_grid->setScale(1-.60f*ease);m_grid->setPosition({getContentSize().width/2,getContentSize().height-26*ease});}
+        std::string voteStatus;
+        if(intro && voteStage==SurvivalVoteStage::Chosen)voteStatus=fmt::format("{} · {}",text("survival-vote-active","DIFFICULTY VOTE"),
+            fmt::format(fmt::runtime(text("survival-vote-count","VOTED {}/{}")),view.vote.voted,view.vote.total));
+        else if(intro && voteStage==SurvivalVoteStage::Closed)voteStatus=text("survival-vote-done","VOTING CLOSED · PREPARING MAP");
+        if(!voteStatus.empty()){m_status->setString(voteStatus.c_str());ui::fitMenuLabelWidth(m_status,getContentSize().width-24,.28f,.20f);}
+        if(m_vote->showing()){m_status->setVisible(false);m_pager->setVisible(false);}
         if(selectionWindow){
             auto const interactive=!m_motion && !elimination && !runtime.surrenderPending() && !m_confirmation;
             m_selection->present(view,preparation,SurvivalOptionsPreferences::get().current(runtime.optionsContext()),

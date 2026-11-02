@@ -105,6 +105,15 @@ test('Solo and Survival HUDs build each customizable element inside a placement 
  // Opacity reaches labels added after the group (feed rows, standings, icons).
  assert.match(play,/refreshHudGroups\(\);\n        addChild\(m_fields->hudRoot, 1000\);/);
  assert.match(play,/refreshHudOpacity\(hudGroup\("feed", 5\)\)/);
+ // Death Match attempt counters live in the editor's attempt groups, not on the PlayLayer root.
+ const ux=read('src/GameplayUx.cpp');
+ assert.match(ux,/"-solo-own-attempt"/);assert.match(ux,/"-solo-opponent-attempt"/);
+ assert.match(ux,/createShadowLabel\(\s*ownAttemptGroup \? ownAttemptGroup : this,/);
+ assert.match(ux,/createShadowLabel\(\s*opponentAttemptGroup \? opponentAttemptGroup : this,/);
+ // The Solo editor preview shows the full three-row death log and the timer with its score difference.
+ const editorSource=read('src/ui/HudEditorPopup.cpp');
+ assert.match(editorSource,/std::array<std::pair<std::string, ccColor3B>, 3> rows/);
+ assert.match(editorSource,/add\(group\("timer"\), "\+42"/);
  assert.match(survival,/refreshHudOpacity\(group\("standings"\)\)/);
  const popup=read('src/RankedPopup.cpp');
  assert.match(popup,/ranked-hud-editor-button/);assert.match(popup,/survival-hud-editor-button/);
@@ -186,8 +195,12 @@ struct CCLayer:CCNode{CCLayer(){ignoreAnchor=true;}void setTouchEnabled(bool){}v
  virtual bool ccTouchBegan(CCTouch*,CCEvent*){return false;}virtual void ccTouchMoved(CCTouch*,CCEvent*){}virtual void ccTouchEnded(CCTouch*,CCEvent*){}virtual void ccTouchCancelled(CCTouch*,CCEvent*){}
  void setLayout(std::nullptr_t){}};
 struct CCLayerColor:CCLayer{static CCLayerColor* create(ccColor4B){return new CCLayerColor;}};
-struct CCDrawNode:CCNode{int polygons=0,segments=0;std::vector<ccColor4F> strokes;static CCDrawNode* create(){return new CCDrawNode;}void clear(){polygons=0;strokes.clear();}
- void drawSegment(CCPoint,CCPoint,float,ccColor4F){++segments;}void drawPolygon(CCPoint*,unsigned,ccColor4F,float,ccColor4F stroke){++polygons;strokes.push_back(stroke);}};
+#define GL_SRC_ALPHA 0x0302
+#define GL_ONE_MINUS_SRC_ALPHA 0x0303
+struct ccBlendFunc{unsigned src,dst;};
+struct CCDrawNode:CCNode{int polygons=0,segments=0;std::vector<ccColor4F> strokes,segmentColors;ccBlendFunc blend{1,GL_ONE_MINUS_SRC_ALPHA};static CCDrawNode* create(){return new CCDrawNode;}void clear(){polygons=0;segments=0;strokes.clear();segmentColors.clear();}
+ void setBlendFunc(ccBlendFunc b){blend=b;}
+ void drawSegment(CCPoint,CCPoint,float,ccColor4F color){++segments;segmentColors.push_back(color);}void drawPolygon(CCPoint*,unsigned,ccColor4F,float,ccColor4F stroke){++polygons;strokes.push_back(stroke);}};
 struct CCMenu:CCLayer{};
 struct CCMenuItemSpriteExtra:CCNodeRGBA{CCObject* target=nullptr;SEL_MenuHandler selector=nullptr;bool enabled=true;
  static CCMenuItemSpriteExtra* create(CCNode* face,CCObject* t,SEL_MenuHandler s){auto*i=new CCMenuItemSpriteExtra;i->target=t;i->selector=s;i->anchor=CCPoint{.5f,.5f};i->content=face->getContentSize();i->addChild(face);return i;}
@@ -209,7 +222,7 @@ namespace geode{
  namespace prelude{using namespace geode;}
 }
 using geode::WeakRef;
-namespace corum::ranked::i18n{inline std::string text(std::string_view,std::string_view english){return std::string(english);}}
+namespace corum::ranked::i18n{inline std::string text(std::string_view,std::string_view english){return std::string(english);}inline char const* literal(std::string_view){return "ATTEMPTS LEFT : ";}}
 namespace corum::ranked::ui{
  enum class FontWeight{Medium,SemiBold,ExtraBold,Black};
  constexpr ccColor3B Text{242,247,255},TextMuted{164,181,205},Cyan{64,224,255},Blue{77,135,255},Green{90,238,151},Red{255,91,111},Gold{255,207,74},Orange{255,145,68},Surface{10,19,36},SurfaceRaised{15,28,50};
@@ -239,24 +252,34 @@ int main(){
  auto& saved=geode::Mod::get()->saved;
  auto* editor=HudEditorPopup::create(HudMode::Solo);assert(editor);
  assert(editor->m_groups.size()==18&&editor->m_listRows.size()==18);
+ // Straight-alpha draw nodes (no over-bright grid), corner marks on the
+ // selection only, grid hidden until a drag, collapsible tools.
+ assert(editor->m_outlines->blend.src==GL_SRC_ALPHA&&editor->m_gridLines->blend.src==GL_SRC_ALPHA);
+ assert(editor->m_outlines->polygons==0&&editor->m_outlines->segments==8);
+ assert(!editor->m_gridLines->isVisible());
+ editor->onCollapse(nullptr);assert(!editor->m_toolbar->isVisible()&&editor->m_expandButton->isVisible());
+ for(auto const& entry:editor->m_toolbarItems)assert(!entry.item->isVisible());
+ editor->onExpand(nullptr);assert(editor->m_toolbar->isVisible()&&!editor->m_expandButton->isVisible());
  auto const timer=hudDefaultPivot(HudMode::Solo,"timer",569,320).value();
  // Tap the clock, drag it 69,-20 (clear of the round state label): the
  // lower-left corner snaps to the 8 px grid.
- assert(editor->beginTouch({timer.x,timer.y-6}));editor->moveTouch({timer.x+69,timer.y-26});editor->endTouch();
+ assert(editor->beginTouch({timer.x,timer.y-6}));assert(editor->m_gridLines->isVisible());
+ editor->moveTouch({timer.x+69,timer.y-26});editor->endTouch();assert(!editor->m_gridLines->isVisible());
  auto* clock=editor->m_groups.at("timer");
  CCRect box;bool any=false;includeBox(clock,editor->m_canvas,clock,box,any);assert(any);
  assert(std::fmod(box.getMinX(),8.0f)==0&&std::fmod(box.getMinY(),8.0f)==0);
  assert(editor->m_working.at("timer").moved&&editor->m_working.at("timer").anchor==HudAnchor::Top);
  // Grid off: drags move by 1 px; the arrows nudge exactly 1 px.
  editor->onGrid(nullptr);assert(editor->m_grid==1);
- auto const before=box;assert(editor->beginTouch(box.origin+CCPoint{2,2}));editor->moveTouch(box.origin+CCPoint{5,2});editor->endTouch();
+ // Grab the clock near its top edge: the score difference widens the group over the state label.
+ auto const before=box;assert(editor->beginTouch(box.origin+CCPoint{2,box.size.height-3}));editor->moveTouch(box.origin+CCPoint{5,box.size.height-3});editor->endTouch();
  any=false;includeBox(clock,editor->m_canvas,clock,box,any);assert(std::abs(box.getMinX()-before.getMinX()-3)<.01f);
  auto const nudgeFrom=box.getMinY();
  for(auto* arrow:editor->m_nudgeButtons)if(arrow->getTag()==1)arrow->activate();
  any=false;includeBox(clock,editor->m_canvas,clock,box,any);assert(std::abs(box.getMinY()-nudgeFrom-1)<.01f);
  editor->onGrid(nullptr);assert(editor->m_grid==8);
  // Dragging far off screen keeps the whole element inside the window.
- assert(editor->beginTouch(box.origin+CCPoint{2,2}));editor->moveTouch({-900,-900});editor->endTouch();
+ assert(editor->beginTouch(box.origin+CCPoint{2,box.size.height-3}));editor->moveTouch({-900,-900});editor->endTouch();
  any=false;includeBox(clock,editor->m_canvas,clock,box,any);assert(box.getMinX()>=0&&box.getMinY()>=0);
  assert(editor->m_working.at("timer").anchor==HudAnchor::BottomLeft);
  // The timer cannot be hidden, but can be made transparent (and back).

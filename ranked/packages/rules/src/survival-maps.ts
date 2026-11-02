@@ -1,5 +1,6 @@
 import { RankedDomainError } from "./errors.js";
 import { validateSurvivalConfig, type SurvivalConfig, type SurvivalTierBand } from "./survival.js";
+import { survivalSliceRange, type SurvivalDifficultyChoice } from "./survival-vote.js";
 
 export type SurvivalDifficultyGroup = "RED_BRONZE" | "SILVER" | "GOLD";
 export type SurvivalMapPhase = "ROUND_1" | "ROUND_2" | "ROUND_3" | "ROUND_4" | "FINAL" | "TIEBREAK";
@@ -48,8 +49,9 @@ const RANGES: Record<SurvivalDifficultyGroup, Record<SurvivalMapPhase, SurvivalM
   GOLD: { ROUND_1: range(6,8), ROUND_2: range(7,9), ROUND_3: range(8,9,["EASY"]), ROUND_4: range(8,9,["EASY"]),
     FINAL: range(null,null,["EASY","MEDIUM","HARD"]), TIEBREAK: range(null,null,["INSANE"]) },
 };
-export function survivalMapRange(group: SurvivalDifficultyGroup, phase: SurvivalMapPhase): SurvivalMapRange {
-  return structuredClone(RANGES[group][phase]);
+/** With a slice: the easy/normal/hard part of the allowed range (difficulty vote). */
+export function survivalMapRange(group: SurvivalDifficultyGroup, phase: SurvivalMapPhase, slice?: SurvivalDifficultyChoice): SurvivalMapRange {
+  return slice ? survivalSliceRange(RANGES[group][phase], slice) : structuredClone(RANGES[group][phase]);
 }
 
 /** Official GD difficulty, independent of a map's featured grade. */
@@ -90,11 +92,11 @@ export function survivalDemonFromNativeCode(code: number): SurvivalDemonDifficul
 }
 
 export function survivalMapAllowed(map: SurvivalMapMetadata, group: SurvivalDifficultyGroup,
-  phase: SurvivalMapPhase, minimumLevelId = 40_000_000): boolean {
+  phase: SurvivalMapPhase, minimumLevelId = 40_000_000, slice?: SurvivalDifficultyChoice): boolean {
   if (!Number.isSafeInteger(map.levelId) || map.levelId < Math.max(40_000_000,minimumLevelId) ||
       !Number.isInteger(map.stars) || map.stars < 1 || map.stars > 10 ||
       map.automatic || map.platformer || (map.length!==undefined && (!Number.isInteger(map.length) || map.length<0 || map.length>3))) return false;
-  const allowed = RANGES[group][phase];
+  const allowed = slice ? survivalSliceRange(RANGES[group][phase], slice) : RANGES[group][phase];
   if (map.demon) return map.stars === 10 && map.demonDifficulty !== null && allowed.demons.includes(map.demonDifficulty);
   return map.demonDifficulty === null && allowed.minimumStars !== null && allowed.maximumStars !== null &&
     map.stars >= allowed.minimumStars && map.stars <= allowed.maximumStars;

@@ -1,6 +1,7 @@
 #include <Geode/binding/GJAccountManager.hpp>
 #include "domain/SurvivalBadgePresentation.hpp"
 #include "domain/SurvivalRoundPresentation.hpp"
+#include "domain/SurvivalVotePresentation.hpp"
 #include "replay/SurvivalReplayRecorder.hpp"
 #include "SurvivalSpectatorRuntime.hpp"
 #include "SurvivalRuntime.hpp"
@@ -76,7 +77,7 @@ void SurvivalRuntime::tick() {
         replay::Recorder::get().finishFromLast("CONNECTION_LOST");
         ++m_generation;m_controlRequest.cancel();m_pollRequest.cancel();m_eventRequest.cancel();m_recoverRequest.cancel();m_queueRequest.cancel();
         m_lastServerNow=0;m_session=token;m_creating=m_pollBusy=m_eventBusy=m_recoverBusy=m_queuePollBusy=false;m_view={};m_queue={};++m_queueGeneration;m_prepared={};m_events.clear();m_attempt.clear();m_spectatorAcceptedAttempt.clear();
-        m_attemptContext=m_enteredContext=m_readyContext=m_failedContext="";m_audioReported.clear();m_nextPoll={};
+        m_attemptContext=m_enteredContext=m_readyContext=m_failedContext="";m_audioReported.clear();m_nextPoll={};m_matchFoundOpenAt.reset();
         m_clock={};resetSurrender();
         m_needRecovery=!token.empty();m_recoverRetryAt={};m_ackRetryAt={};
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
@@ -97,6 +98,7 @@ void SurvivalRuntime::tick() {
         else if(m_needRecovery && std::chrono::steady_clock::now()>=m_recoverRetryAt)recover();
         return;
     }
+    if(m_matchFoundOpenAt && std::chrono::steady_clock::now()>=*m_matchFoundOpenAt){m_matchFoundOpenAt.reset();openRecoveredGame();}
     if(acquiring())RankedRoundPreparation::get().pump();
     pumpEvents();
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
@@ -172,7 +174,9 @@ void SurvivalRuntime::loadOnlineMatch(std::string const& id) {
     m_pollRequest.spawn(request(session).get(onlineEndpoint("/matches/"+id)),[this,generation,session,id](web::WebResponse response) {
         if(!current(generation,session) || m_queue.matchId!=id)return;
         m_pollBusy=false;
-        if(response.code()>=200&&response.code()<300){observe(response.json().unwrapOr(matjson::Value()));openRecoveredGame();}
+        if(response.code()>=200&&response.code()<300){observe(response.json().unwrapOr(matjson::Value()));
+            // Fresh from the queue: show MATCH FOUND in the queue window first.
+            m_matchFoundOpenAt=std::chrono::steady_clock::now()+std::chrono::milliseconds(SurvivalMatchFoundHoldMs);}
         else {m_queue.error="Survival server connection failed. Retrying...";m_nextPoll=std::chrono::steady_clock::now()+std::chrono::seconds(2);}
     });
 }
@@ -222,9 +226,17 @@ void SurvivalRuntime::observe(matjson::Value const& root) {
     auto const oldContext=preparationContext();
     auto const oldState=m_view.state;
     auto const watchedFinal=(m_view.phase=="FINAL"||m_view.phase=="TIEBREAK")&&SurvivalSpectatorRuntime::get().watchingThroughEnd();
+    // A ballot sent for this match stays chosen locally until the server echoes it.
+    auto const pendingBallot=m_view.id==id?m_view.vote.myBallot:std::string{};
     m_view.id=id;m_view.revision=static_cast<std::uint64_t>(revision);m_view.state=root["state"].asString().unwrapOr("");
     m_view.phase=root["phase"].asString().unwrapOr("");m_view.roundKey=root["roundKey"].asString().unwrapOr("");
     m_view.presentationGate=root["presentationGate"].asString().unwrapOr("");
+    {auto const& vote=root["difficultyVote"];auto const local=pendingBallot;
+        m_view.vote={};
+        if(vote.isObject()){m_view.vote.present=true;m_view.vote.resolved=vote["resolved"].asBool().unwrapOr(false);
+            m_view.vote.opensAt=vote["opensAt"].asString().unwrapOr("");m_view.vote.closesAt=vote["closesAt"].asString().unwrapOr("");
+            m_view.vote.voted=static_cast<int>(vote["votedCount"].asInt().unwrapOr(0));m_view.vote.total=static_cast<int>(vote["totalCount"].asInt().unwrapOr(0));
+            m_view.vote.myBallot=vote["myBallot"].asString().unwrapOr(local);}}
     m_view.group=root["difficultyGroup"].asString().unwrapOr("");m_view.ownId=root["myParticipantId"].asString().unwrapOr("human");
     m_view.ownWinner=root["winnerId"].asString().unwrapOr("")==m_view.ownId;
     for(auto const& winner:root["winnerIds"].asArray().unwrapOr(std::vector<matjson::Value>{}))if(winner.asString().unwrapOr("")==m_view.ownId)m_view.ownWinner=true;
@@ -850,6 +862,18 @@ void SurvivalRuntime::pumpSurrenderReturn() {
     if(!owner || !scene || owner.data()!=PlayLayer::get() ||
         owner->getParent()!=scene.data() || director->getRunningScene()!=scene.data() || director->getNextScene())return;
     requestSurvivalGameplayReturn(owner.data());
+}
+std::optional<std::int64_t> SurvivalRuntime::voteOpensInMs() const {
+    if(!m_view.vote.present)return std::nullopt;return m_clock.signedRemainingMillis(m_view.vote.opensAt,localNow());
+}
+std::optional<std::int64_t> SurvivalRuntime::voteClosesInMs() const {
+    if(!m_view.vote.present)return std::nullopt;return m_clock.signedRemainingMillis(m_view.vote.closesAt,localNow());
+}
+void SurvivalRuntime::voteDifficulty(std::string const& ballot) {
+    if(!active() || !m_view.vote.present || m_view.vote.resolved || !m_view.vote.myBallot.empty())return;
+    if(ballot!="EASY" && ballot!="NORMAL" && ballot!="HARD" && ballot!="NONE")return;
+    m_view.vote.myBallot=ballot;
+    auto body=event("DIFFICULTY_VOTE");body["ballot"]=ballot;enqueue(std::move(body));
 }
 void SurvivalRuntime::presentationComplete() {
     if(m_view.online || !active() || m_view.presentationGate.empty() || m_view.result.isObject())return;

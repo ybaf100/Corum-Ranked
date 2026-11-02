@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { unzipSync } from "node:zlib";
 import { Inject, Injectable } from "@nestjs/common";
 import { survivalDemonFromNativeCode, survivalMapAllowed, survivalMapRange, shuffle,
-  type RandomSource, type SurvivalDifficultyGroup, type SurvivalMapPhase,
+  type RandomSource, type SurvivalDifficultyGroup, type SurvivalMapPhase, type SurvivalDifficultyChoice,
   type SurvivalMapMetadata, type SurvivalVerifiedMap } from "@corum-ranked/rules";
 import type {SqlExecutor} from "../database/database.port.js";
 import { RANDOM_SOURCE } from "../common/runtime.module.js";
@@ -13,6 +13,8 @@ export interface SurvivalMapRequest {
   group: SurvivalDifficultyGroup;
   phase: SurvivalMapPhase;
   minimumLevelId: number;
+  /** Easy/normal/hard part of the allowed range chosen by the difficulty vote. */
+  slice?: SurvivalDifficultyChoice;
   excludedLevelIds: readonly number[];
   reservation?: {matchId:string;roundKey:string;mapGeneration:number;token:string};
 }
@@ -154,7 +156,7 @@ export function validSurvivalGeometry(geometry: string): boolean {
 export function verifySurvivalDownload(body: string, expected: SurvivalMapMetadata, request: SurvivalMapRequest): SurvivalVerifiedMap {
   if (body.trim()==="-1") throw new SurvivalMapError("DOWNLOAD_FAILED","GD download returned -1");
   const record=body.split("#")[0]!, row=fields(record), metadata=parseSurvivalMetadata(record);
-  if (metadata.levelId!==expected.levelId || !survivalMapAllowed(metadata,request.group,request.phase,request.minimumLevelId)) {
+  if (metadata.levelId!==expected.levelId || !survivalMapAllowed(metadata,request.group,request.phase,request.minimumLevelId,request.slice)) {
     throw new SurvivalMapError("INVALID_METADATA","Downloaded map differs from validated catalog");
   }
   const encoded=row.get("4") ?? "", version=integer(row,"5",true);
@@ -264,7 +266,7 @@ export class GdSurvivalMapProvider implements SurvivalMapProvider {
   }
   public async select(request: SurvivalMapRequest): Promise<SurvivalVerifiedMap> {
     this.checkHttpCooldown();
-    const allowed=survivalMapRange(request.group,request.phase), filters:Record<string,string>[]=[];
+    const allowed=survivalMapRange(request.group,request.phase,request.slice), filters:Record<string,string>[]=[];
     if (allowed.minimumStars!==null && allowed.maximumStars!==null) {
       const categories=new Set<number>();
       for (let stars=allowed.minimumStars;stars<=allowed.maximumStars;stars++) categories.add(stars<=5 ? 3 : stars<=7 ? 4 : 5);
@@ -294,7 +296,7 @@ export class GdSurvivalMapProvider implements SurvivalMapProvider {
         const catalog=await this.catalog(filter,signal);
         try {await this.replenish(catalog,filter,signal);}catch(e){failed(e);}
         for(const level of catalog.levels.values()) {
-          if(!survivalMapAllowed(level,request.group,request.phase,request.minimumLevelId))continue;
+          if(!survivalMapAllowed(level,request.group,request.phase,request.minimumLevelId,request.slice))continue;
           if(excluded.has(level.levelId)){if(!failures.includes("DUPLICATE_CANDIDATES"))failures.push("DUPLICATE_CANDIDATES");continue;}
           if(this.badCandidates.has(level.levelId))continue;
           candidates.push({level,type:this.legacyRelay?"4":filter.type!,page:catalog.sources.get(level.levelId)??0,catalog});

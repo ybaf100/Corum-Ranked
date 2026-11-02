@@ -5,6 +5,8 @@ import { RankedDomainError } from "./errors.js";
 import { survivalPlacementLp, survivalTierForLp, type SurvivalConfig } from "./survival.js";
 import { survivalDifficultyForAverage, survivalMapAllowed, validateSurvivalEngineConfig,
   type SurvivalDifficultyGroup, type SurvivalMapPhase, type SurvivalVerifiedMap } from "./survival-maps.js";
+import { SURVIVAL_DIFFICULTY_BALLOTS, SURVIVAL_VOTE_OUTRO_MS, survivalBotVotedAt, survivalResolveDifficultyVote,
+  type SurvivalDifficultyBallot, type SurvivalDifficultyVote } from "./survival-vote.js";
 
 export type SurvivalMatchState = "MAP_SELECTION" | "PREPARING" | "ENTERING" | "COUNTDOWN" |
   "PLAYING" | "ROUND_RESULT" | "FINAL_RESULT" | "CANCELLED";
@@ -91,6 +93,8 @@ export interface SurvivalMatch {
   /** Debug adapter's durable presentation barrier; ordinary M3 matches remain automatic. */
   presentationControlled?: boolean;
   presentationGate?: "INTRO" | "ROUND_RESULT" | null;
+  /** Hidden difficulty preference vote held during the intro (online/debug matches). */
+  difficultyVote?: SurvivalDifficultyVote;
   players: SurvivalMatchPlayer[];
   rounds: SurvivalRound[];
   nextMap?: {roundKey:string;phase:SurvivalMapPhase;mapGeneration:number;displayRoundNumber?:number;map:SurvivalVerifiedMap};
@@ -133,6 +137,7 @@ export type SurvivalCommand =
   | { type: "TICK" }
   | {type:"ABSENT";roundKey:string;mapGeneration:number;participantIds:readonly string[]}
   | { type:"PRESENTATION_COMPLETE";roundKey:string;mapGeneration:number;participantId:string }
+  | { type:"DIFFICULTY_VOTE";roundKey:string;mapGeneration:number;participantId:string;ballot:SurvivalDifficultyBallot }
   | { type: "NEXT_MAP_SELECTED"; roundKey:string;mapGeneration:number;map:SurvivalVerifiedMap }
   | { type: "MAP_SELECTED"; roundKey: string; mapGeneration: number; map: SurvivalVerifiedMap }
   | ({ type: "ASSETS_READY"; participantId: string; certificate: SurvivalVerifiedMap } & SurvivalRoundContext)
@@ -152,6 +157,16 @@ export type SurvivalCommand =
 
 function conflict(message: string): never { throw new RankedDomainError("INVALID_MATCH_TRANSITION", message); }
 export const survivalCurrentRound = (match: SurvivalMatch): SurvivalRound => match.rounds[match.rounds.length - 1]!;
+/** The intro holds through the difficulty vote and its short outro. */
+export function survivalIntroEndsAt(match: SurvivalMatch): number {
+  const vote=match.difficultyVote,base=match.createdAt+SURVIVAL_INTRO_MS;
+  if(!vote)return base;
+  return vote.resolvedAt===null?Number.POSITIVE_INFINITY:Math.max(base,vote.resolvedAt+SURVIVAL_VOTE_OUTRO_MS);
+}
+function resolveVote(match: SurvivalMatch, now: number): void {
+  if(match.difficultyVote && match.difficultyVote.resolvedAt===null)
+    match.difficultyVote=survivalResolveDifficultyVote(match.difficultyVote,match.players.map(p=>p.participantId),now);
+}
 const terminal = (match: SurvivalMatch): boolean => match.state === "FINAL_RESULT" || match.state === "CANCELLED";
 const activePlayers = (round: SurvivalRound) => round.players.filter(player => !player.forfeited);
 const entryPlayers = (round: SurvivalRound) => activePlayers(round).filter(player=>!player.absent&&!player.entryDeferred);
@@ -205,6 +220,8 @@ function assertSelectedMap(match:SurvivalMatch,phase:SurvivalMapPhase,map:Surviv
 /** Only the server provider uses this target. Visual candidates never enter it. */
 export function survivalMapSelectionTarget(match:SurvivalMatch){
   const round=survivalCurrentRound(match);
+  // The first map is drawn only after the vote fixes the difficulty weights.
+  if(match.state==="MAP_SELECTION" && match.difficultyVote && match.difficultyVote.resolvedAt===null)return null;
   if(match.state==="MAP_SELECTION" && !round.map)return {roundKey:round.key,mapGeneration:round.mapGeneration,phase:round.phase,prefetch:false};
   if(match.state==="ROUND_RESULT" && round.finishedAt!==null && qualifiedPlayers(match,round).length>1){
     const phase=survivalNextPhase(round.phase,match.config.matchPlayerCount,qualifiedPlayers(match,round).length);
@@ -358,7 +375,8 @@ function finishRound(match: SurvivalMatch, round: SurvivalRound, at: number): vo
  * packets and duplicate reports. >= deadline is closed; preparation is not play time. */
 function advanceTimers(match: SurvivalMatch, now: number): void {
   const round=survivalCurrentRound(match);
-  if(match.presentationGate==="INTRO" && now>=match.createdAt+SURVIVAL_INTRO_MS)match.presentationGate=null;
+  if(match.difficultyVote && match.difficultyVote.resolvedAt===null && now>=match.difficultyVote.closesAt)resolveVote(match,match.difficultyVote.closesAt);
+  if(match.presentationGate==="INTRO" && now>=survivalIntroEndsAt(match))match.presentationGate=null;
   if(match.presentationGate==="ROUND_RESULT" && round.finishedAt!==null && now>=round.finishedAt+SURVIVAL_RESULT_MS)match.presentationGate=null;
   if(match.state==="MAP_SELECTION" && round.map && match.presentationGate!=="INTRO"){
     round.preparationStartedAt=now;transition(match,"PREPARING",now,"PREFETCHED_INTRO_MAP_READY");
@@ -427,10 +445,21 @@ export function reduceSurvivalMatch(before: SurvivalMatch, command: SurvivalComm
     } else if(command.type==="PRESENTATION_COMPLETE") {
       if(!match.presentationControlled || !match.players.some(p=>p.participantId===command.participantId && p.kind==="HUMAN" && p.eliminationStage===null))
         conflict("Invalid presentation owner");
-      if(match.presentationGate==="INTRO" && match.state==="MAP_SELECTION" && now>=match.createdAt+SURVIVAL_INTRO_MS)match.presentationGate=null;
+      if(match.presentationGate==="INTRO" && match.state==="MAP_SELECTION" && now>=survivalIntroEndsAt(match))match.presentationGate=null;
       else if(match.presentationGate==="ROUND_RESULT" && match.state==="ROUND_RESULT" && round.finishedAt!==null && now>=round.finishedAt+SURVIVAL_RESULT_MS)
         match.presentationGate=null;
       else if(match.presentationGate!==null)conflict("Presentation barrier is not complete");
+    } else if(command.type==="DIFFICULTY_VOTE") {
+      const vote=match.difficultyVote;
+      if(!vote || vote.resolvedAt!==null || now<vote.opensAt || now>=vote.closesAt)conflict("Difficulty vote is not open");
+      if(!SURVIVAL_DIFFICULTY_BALLOTS.includes(command.ballot))conflict("Invalid difficulty ballot");
+      if(!match.players.some(p=>p.participantId===command.participantId && p.kind==="HUMAN"))conflict("Invalid difficulty voter");
+      // One ballot per player; an identical retry is harmless, a change is not.
+      const previous=vote.ballots[command.participantId];
+      if(previous!==undefined && previous!==command.ballot)conflict("Difficulty ballot already cast");
+      vote.ballots[command.participantId]=command.ballot;
+      const humans=match.players.filter(p=>p.kind==="HUMAN");
+      if(humans.every(p=>vote.ballots[p.participantId]!==undefined))resolveVote(match,now);
     } else if (command.type === "MAP_SELECTED") {
       if (match.state !== "MAP_SELECTION" || round.map) conflict("Map has already been selected");
       assertSelectedMap(match,round.phase,command.map);
@@ -564,6 +593,18 @@ export function survivalSettlementInputs(match: SurvivalMatch) {
       eventKey:`survival:${match.id}:result:${player.participantId}`,configGeneration:match.configGeneration};
   }).sort((a,b) => a.rank-b.rank || a.participantId.localeCompare(b.participantId));
 }
+/** Public vote state: timing and how many have voted. Never who voted what,
+ * never the tally or weights. Only the viewer's own ballot is echoed back. */
+export function survivalDifficultyVoteView(match: SurvivalMatch, now: number, participantId: string | null) {
+  const vote=match.difficultyVote;
+  if(!vote)return null;
+  const resolved=vote.resolvedAt!==null;
+  const voted=resolved?match.players.length:match.players.filter(p=>p.kind==="HUMAN"
+    ?vote.ballots[p.participantId]!==undefined:now>=survivalBotVotedAt(vote,p.participantId)).length;
+  return {opensAt:new Date(vote.opensAt).toISOString(),closesAt:new Date(vote.closesAt).toISOString(),
+    resolved,votedCount:voted,totalCount:match.players.length,
+    myBallot:participantId===null?null:vote.ballots[participantId]??null};
+}
 export function survivalLiveView(match: SurvivalMatch, now: number, participantId: string | null = null) {
   const round=survivalCurrentRound(match);
   const completed=match.rounds.slice().reverse().find(r=>r.finishedAt!==null);
@@ -608,7 +649,8 @@ export function survivalLiveView(match: SurvivalMatch, now: number, participantI
       waitingForOthers:false,passing:false};
   }).sort((a,b)=>a.rank-b.rank||a.participantId.localeCompare(b.participantId));
   return {matchId:match.id,revision:match.revision,state:match.state,phase:round.phase,roundKey:round.key,
-    selectionOpensAt:new Date(match.createdAt+SURVIVAL_INTRO_MS).toISOString(),nextMap:match.nextMap?{...match.nextMap,displayRoundNumber:round.ordinal+1}:null,
+    selectionOpensAt:new Date(Number.isFinite(survivalIntroEndsAt(match))?survivalIntroEndsAt(match):match.difficultyVote!.closesAt+SURVIVAL_VOTE_OUTRO_MS).toISOString(),
+    difficultyVote:survivalDifficultyVoteView(match,now,participantId),nextMap:match.nextMap?{...match.nextMap,displayRoundNumber:round.ordinal+1}:null,
     presentationGate:match.presentationGate??null,online:match.online??false,roundNumber:survivalDisplayRoundNumber(round),displayRoundNumber:survivalDisplayRoundNumber(round),forceDeathMatch:match.forceDeathMatch??false,matchPlayerCount:match.config.matchPlayerCount,playerCount:match.players.length,roundPlayerCount:round.players.length,
     tiebreakAttempts:match.config.tiebreakAttempts,mapGeneration:round.mapGeneration,map:round.map,averageLp:match.averageLp,difficultyGroup:match.difficultyGroup,
     configGeneration:match.configGeneration,serverNow:new Date(now).toISOString(),

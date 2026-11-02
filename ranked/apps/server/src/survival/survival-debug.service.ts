@@ -146,6 +146,7 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
     const context={roundKey:body.roundKey,mapGeneration:body.mapGeneration,levelId:body.levelId,participantId:"human"};
     let command:SurvivalCommand;
     if(body.type==="PRESENTATION_COMPLETE")command={type:body.type,roundKey:body.roundKey,mapGeneration:body.mapGeneration,participantId:"human"};
+    else if(body.type==="DIFFICULTY_VOTE"){if(!body.ballot)throw new BadRequestException("Ballot required");command={type:body.type,roundKey:body.roundKey,mapGeneration:body.mapGeneration,participantId:"human",ballot:body.ballot};}
     else if(body.type==="ASSETS_READY") {if(!body.certificate)throw new BadRequestException("Map certificate required");command={type:body.type,...context,certificate:body.certificate};}
     else if(body.type==="PREPARATION_FAILED")command={type:body.type,...context,reason:body.reason??"NATIVE_PREPARATION_FAILED"};
     else if(body.type==="ENTERED")command={type:body.type,...context};

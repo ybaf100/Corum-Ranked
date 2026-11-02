@@ -2890,5 +2890,65 @@
   "hud-transparency-short": {
     "en": "T",
     "ko": "투명 "
+  },
+  "survival-vote-title": {
+    "en": "SELECT YOUR PREFERRED DIFFICULTY.",
+    "ko": "선호하는 난이도를 선택하세요."
+  },
+  "survival-vote-easy": {
+    "en": "EASY",
+    "ko": "쉬움"
+  },
+  "survival-vote-normal": {
+    "en": "NORMAL",
+    "ko": "보통"
+  },
+  "survival-vote-hard": {
+    "en": "HARD",
+    "ko": "어려움"
+  },
+  "survival-vote-none": {
+    "en": "NO PREFERENCE",
+    "ko": "선택 안함"
+  },
+  "survival-vote-easy-desc": {
+    "en": "Vote for an easier match overall.",
+    "ko": "매치의 난이도를 전반적으로 쉽게 투표합니다."
+  },
+  "survival-vote-normal-desc": {
+    "en": "Vote for a moderate match overall.",
+    "ko": "매치의 난이도를 전반적으로 무난하게 투표합니다."
+  },
+  "survival-vote-hard-desc": {
+    "en": "Vote for a harder match overall.",
+    "ko": "매치의 난이도를 전반적으로 어렵게 투표합니다."
+  },
+  "survival-vote-none-desc": {
+    "en": "No preference. A random hidden vote goes to one of the other three.",
+    "ko": "선호하는 난이도 없이 남은 난이도 중 하나에 무작위로 투표됩니다."
+  },
+  "survival-vote-time": {
+    "en": "TIME LEFT {}s",
+    "ko": "남은 시간 {}"
+  },
+  "survival-vote-count": {
+    "en": "VOTED {}/{}",
+    "ko": "투표 {}/{}"
+  },
+  "survival-vote-active": {
+    "en": "DIFFICULTY VOTE",
+    "ko": "난이도 투표 중"
+  },
+  "survival-vote-done": {
+    "en": "VOTING CLOSED · PREPARING MAP",
+    "ko": "투표가 끝났습니다 · 맵 준비 중"
+  },
+  "hud-collapse": {
+    "en": "HIDE TOOLS",
+    "ko": "접기"
+  },
+  "hud-tools-open": {
+    "en": "TOOLS",
+    "ko": "도구 열기"
   }
 }

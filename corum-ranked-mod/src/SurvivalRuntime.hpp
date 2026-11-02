@@ -20,8 +20,15 @@ struct SurvivalQueueView {
     int players=0,minimumPlayers=8,maximumPlayers=16,maxWaitSeconds=180;
     bool enabled=false;
 };
+// Hidden difficulty vote: only timing and how many players voted are public.
+struct SurvivalVoteView {
+    bool present=false,resolved=false;
+    std::string opensAt,closesAt,myBallot;
+    int voted=0,total=0;
+};
 struct SurvivalMatchView {
     std::uint64_t revision=0;
+    SurvivalVoteView vote;
     std::string id,state,phase,roundKey,group,ownId="human",error,startsAt,endsAt,entryOpensAt,entryRequestedAt,mapError,presentationGate,selectionOpensAt,eliminatedAt;
     int mapGeneration=0,roundNumber=0,targetQualifiers=0,playerCount=0,roundPlayerCount=0,matchPlayerCount=16,tiebreakAttempts=3;
     SurvivalMapMetadata map;
@@ -48,6 +55,8 @@ public:
     bool active() const { return !m_view.id.empty(); }
     bool creating() const { return m_creating; }
     bool queueing() const { return m_queue.status=="QUEUED" || m_queue.status=="JOINING"; }
+    // True during the short MATCH FOUND hold between the queue and the intro.
+    bool matchFoundHold() const { return m_matchFoundOpenAt.has_value(); }
     SurvivalQueueView const& queue() const { return m_queue; }
     int queueWaitingSeconds() const;
     int configuredPlayerCount() const;
@@ -116,6 +125,10 @@ public:
     void surrender();
     bool surrenderPending() const {return !m_surrenderEventId.empty() && !m_surrenderAccepted;}
     void presentationComplete();
+    // One ballot per match: EASY, NORMAL, HARD or NONE (random hidden vote).
+    void voteDifficulty(std::string const& ballot);
+    std::optional<std::int64_t> voteOpensInMs() const;
+    std::optional<std::int64_t> voteClosesInMs() const;
     void acknowledge();
     std::optional<ScoreAnimationInput> scoreAnimation() const;
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
@@ -205,6 +218,8 @@ private:
     std::deque<matjson::Value> m_events;
     std::uint64_t m_eventOverflowEvictions=0;
     std::chrono::steady_clock::time_point m_pollStartedAt{},m_nextPoll{},m_nextProgress{},m_retryAt{},m_recoverRetryAt{},m_nextQueuePoll{},m_ackRetryAt{};
+    // MATCH FOUND stays in the queue window for ~1 s before the intro opens.
+    std::optional<std::chrono::steady_clock::time_point> m_matchFoundOpenAt;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_controlRequest,m_pollRequest,m_eventRequest,m_recoverRequest,m_queueRequest;
 };
 void showSurvivalGame();

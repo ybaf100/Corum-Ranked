@@ -1,3 +1,4 @@
+import { SURVIVAL_VOTE_INTRO_MS } from "@corum-ranked/rules";
 import {SurvivalBadgesService} from "../src/survival/survival-badges.service.js";
 import {SurvivalPlayerInfoController} from "../src/survival/survival-player-info.controller.js";
 import {ForumRecordsService} from "../src/forum/forum-records.service.js";
@@ -358,8 +359,12 @@ describe("global durable map selection history",()=>{
 
 it("durably preselects the next official map during results and adopts it after a process restart without rerolling",async()=>{
  let m=await database.transaction(tx=>engine.createWithin(tx,"controlled-prefetch",entrants,document,undefined,true));
+ // The first map waits for the hidden difficulty vote; an unanswered vote closes on its deadline.
+ await engine.selectMap(m.id);expect(survivalCurrentRound(await engine.get(m.id)).map).toBeNull();
+ now+=SURVIVAL_VOTE_INTRO_MS-1_500;await engine.tick(m.id);
  await engine.selectMap(m.id);m=await engine.get(m.id);expect(survivalCurrentRound(m).map).not.toBeNull();
- expect(m.state).toBe("MAP_SELECTION");now+=6000;await engine.tick(m.id);
+ expect(m.difficultyVote?.resolvedAt).not.toBeNull();
+ expect(m.state).toBe("MAP_SELECTION");now+=1_500;await engine.tick(m.id);
  m=await prepare(await engine.get(m.id));
  for(const [i,p] of survivalCurrentRound(m).players.entries()){
   const attemptId=ids.next();m=await send(m,{type:"ATTEMPT_START",...context(m),participantId:p.participantId,attemptId});

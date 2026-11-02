@@ -1,3 +1,4 @@
+import { SURVIVAL_VOTE_OPENS_MS } from "@corum-ranked/rules";
 import {SurvivalController} from "../src/survival/survival.controller.js";
 import {SurvivalBadgesService} from "../src/survival/survival-badges.service.js";
 import {SurvivalReplayReceiptController} from "../src/survival/survival-replay-receipt.controller.js";
@@ -103,7 +104,15 @@ async function game(count:number,fill=false){const group:Client[]=[];for(let i=0
  if(count<16){now+=180000;await touch(group);await queue.tickOnce();}
  const state=await api(group[0]!,"/queue/status");expect(state.body.status).toBe("MATCHED");return {group,id:state.body.matchId as string};}
 async function event(c:Client,m:SurvivalMatch,type:string,fields:Record<string,unknown>={}){const r=survivalCurrentRound(m);const response=await api(c,`/online/matches/${m.id}/events`,{eventId:ids.next(),type,roundKey:r.key,mapGeneration:r.mapGeneration,levelId:r.map?.levelId??0,...(["ASSETS_READY","ENTERED","ATTEMPT_START"].includes(type)?{installedMods:mods}:{}),...fields});expect(response.status, `Survival ${type} rejected: ${JSON.stringify(response.body)}`).toBe(201);return response.body;}
-async function prepare(id:string,group:Client[]){let m=await engine.get(id);now+=(await engine.get(id)).presentationGate==="INTRO"?6000:SURVIVAL_RESULT_MS;await touch(group);await online.tickOnce();await engine.selectMap(id);m=await engine.get(id);
+/** Advances the server clock past the intro or result gate. Humans answer the
+ * hidden difficulty vote as soon as it opens (as clients do), so the intro keeps its 6 s. */
+async function advanceGate(id:string){const m=await engine.get(id);
+ if(m.presentationGate!=="INTRO"){now+=SURVIVAL_RESULT_MS;return;}
+ if(!m.difficultyVote || m.difficultyVote.resolvedAt!==null){now+=6000;return;}
+ now+=SURVIVAL_VOTE_OPENS_MS;const r=survivalCurrentRound(m);
+ for(const p of m.players.filter(p=>p.kind==="HUMAN"))await engine.dispatch(id,`vote:${p.participantId}`,{type:"DIFFICULTY_VOTE",roundKey:r.key,mapGeneration:r.mapGeneration,participantId:p.participantId,ballot:"NONE"});
+ now+=6000-SURVIVAL_VOTE_OPENS_MS;}
+async function prepare(id:string,group:Client[]){let m=await engine.get(id);await advanceGate(id);await touch(group);await online.tickOnce();await engine.selectMap(id);m=await engine.get(id);
  for(const c of group)await event(c,m,"ASSETS_READY",{certificate:survivalCurrentRound(m).map});await online.tickOnce();m=await engine.get(id);
  now=survivalCurrentRound(m).entryRequestedAt!+5000;await touch(group);
  for(const c of group)await event(c,m,"ENTERED");m=await engine.get(id);
@@ -138,7 +147,7 @@ describe("Survival M5 public HTTP and persistent online game",()=>{
 
  it("holds the ready room for exactly 5s, accepts surrender during the wait and preserves its deadline",async()=>{
   const {group,id}=await game(8),owner=group[0]!,peers=group.slice(1);
-  now+=(await engine.get(id)).presentationGate==="INTRO"?6000:SURVIVAL_RESULT_MS;await touch(group);await online.tickOnce();await engine.selectMap(id);let m=await engine.get(id);
+  await advanceGate(id);await touch(group);await online.tickOnce();await engine.selectMap(id);let m=await engine.get(id);
   for(const c of group)await event(c,m,"ASSETS_READY",{certificate:survivalCurrentRound(m).map});
   m=await engine.get(id);const readyAt=now,round=survivalCurrentRound(m);
   const view=(await api(owner,`/online/matches/${id}`)).body;
@@ -322,7 +331,7 @@ describe("Survival M5 public HTTP and persistent online game",()=>{
  });
  it("excludes an absent download from readiness, then accepts certified mid-round native re-entry and progress",async()=>{
    const {group,id}=await game(8),offline=group[0]!,peers=group.slice(1);
-   now+=(await engine.get(id)).presentationGate==="INTRO"?6000:SURVIVAL_RESULT_MS;await touch(peers);await online.tickOnce();await engine.selectMap(id);let m=await engine.get(id);
+   await advanceGate(id);await touch(peers);await online.tickOnce();await engine.selectMap(id);let m=await engine.get(id);
    for(const c of peers)await event(c,m,"ASSETS_READY",{certificate:survivalCurrentRound(m).map});
    now=survivalCurrentRound(m).preparationStartedAt!+15000;await touch(peers);await online.tickOnce();m=await engine.get(id);
    expect(m.state).toBe("ENTERING");expect(survivalCurrentRound(m).players.find(p=>p.participantId===offline.session.playerId)).toMatchObject({absent:true,assetsReadyAt:null,enteredAt:null});
@@ -337,14 +346,14 @@ describe("Survival M5 public HTTP and persistent online game",()=>{
  it("keeps all-disconnected 0% rounds and repeated finals running, without false native readiness or cancellation",async()=>{
    const {group,id}=await game(8);
    for(let stage=0;stage<5;stage++){
-     now+=(await engine.get(id)).presentationGate==="INTRO"?6000:SURVIVAL_RESULT_MS;await online.tickOnce();await engine.selectMap(id);let m=await engine.get(id);
+     await advanceGate(id);await online.tickOnce();await engine.selectMap(id);let m=await engine.get(id);
      now=survivalCurrentRound(m).preparationStartedAt!+15000;await online.tickOnce();m=await engine.get(id);
      expect(m.state).toBe("COUNTDOWN");expect(survivalCurrentRound(m).players.every(p=>p.assetsReadyAt===null&&p.enteredAt===null)).toBe(true);
      now=survivalCurrentRound(m).endsAt!;await online.tickOnce();m=await engine.get(id);
      expect(m.state).toBe("ROUND_RESULT");expect(m.cancellationReason).toBeNull();expect(m.winnerId).toBeNull();
    }
    expect((await db.query("SELECT * FROM sur_lp_ledger")).rows).toHaveLength(0);
-   now+=(await engine.get(id)).presentationGate==="INTRO"?6000:SURVIVAL_RESULT_MS;await online.tickOnce();await engine.selectMap(id);let m=await engine.get(id);expect(survivalCurrentRound(m).phase).toBe("TIEBREAK");
+   await advanceGate(id);await online.tickOnce();await engine.selectMap(id);let m=await engine.get(id);expect(survivalCurrentRound(m).phase).toBe("TIEBREAK");
    now=survivalCurrentRound(m).preparationStartedAt!+15000;await online.tickOnce();m=await engine.get(id);now=survivalCurrentRound(m).startsAt!;await online.tickOnce();m=await engine.get(id);
    const fresh=await client(group[0]!.channel,group[0]!.account,true);await event(fresh,m,"ASSETS_READY",{certificate:survivalCurrentRound(m).map});await event(fresh,m,"ENTERED");
    await record(fresh,m,94.371);now=survivalCurrentRound(m).endsAt!;await online.tickOnce();m=await engine.get(id);
@@ -385,7 +394,7 @@ describe("Survival M5 public HTTP and persistent online game",()=>{
    await event(c,m,"FORFEIT");expect((await api(c,`/online/matches/${id}/events`,score)).status).toBe(409);
  });
  it("catches preparation failure without blaming successful peers and rejects a mismatched native certificate",async()=>{
-   const {group,id}=await game(8);now+=(await engine.get(id)).presentationGate==="INTRO"?6000:SURVIVAL_RESULT_MS;await touch();await online.tickOnce();await engine.selectMap(id);let m=await engine.get(id);
+   const {group,id}=await game(8);await advanceGate(id);await touch();await online.tickOnce();await engine.selectMap(id);let m=await engine.get(id);
    const bad=await api(group[0]!,`/online/matches/${id}/events`,{eventId:ids.next(),type:"ASSETS_READY",roundKey:survivalCurrentRound(m).key,mapGeneration:1,levelId:survivalCurrentRound(m).map!.levelId,installedMods:mods,certificate:{...survivalCurrentRound(m).map,geometrySha256:"b".repeat(64)}});
    expect(bad.status).toBe(409);
    for(const c of group)await event(c,m,"PREPARATION_FAILED");m=await engine.get(id);expect(m.state).toBe("MAP_SELECTION");expect(m.players.every(p=>p.eliminationStage===null)).toBe(true);
@@ -467,7 +476,7 @@ describe("Survival M5 public HTTP and persistent online game",()=>{
  });
 
  it("accepts an app restart just before preparation closes, even when the first fresh poll renews presence",async()=>{
-   const {group,id}=await game(8),old=group[0]!,peers=group.slice(1);now+=(await engine.get(id)).presentationGate==="INTRO"?6000:SURVIVAL_RESULT_MS;await touch();await online.tickOnce();await engine.selectMap(id);let m=await engine.get(id);
+   const {group,id}=await game(8),old=group[0]!,peers=group.slice(1);await advanceGate(id);await touch();await online.tickOnce();await engine.selectMap(id);let m=await engine.get(id);
    for(const c of peers)await event(c,m,"ASSETS_READY",{certificate:survivalCurrentRound(m).map});
    now=survivalCurrentRound(m).preparationStartedAt!+13000;await touch(peers);const fresh=await client(old.channel,old.account,true);
    const view=(await api(fresh,"/online/active")).body.match;expect(view.state).toBe("ENTERING");m=await engine.get(id);
@@ -716,7 +725,7 @@ describe('own Survival replay official receipt over authenticated production HTT
 
 describe("authenticated audio recovery and delayed entry",()=>{
  it("requires independent stable accounts, rejects stale generations and changes only a pre-play map",async()=>{
-  const {group,id}=await game(8);now+=6000;await touch(group);await online.tickOnce();await engine.selectMap(id);let m=await engine.get(id);
+  const {group,id}=await game(8);await advanceGate(id);await touch(group);await online.tickOnce();await engine.selectMap(id);let m=await engine.get(id);
   const original=survivalCurrentRound(m),level=original.map!.levelId;
   const failure={category:"AUDIO_UNAVAILABLE_PERMANENT",resourceKind:"SONG",resourceId:123,nativeCode:2};
   await event(group[0]!,m,"PREPARATION_FAILED",{reason:failure.category,audioFailure:failure});
@@ -734,7 +743,7 @@ describe("authenticated audio recovery and delayed entry",()=>{
   const oldReady=await api(group[0]!,`/online/matches/${id}/events`,{eventId:ids.next(),type:"ASSETS_READY",roundKey:original.key,mapGeneration:original.mapGeneration,levelId:level,certificate:original.map,installedMods:mods});expect(oldReady.status).toBe(409);
  });
  it("does not let transient failures or a lone reporter quarantine any map, and forbids reports after play begins",async()=>{
-  const {group,id}=await game(8);now+=6000;await touch(group);await online.tickOnce();await engine.selectMap(id);let m=await engine.get(id);
+  const {group,id}=await game(8);await advanceGate(id);await touch(group);await online.tickOnce();await engine.selectMap(id);let m=await engine.get(id);
   for(const c of group.slice(0,2))await event(c,m,"PREPARATION_FAILED",{reason:"AUDIO_DOWNLOAD_TRANSIENT",audioFailure:{category:"AUDIO_DOWNLOAD_TRANSIENT",resourceKind:"SONG",resourceId:123,nativeCode:1}});
   expect((await engine.get(id)).state).toBe("PREPARING");expect((await db.query("SELECT * FROM sur_resource_quarantine WHERE resource_id=123")).rows).toHaveLength(0);
   for(const c of group)await event(c,m,"ASSETS_READY",{certificate:survivalCurrentRound(m).map});m=await engine.get(id);

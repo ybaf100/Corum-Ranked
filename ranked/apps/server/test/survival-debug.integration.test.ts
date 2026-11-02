@@ -1,3 +1,4 @@
+import { SURVIVAL_VOTE_OPENS_MS } from "@corum-ranked/rules";
 import {survivalHistoryProjection} from "../src/history/survival-history.js";
 import { appendFileSync } from "node:fs";
 import { countSql,failSqlOnce } from "./sql-counter.js";
@@ -80,7 +81,7 @@ beforeEach(async()=>{
 });
 async function create(){
   const m=await engine.get((await debug.create(session,body())).matchId);
-  now+=6000;
+  now+=SURVIVAL_VOTE_OPENS_MS;await send(m,"DIFFICULTY_VOTE",{ballot:"NONE"});now+=6000-SURVIVAL_VOTE_OPENS_MS;
   await send(m,"PRESENTATION_COMPLETE");return engine.get(m.id);
 }
 async function send(m:SurvivalMatch,type:SurvivalDebugEventDto["type"],fields:Partial<SurvivalDebugEventDto>={}) {
@@ -215,13 +216,17 @@ describe("Survival M4 persistent debug game",()=>{
     expect(recovered.standings.find(p=>p.participantId==="human")).toMatchObject({bestProgress:100,cleared:true});
     expect(survivalCurrentRound(await engine.get(m.id)).players[0]!.attempts).toHaveLength(1);
   });
-  it("prefetches during the six-second roster and advances the durable result gate on the server clock",async()=>{
+  it("prefetches during the roster once the hidden vote closes and advances the durable result gate on the server clock",async()=>{
     let m=await engine.get((await debug.create(session,body())).matchId);
     expect(m.presentationGate).toBe("INTRO");
+    // No map is drawn before the difficulty vote fixes its weights.
+    await engine.selectMap(m.id);expect(survivalCurrentRound(await engine.get(m.id)).map).toBeNull();
+    now+=SURVIVAL_VOTE_OPENS_MS;await send(m,"DIFFICULTY_VOTE",{ballot:"HARD"});
+    expect((await engine.get(m.id)).difficultyVote?.resolvedAt).toBe(now);
     await engine.selectMap(m.id);await debug.tickOnce();
     expect(survivalCurrentRound(await engine.get(m.id)).map).not.toBeNull();
     expect(survivalCurrentRound(await engine.get(m.id)).preparationStartedAt).toBeNull();
-    now+=5999;await expect(send(m,"PRESENTATION_COMPLETE")).rejects.toThrow("not complete");
+    now+=5999-SURVIVAL_VOTE_OPENS_MS;await expect(send(m,"PRESENTATION_COMPLETE")).rejects.toThrow("not complete");
     now+=1;await send(m,"PRESENTATION_COMPLETE");m=await prepare(await engine.get(m.id));
     await record(m,100);now=survivalCurrentRound(m).endsAt!;await debug.tickOnce();m=await engine.get(m.id);
     expect(m.state).toBe("ROUND_RESULT");expect(m.presentationGate).toBe("ROUND_RESULT");
@@ -545,7 +550,7 @@ describe("debug discovery recovery and prompt settlement",()=>{
  });
  it("plays a four-player short semifinal and final through the real reducer and LP ledger",async()=>{
   const view=await debug.create(session,{...body(),botCount:3});let m=await engine.get(view.matchId);
-  now+=6000;await send(m,"PRESENTATION_COMPLETE");m=await engine.get(m.id);
+  now+=SURVIVAL_VOTE_OPENS_MS;await send(m,"DIFFICULTY_VOTE",{ballot:"NONE"});now+=6000-SURVIVAL_VOTE_OPENS_MS;await send(m,"PRESENTATION_COMPLETE");m=await engine.get(m.id);
   for(let i=0;i<2;i++){
    m=await prepare(m);expect(survivalCurrentRound(m).phase).toBe(i===0?"ROUND_3":"FINAL");
    await record(m,100);now=survivalCurrentRound(m).endsAt!;await debug.tickOnce();m=await engine.get(m.id);

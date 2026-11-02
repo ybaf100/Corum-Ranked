@@ -20,11 +20,12 @@ export class SurvivalAudioFailureDto implements SurvivalAudioFailure {
 }
 export class SurvivalDebugEventDto {
   @IsUUID() public eventId!:string;
-  @IsIn(["ASSETS_READY","PREPARATION_FAILED","ENTERED","ATTEMPT_START","PROGRESS","ATTEMPT_END","FORFEIT","PRESENTATION_COMPLETE"])
-  public type!:"ASSETS_READY"|"PREPARATION_FAILED"|"ENTERED"|"ATTEMPT_START"|"PROGRESS"|"ATTEMPT_END"|"FORFEIT"|"PRESENTATION_COMPLETE";
+  @IsIn(["ASSETS_READY","PREPARATION_FAILED","ENTERED","ATTEMPT_START","PROGRESS","ATTEMPT_END","FORFEIT","PRESENTATION_COMPLETE","DIFFICULTY_VOTE"])
+  public type!:"ASSETS_READY"|"PREPARATION_FAILED"|"ENTERED"|"ATTEMPT_START"|"PROGRESS"|"ATTEMPT_END"|"FORFEIT"|"PRESENTATION_COMPLETE"|"DIFFICULTY_VOTE";
   @IsString() @Length(1,80) public roundKey!:string;
   @IsInt() @Min(1) public mapGeneration!:number;
-  @ValidateIf((event:SurvivalDebugEventDto)=>!["FORFEIT","PRESENTATION_COMPLETE"].includes(event.type)) @IsInt() @Min(40000000) public levelId!:number;
+  @ValidateIf((event:SurvivalDebugEventDto)=>!["FORFEIT","PRESENTATION_COMPLETE","DIFFICULTY_VOTE"].includes(event.type)) @IsInt() @Min(40000000) public levelId!:number;
+  @ValidateIf((event:SurvivalDebugEventDto)=>event.type==="DIFFICULTY_VOTE") @IsIn(["EASY","NORMAL","HARD","NONE"]) public ballot?:"EASY"|"NORMAL"|"HARD"|"NONE";
   @ValidateIf((event:SurvivalDebugEventDto)=>["ASSETS_READY","ENTERED","ATTEMPT_START"].includes(event.type))
   @IsArray() @ValidateNested({each:true}) @Type(()=>InstalledModDto) public installedMods?:InstalledModDto[];
   @IsOptional() @IsUUID() public attemptId?:string;

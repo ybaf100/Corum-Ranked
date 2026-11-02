@@ -3,9 +3,10 @@ import {survivalRoundBadges} from "@corum-ranked/rules";
 import {reportSurvivalAudioFailure,type SurvivalAudioFailure} from "./survival-audio-recovery.js";
 import { DemandWorker, signalAfterCommit } from "../database/database-work.js";
 import { lockSurvivalAdmission,assertSurvivalAdmission } from "./survival-admission.js";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes, randomInt } from "node:crypto";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger,
   NotFoundException, type OnApplicationBootstrap, type OnApplicationShutdown } from "@nestjs/common";
+import { survivalOpenDifficultyVote, survivalSliceOrder, type SurvivalDifficultyChoice } from "@corum-ranked/rules";
 import { observeSurvivalAchievementCheckpoint, recoverSurvivalAchievementCheckpoint, createSurvivalMatch, reduceSurvivalMatch, survivalMapSelectionTarget, survivalCurrentRound, survivalNextPhase, survivalLiveView, survivalMilliPercent,
   type SurvivalVerifiedMap, type SurvivalCommand, type SurvivalEntrant, type SurvivalMatch } from "@corum-ranked/rules";
 import { ID_GENERATOR, SERVER_CLOCK, type IdGenerator, type ServerClock } from "../common/runtime.module.js";
@@ -92,7 +93,9 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
         return {...p,name:profile.gd_username,lp:humanLpSnapshot??Number(profile.lp),displayedTier:profile.displayed_tier,gdAccountId:profile.gd_account_id};
       });
       const match=createSurvivalMatch(this.ids.next(),entrants,captured.config,captured.generation,this.clock.now().getTime(),online,variableSize,forceDeathMatch);
-      if(presentationControlled){match.presentationControlled=true;match.presentationGate="INTRO";}
+      if(presentationControlled){match.presentationControlled=true;match.presentationGate="INTRO";
+        // Hidden match-wide difficulty preference; a forced Death Match has one fixed demon.
+        if(!forceDeathMatch)match.difficultyVote=survivalOpenDifficultyVote(match.createdAt,randomBytes(16).toString("hex"));}
       await tx.query(`INSERT INTO sur_matches(id,creation_key,request_hash,state,revision,config_generation,config_snapshot,
         average_lp,difficulty_group,current_round_key,snapshot,created_at,updated_at)
         VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11::jsonb,$12,$12)`,
@@ -170,7 +173,9 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
         (row.map_job_token && row.map_job_deadline_at && new Date(row.map_job_deadline_at).getTime()>now))return null;
       const token=this.ids.next();
       await tx.query("UPDATE sur_matches SET map_job_token=$2,map_job_deadline_at=$3 WHERE id=$1",[matchId,token,iso(now+180_000)]);
-      return {token,roundKey:target.roundKey,mapGeneration:target.mapGeneration,matchPlayerCount:row.snapshot.config.matchPlayerCount,request:{group:row.snapshot.difficultyGroup,
+      // Vote weights pick this map's slice (55/35/10 by rank); other slices are fallbacks.
+      const slices:(SurvivalDifficultyChoice|undefined)[]=row.snapshot.difficultyVote?.weights?survivalSliceOrder(row.snapshot.difficultyVote.weights,randomInt(1000)):[undefined];
+      return {token,slices,roundKey:target.roundKey,mapGeneration:target.mapGeneration,matchPlayerCount:row.snapshot.config.matchPlayerCount,request:{group:row.snapshot.difficultyGroup,
         phase:target.phase,minimumLevelId:row.snapshot.config.minimumLevelId,
         reservation:{matchId,roundKey:target.roundKey,mapGeneration:target.mapGeneration,token},
         excludedLevelIds:row.snapshot.rounds.flatMap(r=>r.selectedMaps.map(m=>m.levelId))}};
@@ -180,22 +185,32 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
       const window=30;
       for(let attempt=0;attempt<8;attempt++) {
         const recent=(await this.database.query<{level_id:string}>("SELECT level_id FROM sur_map_selection_history ORDER BY id DESC LIMIT $1",[window])).rows.map(r=>Number(r.level_id));
-        let map:SurvivalVerifiedMap;
-        try {
-          map=await this.maps.select({...job.request,excludedLevelIds:[...job.request.excludedLevelIds,...recent]});
-          if(recent.includes(map.levelId))throw new SurvivalMapError("DUPLICATE_CANDIDATES","Provider returned a recently selected map");
-        } catch(error) {await this.maps.release?.(job.request);throw error;}
+        let map:SurvivalVerifiedMap|null=null,used:typeof job.request=job.request,lastError:unknown=null;
+        for(const slice of job.slices){
+          const request=slice?{...job.request,slice}:job.request;
+          try {
+            map=await this.maps.select({...request,excludedLevelIds:[...request.excludedLevelIds,...recent]});
+            if(recent.includes(map.levelId))throw new SurvivalMapError("DUPLICATE_CANDIDATES","Provider returned a recently selected map");
+            used=request;break;
+          } catch(error) {
+            map=null;lastError=error;await this.maps.release?.(request);
+            // Upstream blocks apply to every slice; do not hammer the next ones.
+            if(error instanceof SurvivalMapError && (error.http?.status===403 || error.http?.status===429))break;
+          }
+        }
+        if(!map)throw lastError??new SurvivalMapError("NO_ELIGIBLE_MAP","No difficulty slice produced a map");
+        const chosen:SurvivalVerifiedMap=map;
         const accepted=await this.database.transaction(async tx=>{
           const row=await this.lock(tx,matchId),round=survivalCurrentRound(row.snapshot),target=survivalMapSelectionTarget(row.snapshot);
           if(row.map_job_token!==job.token || !target || target.roundKey!==job.roundKey || target.mapGeneration!==job.mapGeneration || target.phase!==job.request.phase)return true;
           // External downloads finished before this short global confirmation lock.
           await tx.query("SELECT pg_advisory_xact_lock(hashtext('survival-map-history-v1'))");
           const latest=(await tx.query<{level_id:string}>("SELECT level_id FROM sur_map_selection_history ORDER BY id DESC LIMIT $1",[window])).rows;
-          if(latest.some(r=>Number(r.level_id)===map.levelId))return false;
-          const match=reduceSurvivalMatch(row.snapshot,{type:target.prefetch?"NEXT_MAP_SELECTED":"MAP_SELECTED",roundKey:round.key,mapGeneration:round.mapGeneration,map},this.clock.now().getTime());
-          await this.maps.confirm?.(tx,job.request,map);
+          if(latest.some(r=>Number(r.level_id)===chosen.levelId))return false;
+          const match=reduceSurvivalMatch(row.snapshot,{type:target.prefetch?"NEXT_MAP_SELECTED":"MAP_SELECTED",roundKey:round.key,mapGeneration:round.mapGeneration,map:chosen},this.clock.now().getTime());
+          await this.maps.confirm?.(tx,used,chosen);
           await this.persist(tx,row.snapshot,match);
-          await tx.query("INSERT INTO sur_map_selection_history(match_id,round_key,map_generation,level_id,history_window,selected_at) VALUES($1,$2,$3,$4,$5,$6)",[matchId,job.roundKey,job.mapGeneration,map.levelId,window,this.clock.now().toISOString()]);
+          await tx.query("INSERT INTO sur_map_selection_history(match_id,round_key,map_generation,level_id,history_window,selected_at) VALUES($1,$2,$3,$4,$5,$6)",[matchId,job.roundKey,job.mapGeneration,chosen.levelId,window,this.clock.now().toISOString()]);
           await tx.query("UPDATE sur_matches SET map_job_token=NULL,map_job_deadline_at=NULL,map_retry_at=NULL,map_error=NULL,map_failure_count=0 WHERE id=$1",[matchId]);
           return true;
         });
@@ -203,7 +218,8 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
           // The bucket this match will most likely need after this round keeps a
           // deeper READY pool (bounded, refilled ahead of idle warming).
           try{const after=survivalNextPhase(job.request.phase,job.matchPlayerCount);
-            if(after!==job.request.phase)await this.maps.anticipate?.({group:job.request.group,phase:after,minimumLevelId:job.request.minimumLevelId});
+            if(after!==job.request.phase)for(const slice of job.slices)
+              await this.maps.anticipate?.({group:job.request.group,phase:after,minimumLevelId:job.request.minimumLevelId,...(slice?{slice}:{})});
           }catch(e){this.logger.warn(`Survival map anticipation ${matchId}: ${String(e)}`);}
           return;}
         await this.maps.release?.(job.request);

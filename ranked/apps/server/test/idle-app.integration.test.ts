@@ -58,7 +58,7 @@ it.each([16,64] as const)('measures actual full-app SQL in %i-player format with
   // Do not replace the real provider or disable its backoff/recovery worker.
   await app.get<SurvivalMapPool>(SURVIVAL_MAP_PROVIDER).waitForInitialFill();
   const recovered=(await db.query<{count:string}>("SELECT count(*)::text AS count FROM sur_map_candidate_buckets WHERE request->'lastFailure' IS NOT NULL")).rows[0]!;
-  expect(Number(recovered.count)).toBe(11);
+  expect(Number(recovered.count)).toBe(12); // one bucket per distinct easy/normal/hard slice range
   if(format===64){const config=app.get(SurvivalConfigService);await config.withAdmission(()=>db.transaction(tx=>config.operationMode(tx,64)));config.applyOperationMode(64);}
   expect(app.get(SurvivalConfigService).getSnapshot().config.matchPlayerCount).toBe(format);
   const startup=counter.metrics.queries;counter.reset();

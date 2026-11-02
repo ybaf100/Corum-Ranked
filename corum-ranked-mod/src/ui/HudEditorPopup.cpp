@@ -92,6 +92,26 @@ void drawBox(CCDrawNode* draw, CCRect const& box, ccColor4F fill, float border, 
     draw->drawPolygon(points, 4, fill, border, stroke);
 }
 
+// CCDrawNode blends premultiplied (ONE, ONE_MINUS_SRC_ALPHA), so a straight
+// {1,1,1,0.035} line drew almost fully white. The editor's colours are
+// straight alpha: draw them with the matching blend function.
+CCDrawNode* straightDraw() {
+    auto* draw = CCDrawNode::create();
+    draw->setBlendFunc({GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA});
+    return draw;
+}
+
+// Selection: four corner brackets instead of a filled box over the label.
+void drawCorners(CCDrawNode* draw, CCRect const& box, ccColor4F color) {
+    auto const arm = std::min(7.0f, std::max(3.0f, std::min(box.size.width, box.size.height) * 0.45f));
+    auto const x0 = box.getMinX() - 2.0f, x1 = box.getMaxX() + 2.0f, y0 = box.getMinY() - 2.0f, y1 = box.getMaxY() + 2.0f;
+    for (auto [x, y, sx, sy] : {std::tuple{x0, y0, 1.0f, 1.0f}, std::tuple{x1, y0, -1.0f, 1.0f},
+                                std::tuple{x0, y1, 1.0f, -1.0f}, std::tuple{x1, y1, -1.0f, -1.0f}}) {
+        draw->drawSegment({x, y}, {x + sx * arm, y}, 0.75f, color);
+        draw->drawSegment({x, y}, {x, y + sy * arm}, 0.75f, color);
+    }
+}
+
 CCNodeRGBA* fadingNode() {
     auto* node = CCNodeRGBA::create();
     node->setCascadeOpacityEnabled(true);
@@ -130,7 +150,7 @@ bool HudEditorPopup::init(HudMode mode) {
     m_buttonMenu->setZOrder(30);
     buildBackground();
     if (mode == HudMode::Solo) buildSoloPreview(); else buildSurvivalPreview();
-    m_outlines = CCDrawNode::create();
+    m_outlines = straightDraw();
     m_canvas->addChild(m_outlines, 40);
     m_tag = label("", 0.22f, {}, Text, FontWeight::ExtraBold);
     m_canvas->addChild(m_tag, 41);
@@ -143,6 +163,7 @@ bool HudEditorPopup::init(HudMode mode) {
 
 void HudEditorPopup::onExit() {
     m_drag = Drag::None;
+    setDragging(false);
     Popup::onExit();
 }
 
@@ -179,15 +200,20 @@ void HudEditorPopup::buildBackground() {
     auto* ground = CCLayerColor::create({10, 22, 54, 235});
     ground->setContentSize({w, 64.0f});
     m_canvas->addChild(ground, -8);
-    auto* grid = CCDrawNode::create();
-    for (float x = 16.0f; x < w; x += 16.0f) grid->drawSegment({x, 0}, {x, h}, 0.25f, {1, 1, 1, 0.035f});
-    for (float y = 16.0f; y < h; y += 16.0f) grid->drawSegment({0, y}, {w, y}, 0.25f, {1, 1, 1, 0.035f});
-    grid->drawSegment({w / 2.0f, 0}, {w / 2.0f, h}, 0.35f, {0.25f, 0.88f, 1, 0.18f});
-    grid->drawSegment({0, h / 2.0f}, {w, h / 2.0f}, 0.35f, {0.25f, 0.88f, 1, 0.18f});
-    grid->drawSegment({0, 64.0f}, {w, 64.0f}, 0.6f, {0.25f, 0.88f, 1, 0.35f});
-    // Native progress bar and pause button: shown for reference, not editable.
-    drawBox(grid, {w / 2.0f - 100.0f, h - 12.0f, 200.0f, 6.0f}, {1, 1, 1, 0.12f}, 0.5f, {1, 1, 1, 0.45f});
-    drawBox(grid, {w / 2.0f - 100.0f, h - 12.0f, 112.0f, 6.0f}, {0.35f, 0.93f, 0.59f, 0.55f}, 0.0f, {0, 0, 0, 0});
+    // Grid and centre guides appear only while an element is dragged.
+    m_gridLines = straightDraw();
+    for (float x = 16.0f; x < w; x += 16.0f) m_gridLines->drawSegment({x, 0}, {x, h}, 0.25f, {1, 1, 1, 0.06f});
+    for (float y = 16.0f; y < h; y += 16.0f) m_gridLines->drawSegment({0, y}, {w, y}, 0.25f, {1, 1, 1, 0.06f});
+    m_gridLines->drawSegment({w / 2.0f, 0}, {w / 2.0f, h}, 0.35f, {0.25f, 0.88f, 1, 0.35f});
+    m_gridLines->drawSegment({0, h / 2.0f}, {w, h / 2.0f}, 0.35f, {0.25f, 0.88f, 1, 0.35f});
+    m_gridLines->setVisible(false);
+    m_canvas->addChild(m_gridLines, -7);
+    auto* grid = straightDraw();
+    grid->drawSegment({0, 64.0f}, {w, 64.0f}, 0.5f, {0.25f, 0.88f, 1, 0.18f});
+    // Native progress bar and pause button: shown for reference, not editable,
+    // and kept dim so they never read as part of the editable HUD.
+    drawBox(grid, {w / 2.0f - 100.0f, h - 12.0f, 200.0f, 6.0f}, {1, 1, 1, 0.08f}, 0.5f, {1, 1, 1, 0.22f});
+    drawBox(grid, {w / 2.0f - 100.0f, h - 12.0f, 112.0f, 6.0f}, {0.35f, 0.93f, 0.59f, 0.32f}, 0.0f, {0, 0, 0, 0});
     m_canvas->addChild(grid, -7);
     if (auto* pause = CCSprite::createWithSpriteFrameName("GJ_pauseBtn_001.png")) {
         pause->setScale(0.6f);
@@ -211,11 +237,12 @@ void HudEditorPopup::buildSoloPreview() {
     add(group("own-name"), i18n::text("you", "YOU"), FontWeight::SemiBold, 0.51f, {0, 1}, {left, top - 4.0f}, Cyan).fit(96.0f, 0.51f, 0.21f);
     add(group("own-caption"), i18n::text("score", "SCORE"), FontWeight::SemiBold, 0.51f, {0, 1}, {left, top - 22.0f}, Text);
     add(group("own-score"), "182.0", FontWeight::Black, 0.714f, {0, 1}, {left + 82.0f, top - 20.0f}, Text).fit(76.0f, 0.714f, 0.26f);
-    add(group("own-attempt"), "Attempts : 2/3", FontWeight::SemiBold, 0.476f, {0, 1}, {left, top - 40.0f}, Gold);
+    // Death Match attempt counters exactly as GameplayUx draws them.
+    add(group("own-attempt"), std::string(i18n::literal("inline.attempts-left")) + "2", FontWeight::SemiBold, 0.34f, {0, 1}, {left, top - 53.0f}, Text);
     add(group("opponent-name"), i18n::text("opponent", "OPPONENT"), FontWeight::SemiBold, 0.51f, {1, 1}, {right, top - 4.0f}, Red).fit(96.0f, 0.51f, 0.21f);
     add(group("opponent-caption"), i18n::text("score", "SCORE"), FontWeight::SemiBold, 0.51f, {1, 1}, {right - 88.0f, top - 22.0f}, Text);
     add(group("opponent-score"), "140.0", FontWeight::Black, 0.714f, {1, 1}, {right, top - 20.0f}, Text).fit(76.0f, 0.714f, 0.26f);
-    add(group("opponent-attempt"), "Attempts : 1/3", FontWeight::SemiBold, 0.476f, {1, 1}, {right, top - 40.0f}, Gold);
+    add(group("opponent-attempt"), std::string(i18n::literal("inline.opp-attempts-left")) + "1", FontWeight::SemiBold, 0.34f, {1, 1}, {right, top - 53.0f}, Gold);
     for (int index = 0; index < 3; ++index) {
         for (auto [parent, x, done] : {std::tuple{static_cast<CCNode*>(group("own-checks")), left + 8.0f + 17.0f * index, index < 2},
                                        std::tuple{static_cast<CCNode*>(group("opponent-checks")), right - 42.0f + 17.0f * index, index < 1}}) {
@@ -229,7 +256,14 @@ void HudEditorPopup::buildSoloPreview() {
         }
     }
     add(group("round"), fmt::format("{} 2", i18n::text("round", "ROUND")), FontWeight::SemiBold, 0.527f, {0.5f, 1}, {w / 2.0f, top - 1.0f}, Gold);
-    add(group("timer"), "02:39", FontWeight::Black, CompetitiveClockScale, {0.5f, 1}, {w / 2.0f, top - 18.0f}, Text);
+    // The live score difference rides in the timer group next to the clock.
+    auto clock = add(group("timer"), "02:39", FontWeight::Black, CompetitiveClockScale, {0.5f, 1}, {w / 2.0f, top - 18.0f}, Text);
+    auto delta = add(group("timer"), "+42", FontWeight::ExtraBold, CompetitiveClockScale, {0.5f, 1}, {w / 2.0f + 34.0f, top - 18.0f}, Green);
+    auto const clockPair = competitiveClockPair(w / 2.0f,
+        clock.foreground->getContentSize().width * clock.foreground->getScale(),
+        delta.foreground->getContentSize().width * delta.foreground->getScale());
+    clock.position({clockPair.clockX, top - 18.0f});
+    delta.position({clockPair.deltaX, top - 18.0f});
     add(group("state"), "MATCH POINT", FontWeight::SemiBold, 0.442f, {0.5f, 1}, {w / 2.0f, top - 47.0f}, Gold);
 
     auto caption = add(group("qualifying-caption"), "Qualifying", FontWeight::SemiBold, 0.51f, {0, 0},
@@ -248,9 +282,11 @@ void HudEditorPopup::buildSoloPreview() {
     group("progress")->addChild(progress, 5);
 
     auto* feed = group("feed");
-    std::array<std::pair<std::string, ccColor3B>, 2> rows {{
+    // The death log at its maximum of three rows (oldest at the bottom).
+    std::array<std::pair<std::string, ccColor3B>, 3> rows {{
         {fmt::format("{} 38%", i18n::text("opponent", "OPPONENT")), Green},
         {fmt::format("{} 21%", i18n::text("you", "YOU")), Red},
+        {fmt::format("{} 64%", i18n::text("opponent", "OPPONENT")), Green},
     }};
     for (std::size_t index = 0; index < rows.size(); ++index) {
         auto* row = fadingNode();
@@ -300,7 +336,7 @@ void HudEditorPopup::buildSurvivalPreview() {
         score.position({rankWidth + 4.0f + nameWidth + 4.0f, -1.0f});
         standings->addChild(row, 5);
     }
-    auto* cutoff = CCDrawNode::create();
+    auto* cutoff = straightDraw();
     auto const y = top - static_cast<float>(cutoffAfter) * gap + gap * 0.15f;
     cutoff->drawSegment({8.0f, y}, {8.0f + textWidth + 3.0f, y}, 0.65f, {1, 0.32f, 0.41f, 0.95f});
     standings->addChild(cutoff, 6);
@@ -383,7 +419,8 @@ void HudEditorPopup::buildToolbar() {
             ? i18n::text("hud-editor-title-solo", "SOLO HUD SETUP")
             : i18n::text("hud-editor-title-survival", "SURVIVAL HUD SETUP"),
         {-44.0f, 72.0f}, 200.0f, Cyan, 0.30f);
-    m_presetLabel = toolbarCaption("", {110.0f, 72.0f}, 80.0f, Gold, 0.20f);
+    m_presetLabel = toolbarCaption("", {84.0f, 72.0f}, 56.0f, Gold, 0.20f);
+    toolbarButton(i18n::text("hud-collapse", "HIDE TOOLS"), {40, 16}, {132.0f, 72.0f}, menu_selector(HudEditorPopup::onCollapse), Blue);
     toolbarCaption(i18n::text("hud-editor-hint", "Drag to move · tap to select · fine move 1px · applies from the next match"),
         {0.0f, 58.0f}, 296.0f, TextMuted, 0.17f);
 
@@ -422,6 +459,18 @@ void HudEditorPopup::buildToolbar() {
     toolbarButton(i18n::text("cancel", "CANCEL"), {124, 24}, {-68.0f, -66.0f}, menu_selector(HudEditorPopup::onCancel), Blue);
     toolbarButton(i18n::text("hud-save", "SAVE"), {124, 24}, {68.0f, -66.0f}, menu_selector(HudEditorPopup::onSave), Green);
 
+    // Collapsed tools leave one small button in the bottom-right corner.
+    {
+        CCSize const size {64.0f, 22.0f};
+        auto* face = surface(size, {}, Cyan, SurfaceRaised, 250, true);
+        auto* title = menuLabel(i18n::text("hud-tools-open", "TOOLS"), 0.24f, {size.width / 2.0f, size.height / 2.0f}, Text, FontWeight::ExtraBold);
+        fitFullMenuLabel(title, size.width - 8.0f, size.height - 6.0f, 0.24f);
+        face->addChild(title, 5);
+        m_expandButton = CCMenuItemSpriteExtra::create(face, this, menu_selector(HudEditorPopup::onExpand));
+        m_expandButton->setPosition({m_size.width - 6.0f - size.width / 2.0f, 6.0f + size.height / 2.0f});
+        m_expandButton->setVisible(false);
+        m_buttonMenu->addChild(m_expandButton);
+    }
     auto const x = m_mode == HudMode::Solo ? m_size.width / 2.0f : m_size.width / 2.0f + 44.0f;
     placeToolbar({x, m_size.height / 2.0f - 6.0f});
     buildList();
@@ -636,11 +685,10 @@ void HudEditorPopup::refresh() {
             auto const bottom = std::max(box.getMinY(), selectedBox.getMinY()), top = std::min(box.getMaxY(), selectedBox.getMaxY());
             if (right - left > 2.0f && top - bottom > 2.0f) overlap = true;
         }
-        if (id == m_selected) continue;
-        drawBox(m_outlines, box, {0, 0, 0, 0}, 0.5f, t.visible ? ccColor4F{1, 1, 1, 0.28f} : ccColor4F{1, 0.36f, 0.43f, 0.45f});
     }
+    // No borders on unselected elements: the preview reads as the real HUD.
     auto const stroke = overlap ? ccColor4F{1, 0.36f, 0.43f, 1} : ccColor4F{0.25f, 0.88f, 1, 1};
-    drawBox(m_outlines, selectedBox, {stroke.r, stroke.g, stroke.b, 0.10f}, 0.9f, stroke);
+    drawCorners(m_outlines, selectedBox, stroke);
 
     auto const* spec = hudElement(m_mode, m_selected);
     auto const name = elementName(m_mode, m_selected);
@@ -671,10 +719,10 @@ void HudEditorPopup::refresh() {
     fitMenuLabelWidth(m_visibleCaption, 76.0f, 0.26f, 0.14f);
     m_gridCaption->setString((m_grid > 1.0f ? i18n::text("hud-grid-on", "GRID 8PX") : i18n::text("hud-grid-off", "GRID OFF")).c_str());
     fitMenuLabelWidth(m_gridCaption, 112.0f, 0.26f, 0.14f);
-    auto enable = [](CCMenuItemSpriteExtra* item, bool enabled) {
+    auto enable = [this](CCMenuItemSpriteExtra* item, bool enabled) {
         item->setEnabled(enabled);
         item->setCascadeOpacityEnabled(true);
-        item->setOpacity(enabled ? 255 : 90);
+        item->setOpacity(enabled ? (m_drag == Drag::Element ? 70 : 255) : 90);
     };
     enable(m_visibleButton, hideable);
     enable(m_smallerButton, movable && selected.scale > HudMinimumScale + 0.001f);
@@ -698,10 +746,11 @@ bool HudEditorPopup::beginTouch(CCPoint location) {
         if (entry.item->isVisible() && entry.item->boundingBox().containsPoint(menuPoint)) return false;
     for (auto* item : m_listItems)
         if (item->isVisible() && item->boundingBox().containsPoint(menuPoint)) return false;
+    if (m_expandButton && m_expandButton->isVisible() && m_expandButton->boundingBox().containsPoint(menuPoint)) return false;
     auto const point = m_canvas->convertToNodeSpace(location);
     // While the list is open the canvas is not editable; swallow other taps.
     if (m_listOpen) { m_drag = Drag::None; return true; }
-    if (m_toolbar && m_toolbar->boundingBox().containsPoint(point)) {
+    if (m_toolbar && m_toolbar->isVisible() && m_toolbar->boundingBox().containsPoint(point)) {
         m_drag = Drag::Toolbar;
         m_dragStart = point;
         m_dragOrigin = m_toolbar->getPosition();
@@ -729,6 +778,7 @@ bool HudEditorPopup::beginTouch(CCPoint location) {
         m_dragOrigin = CCPoint{t.position.x, t.position.y};
         m_dragBox = elementBox(hit);
         m_dragScale = t.scale;
+        setDragging(true);
     } else {
         m_drag = Drag::None;
     }
@@ -761,7 +811,29 @@ void HudEditorPopup::moveTouch(CCPoint location) {
 
 void HudEditorPopup::endTouch() {
     m_drag = Drag::None;
+    setDragging(false);
 }
+
+void HudEditorPopup::setDragging(bool dragging) {
+    if (m_gridLines) m_gridLines->setVisible(dragging);
+    auto const opacity = static_cast<GLubyte>(dragging ? 70 : 255);
+    if (m_toolbar) propagateHudOpacity(m_toolbar, opacity);
+    for (auto const& entry : m_toolbarItems) {
+        entry.item->setCascadeOpacityEnabled(true);
+        if (entry.item->isEnabled()) entry.item->setOpacity(opacity);
+    }
+}
+
+void HudEditorPopup::setToolsCollapsed(bool collapsed) {
+    m_toolsCollapsed = collapsed;
+    if (m_toolbar) m_toolbar->setVisible(!collapsed);
+    for (auto const& entry : m_toolbarItems) entry.item->setVisible(!collapsed);
+    if (m_expandButton) m_expandButton->setVisible(collapsed);
+    if (collapsed && m_listOpen) setListOpen(false);
+}
+
+void HudEditorPopup::onCollapse(CCObject*) { setToolsCollapsed(true); }
+void HudEditorPopup::onExpand(CCObject*) { setToolsCollapsed(false); }
 
 void HudEditorPopup::onPrevious(CCObject*) {
     auto const elements = hudElements(m_mode);

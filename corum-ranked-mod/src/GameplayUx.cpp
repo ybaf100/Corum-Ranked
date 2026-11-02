@@ -3,6 +3,7 @@
 #include "domain/CompetitiveHudLayout.hpp"
 #include "domain/ScoreDisplay.hpp"
 #include "ui/PlayerIcon.hpp"
+#include "ui/HudPlacementGroup.hpp"
 #include "ui/RankedTranslations.hpp"
 #include "ui/RankedVisuals.hpp"
 
@@ -282,9 +283,13 @@ class $modify(CorumRankedGameplayUx, PlayLayer) {
             m_fields->scoreDelta.foreground->setID("ranked-score-delta"_spr);
             setShadowVisible(m_fields->scoreDelta, false);
         }
+        // Death Match attempts follow the Solo HUD editor's own/opponent
+        // attempt placement (position, scale, visibility and opacity).
+        auto* ownAttemptGroup = getChildByIDRecursive(std::string("hud-group"_spr) + "-solo-own-attempt");
+        auto* opponentAttemptGroup = getChildByIDRecursive(std::string("hud-group"_spr) + "-solo-opponent-attempt");
         if (!m_fields->attemptsLeft.foreground) {
             m_fields->attemptsLeft = createShadowLabel(
-                this,
+                ownAttemptGroup ? ownAttemptGroup : this,
                 "",
                 0.34f,
                 {0.0f, 1.0f},
@@ -294,10 +299,11 @@ class $modify(CorumRankedGameplayUx, PlayLayer) {
             );
             m_fields->attemptsLeft.foreground->setID("ranked-deathmatch-attempts-left"_spr);
             setShadowVisible(m_fields->attemptsLeft, false);
+            corum::ranked::ui::refreshHudOpacity(ownAttemptGroup);
         }
         if (!m_fields->opponentAttemptsLeft.foreground) {
             m_fields->opponentAttemptsLeft = createShadowLabel(
-                this,
+                opponentAttemptGroup ? opponentAttemptGroup : this,
                 "",
                 0.34f,
                 {1.0f, 1.0f},
@@ -309,6 +315,7 @@ class $modify(CorumRankedGameplayUx, PlayLayer) {
                 "ranked-deathmatch-opponent-attempts-left"_spr
             );
             setShadowVisible(m_fields->opponentAttemptsLeft, false);
+            corum::ranked::ui::refreshHudOpacity(opponentAttemptGroup);
         }
     }
 
