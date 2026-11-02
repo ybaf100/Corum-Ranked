@@ -56,7 +56,8 @@ class ReleaseWorkflowTest(unittest.TestCase):
                 push = triggers.get('push') if isinstance(triggers, dict) else None
                 if isinstance(push, dict) and 'branches' in push:
                     self.assertEqual(push['branches'], ['main'])
-        for name in ('build-ranked-debug.yml', 'build-ranked-mod.yml', 'ranked-ci.yml', 'deploy-ranked-lightsail.yml'):
+        for name in ('build-ranked-debug.yml', 'build-ranked-mod.yml', 'ranked-ci.yml', 'deploy-ranked-lightsail.yml',
+                     'build-mod.yml', 'build-installer.yml'):
             self.assertNotIn('push', workflow(name)['on'])
 
     def test_failed_or_missing_debug_and_test_results_cannot_activate(self):

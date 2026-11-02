@@ -2,13 +2,8 @@ name: Build Windows Installer
 
 on:
   workflow_call:
+  # Not part of the Ranked pipeline: manual (or tag release) only.
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "installer/**"
-      - "corum-integration-mod/mod.json"
-      - ".github/workflows/build-installer.yml"
 
 permissions:
   contents: read
