@@ -441,7 +441,14 @@ struct SurvivalView {
     std::vector<int> promotionRanks;
 };
 
+// Solo queue radar: the current rating search radius and anonymous queued
+// players as (rating distance, stable angle in degrees).
+struct SoloQueueRadar {
+    int searchRange = 0, maximumRange = 0;
+    std::vector<std::pair<int, float>> contacts;
+};
 struct RuntimeView {
+    SoloQueueRadar queueRadar;
     int lobbyOffline=0,lobbyOnline=0;bool lobbyPopulationKnown=false;
     bool soloEnabled = false, survivalEnabled = false, survivalConfigReady = false;
     int survivalPlayerCount=16;

@@ -1427,6 +1427,12 @@ void RankedRuntime::pollQueue() {
                     m_recoveringMatch = false; fetchActivePlacement(); return;
                 }
                 auto const range = root["searchRange"].asInt().unwrapOr(0);
+                m_view.queueRadar.searchRange = static_cast<int>(range);
+                m_view.queueRadar.maximumRange = static_cast<int>(root["maximumRange"].asInt().unwrapOr(0));
+                m_view.queueRadar.contacts.clear();
+                for (auto const& contact : root["radar"].asArray().unwrapOr(std::vector<matjson::Value>{}))
+                    m_view.queueRadar.contacts.emplace_back(static_cast<int>(contact["distance"].asInt().unwrapOr(0)),
+                        static_cast<float>(contact["angle"].asDouble().unwrapOr(0.0)));
                 m_view.status = range > 0
                     ? fmt::format("Searching for an opponent (rating range +/-{})...", range)
                     : "Searching for an opponent...";

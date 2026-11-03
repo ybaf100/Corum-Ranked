@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { signalAfterCommit } from "../database/database-work.js";
 import {
   ConflictException,
@@ -354,6 +355,26 @@ export class QueueService {
     return { serverNow: now.toISOString() };
   }
 
+  /** Anonymous radar contacts for the queue panel: other live queued players
+   * within the maximum rating range, as a rating distance and a stable angle
+   * hashed from the entry (no ids, names or ratings are exposed). */
+  private async radar(entry: QueueRow, now: Date, maximumRange: number) {
+    const rows = await this.database.query<{ player_id: string; joined_at: Date | string; hidden_mmr_snapshot: number }>(
+      `SELECT player_id, joined_at, hidden_mmr_snapshot FROM ranked_queue_entries
+       WHERE status = 'QUEUED' AND player_id <> $1 AND last_heartbeat_at > $2
+         AND abs(hidden_mmr_snapshot - $3) <= $4
+       ORDER BY abs(hidden_mmr_snapshot - $3), player_id LIMIT 24`,
+      [entry.player_id, new Date(now.getTime() - 30_000).toISOString(), Number(entry.hidden_mmr_snapshot), maximumRange],
+    );
+    return rows.rows.map((row) => {
+      const seed = createHash("sha256").update(`${row.player_id}:${new Date(row.joined_at).toISOString()}`).digest();
+      return {
+        distance: Math.round(Math.abs(Number(row.hidden_mmr_snapshot) - Number(entry.hidden_mmr_snapshot))),
+        angle: Math.round((seed.readUInt32BE(0) / 0x1_0000_0000) * 3600) / 10,
+      };
+    });
+  }
+
   public async status(session: RankedSessionContext) {
     const now = this.clock.now();
     const queue = await this.database.query<QueueRow>(
@@ -375,10 +396,13 @@ export class QueueService {
       const searchRange = snapshot.operational.matchmaking
         ? ratingRangeAt(entry.joined_at, now, snapshot.operational.matchmaking)
         : null;
+      const policy = snapshot.operational.matchmaking;
       return {
         status: entry.status,
         joinedAt: new Date(entry.joined_at).toISOString(),
         searchRange,
+        maximumRange: policy ? policy.maximumRatingRange : null,
+        radar: entry.status === "QUEUED" && policy ? await this.radar(entry, now, policy.maximumRatingRange) : [],
         serverNow: now.toISOString(),
       };
     }

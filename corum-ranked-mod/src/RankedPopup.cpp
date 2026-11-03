@@ -498,6 +498,9 @@ class CorumRankedLayer final : public CCLayerColor {
     CCNode *m_queueRingCyan = nullptr, *m_queueRingGold = nullptr, *m_queueSweep = nullptr;
     CCLabelBMFont *m_queueCenter = nullptr, *m_queueOpponentMark = nullptr, *m_queueOpponentLabel = nullptr;
     CCNode* m_queueOpponentBox = nullptr;
+    // Solo radar: search circle + detected players, redrawn as the range widens.
+    CCDrawNode* m_queueRadar = nullptr;
+    CCLabelBMFont* m_queueRangeLabel = nullptr;
     CCMenuItemSpriteExtra *m_queueLeave = nullptr, *m_queueFill = nullptr;
     float m_statusTextWidth = 0;
     corum::ranked::ui::LobbyHover* m_lobbyHover = nullptr;
@@ -1247,6 +1250,7 @@ class CorumRankedLayer final : public CCLayerColor {
         m_lobbySurvival = m_lobbySolo = m_lobbyPanel = nullptr;
         m_queueContents = nullptr; m_queueMenu = nullptr; m_queuePlayers = m_queueWait = m_queueMinimum = m_queueHint = m_queueHeading = nullptr;
         m_queueRingCyan = m_queueRingGold = m_queueSweep = m_queueOpponentBox = nullptr; m_queueCenter = m_queueOpponentMark = m_queueOpponentLabel = nullptr;
+        m_queueRadar = nullptr; m_queueRangeLabel = nullptr;
         m_queueSlots.clear(); m_queueLeave = m_queueFill = nullptr; m_queueShown = m_queueAnimating = false;
         resetDynamicUiPointers();
         corum::ranked::ui::cancelMenuTouch(m_menu);
@@ -2869,6 +2873,7 @@ class CorumRankedLayer final : public CCLayerColor {
         if (m_queueContents) m_queueContents->removeFromParentAndCleanup(true);
         m_queueSlots.clear(); m_queuePlayers = m_queueWait = m_queueMinimum = m_queueHint = m_queueHeading = nullptr; m_queueLeave = m_queueFill = nullptr;
         m_queueRingCyan = m_queueRingGold = m_queueSweep = m_queueOpponentBox = nullptr; m_queueCenter = m_queueOpponentMark = m_queueOpponentLabel = nullptr;
+        m_queueRadar = nullptr; m_queueRangeLabel = nullptr;
         auto const cx = queueCenterX();
         // The queue occupies the widened area right of the divider (which sits
         // in the old gap), centred in it rather than on the hidden action card.
@@ -2942,6 +2947,11 @@ class CorumRankedLayer final : public CCLayerColor {
             m_queueOpponentMark = makeLabel("?",0.36f,{ring.x + side,ring.y + 4.0f},corum::ranked::ui::TextMuted,"black"); m_queueContents->addChild(m_queueOpponentMark,6);
             m_queueOpponentLabel = makeLabel(tr("opponent","OPPONENT"),0.20f,{ring.x + side,ring.y - 16.0f},corum::ranked::ui::TextMuted,"extrabold");
             corum::ranked::ui::fitMenuLabelWidth(m_queueOpponentLabel,52.0f,0.20f,0.12f); m_queueContents->addChild(m_queueOpponentLabel,5);
+            m_queueRadar = CCDrawNode::create();
+            m_queueRadar->setBlendFunc({GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA});
+            m_queueRadar->setPosition(ring); m_queueContents->addChild(m_queueRadar,4);
+            m_queueRangeLabel = makeLabel("",0.16f,{ring.x,ring.y + ringRadius + 2.0f},corum::ranked::ui::TextMuted,"semibold");
+            m_queueContents->addChild(m_queueRangeLabel,5);
             m_queueCenter = makeLabel(tr("searching","SEARCHING..."),0.24f,{ring.x,ring.y + 10.0f},kGold,"black");
             corum::ranked::ui::fitMenuLabelWidth(m_queueCenter,ringRadius * 1.6f,0.24f,0.14f); m_queueContents->addChild(m_queueCenter,5);
             m_queueWait = makeLabel("",0.40f,{ring.x,ring.y - 6.0f},corum::ranked::ui::Text,"black"); m_queueContents->addChild(m_queueWait,5);
@@ -2961,6 +2971,38 @@ class CorumRankedLayer final : public CCLayerColor {
         if (m_queueRingCyan) m_queueRingCyan->setVisible(settled && cyanRing && !found);
         if (m_queueRingGold) m_queueRingGold->setVisible(settled && found);
         if (m_queueSweep) m_queueSweep->setVisible(settled && !found);
+        if (m_queueRadar) m_queueRadar->setVisible(settled && !found);
+        if (m_queueRangeLabel) m_queueRangeLabel->setVisible(settled && !found);
+    }
+
+    // The search circle grows with the server's widening rating range (outer
+    // ring = maximum range); queued players inside it appear as red contacts
+    // at their rating distance and a stable, evenly spread angle.
+    void drawSoloRadar() {
+        if (!m_queueRadar) return;
+        auto const& radar = RankedRuntime::get().view().queueRadar;
+        constexpr float outer = 46.0f, sweepRadius = 44.0f;
+        auto const maximum = std::max(1, radar.maximumRange);
+        auto const range = std::clamp(radar.searchRange, 0, maximum);
+        auto const radius = radar.maximumRange > 0 ? std::max(outer * 0.18f, outer * static_cast<float>(range) / static_cast<float>(maximum)) : outer;
+        m_queueRadar->clear();
+        constexpr int segments = 60;
+        for (int i = 0; i < segments; ++i) {
+            auto const a = 6.28318530718f * static_cast<float>(i) / segments, b = 6.28318530718f * static_cast<float>(i + 1) / segments;
+            m_queueRadar->drawSegment({std::cos(a) * radius, std::sin(a) * radius}, {std::cos(b) * radius, std::sin(b) * radius}, 0.7f, {0.25f, 0.88f, 1.0f, 0.75f});
+        }
+        for (auto const& [distance, angle] : radar.contacts) {
+            if (distance > range) continue;
+            auto const r = outer * static_cast<float>(distance) / static_cast<float>(maximum);
+            auto const rad = angle * 0.01745329252f;
+            m_queueRadar->drawDot({std::cos(rad) * r, std::sin(rad) * r}, 1.6f, {1.0f, 0.32f, 0.41f, 1.0f});
+        }
+        if (m_queueSweep) m_queueSweep->setScale(radius / sweepRadius);
+        if (m_queueRangeLabel) {
+            auto const text = range > 0 ? fmt::format("+/-{}", range) : std::string();
+            if (text != m_queueRangeLabel->getString()) m_queueRangeLabel->setString(text.c_str());
+            m_queueRangeLabel->setPositionY(m_queueRadar->getPositionY() + radius + 4.0f);
+        }
     }
 
     void updateQueuePanel() {
@@ -3020,6 +3062,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 }
             }
             syncQueueRings(found, true);
+            drawSoloRadar();
             if (m_queueCenter) {
                 auto const center = found ? tr("match-found","MATCH FOUND") : tr("searching","SEARCHING...");
                 if (center != m_queueCenter->getString()) { m_queueCenter->setString(center.c_str()); corum::ranked::ui::fitMenuLabelWidth(m_queueCenter,64.0f,0.24f,0.14f); }
@@ -3058,6 +3101,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 // pointers survived into the next open's syncQueueRings().
                 self->m_queueRingCyan = self->m_queueRingGold = self->m_queueSweep = self->m_queueOpponentBox = nullptr;
                 self->m_queueCenter = self->m_queueOpponentMark = self->m_queueOpponentLabel = nullptr;
+                self->m_queueRadar = nullptr; self->m_queueRangeLabel = nullptr;
             }
             self->syncLobbyInput(); self->placeLobbyFooter(); self->refreshLobbyHover();
         };
