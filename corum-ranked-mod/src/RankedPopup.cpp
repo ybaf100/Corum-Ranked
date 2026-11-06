@@ -3039,7 +3039,7 @@ class CorumRankedLayer final : public CCLayerColor {
         {
             // Dark hub disc behind the centre text.
             CCPoint disc[40];
-            for (int i = 0; i < 40; ++i) { auto const a = 6.28318530718f * static_cast<float>(i) / 40.0f; disc[i] = {std::cos(a) * hub, std::sin(a) * hub}; }
+            for (int i = 0; i < 40; ++i) { auto const a = 6.28318530718f * static_cast<float>(i) / 40.0f; disc[i] = CCPoint{std::cos(a) * hub, std::sin(a) * hub}; }
             m_queueRadar->drawPolygon(disc, 40, {0.02f, 0.05f, 0.11f, 0.92f * k}, 0, {0, 0, 0, 0});
         }
         if (!m_queueSurvivalArena) {
