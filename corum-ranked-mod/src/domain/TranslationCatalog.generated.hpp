@@ -89,6 +89,7 @@ inline constexpr std::array kTranslations {
     CatalogTranslation{"achievement-hidden", "HIDDEN", "Hidden"},
     CatalogTranslation{"achievement-holders", "{} players ({}%)", "{}명이 달성 ({}%)"},
     CatalogTranslation{"achievement-maxed", "ACHIEVEMENT MAXED", "도전과제 최고 단계"},
+    CatalogTranslation{"achievement-stage-holders", "{} players at this stage (top {}%)", "이 단계에 {}명이 있습니다 (상위 {}%)"},
     CatalogTranslation{"achievement-subtitle", "PROGRESS · AP · TITLES", "진행도 · AP · 칭호"},
     CatalogTranslation{"achievement-trophy", "TROPHY", "도전과제"},
     CatalogTranslation{"achievement-unlocked", "ACHIEVEMENT UNLOCKED", "도전과제 달성"},

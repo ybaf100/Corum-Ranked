@@ -150,6 +150,9 @@ struct AchievementCardView {
     // Players holding this achievement (any level) and their share.
     int holders = 0;
     double holderPercent = 0.0;
+    // Growth achievements: players at the own highest stage and the share at or above it.
+    std::optional<int> stageHolders;
+    double stageTopPercent = 0.0;
     std::vector<AchievementLevelView> levels;
     std::vector<AchievementRewardView> unlocks;
 };

@@ -3070,5 +3070,9 @@
   "debug-logs-no-crash": {
     "en": "No crash logs",
     "ko": "크래시 로그 없음"
+  },
+  "achievement-stage-holders": {
+    "en": "{} players at this stage (top {}%)",
+    "ko": "이 단계에 {}명이 있습니다 (상위 {}%)"
   }
 }

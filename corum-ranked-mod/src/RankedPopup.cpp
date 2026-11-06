@@ -5410,16 +5410,19 @@ class CorumRankedLayer final : public CCLayerColor {
             );
             corum::ranked::ui::fitMenuLabelWidth(progressLabel, (cardWidth - 92.0f) * 0.62f, 0.30f*cardScale, 0.18f*cardScale);
             m_root->addChild(progressLabel, 4);
-            // Faint "n players (n%)" holder count, right of the progress text.
+            // Faint holder count, right of the progress text: a growth
+            // achievement names the players at the own stage and its top share.
             auto* holdersLabel = makeLabel(
-                fmt::format(fmt::runtime(tr("achievement-holders", "{} players ({}%)")), card.holders, fmt::format("{:.1f}", card.holderPercent)),
+                card.stageHolders
+                    ? fmt::format(fmt::runtime(tr("achievement-stage-holders", "{} players at this stage (top {}%)")), *card.stageHolders, fmt::format("{:.1f}", card.stageTopPercent))
+                    : fmt::format(fmt::runtime(tr("achievement-holders", "{} players ({}%)")), card.holders, fmt::format("{:.1f}", card.holderPercent)),
                 0.21f*cardScale,
                 {center.x - cardWidth / 2.0f + 10.0f + (cardWidth - 92.0f), center.y - 18.0f*cardScale},
                 corum::ranked::ui::TextMuted,
                 "medium",
                 {1.0f, 0.5f}
             );
-            corum::ranked::ui::fitMenuLabelWidth(holdersLabel, (cardWidth - 92.0f) * 0.36f, 0.21f*cardScale, 0.14f*cardScale);
+            corum::ranked::ui::fitMenuLabelWidth(holdersLabel, (cardWidth - 92.0f) * 0.36f, 0.21f*cardScale, card.stageHolders ? 0.12f*cardScale : 0.14f*cardScale);
             holdersLabel->setOpacity(170);
             m_root->addChild(holdersLabel, 4);
             auto* barBack = CCLayerColor::create({40, 50, 68, 220});

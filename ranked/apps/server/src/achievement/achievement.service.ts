@@ -559,6 +559,17 @@ export class AchievementService {
     const holders = new Map((await transaction.query<{ achievement_id: string; holders: string }>(
       `SELECT achievement_id, count(DISTINCT player_id)::text AS holders FROM ranked_achievement_unlocks GROUP BY achievement_id`,
     )).rows.map((entry) => [entry.achievement_id, Number(entry.holders)]));
+    // Growth achievements: players per highest reached stage, for
+    // "n players at this stage (top n%)".
+    const stages = new Map<string, Map<number, number>>();
+    for (const entry of (await transaction.query<{ achievement_id: string; level: number; players: string }>(
+      `SELECT achievement_id, level, count(*)::text AS players FROM (
+         SELECT player_id, achievement_id, max(achievement_level) AS level FROM ranked_achievement_unlocks
+         GROUP BY player_id, achievement_id) highest GROUP BY achievement_id, level`,
+    )).rows) {
+      const byLevel = stages.get(entry.achievement_id) ?? new Map<number, number>();
+      byLevel.set(Number(entry.level), Number(entry.players)); stages.set(entry.achievement_id, byLevel);
+    }
     const population = Math.max(1, Number((await transaction.query<{ total: string }>(
       "SELECT count(*)::text AS total FROM ranked_players",
     )).rows[0]?.total ?? 1));
@@ -586,6 +597,16 @@ export class AchievementService {
           titleEnabled: definition.titleEnabled && !concealed,
           holders: holders.get(definition.id) ?? 0,
           holderPercent: Math.round(((holders.get(definition.id) ?? 0) / population) * 1000) / 10,
+          ...(() => {
+            // Own highest stage of a growth achievement: players at exactly
+            // that stage, and the share at that stage or above.
+            const own = definition.type === "ONE_SHOT" ? 0 : Math.max(0, ...ownUnlocks.map((unlock) => Number(unlock.achievement_level)));
+            if (own < 1) return {};
+            const byLevel = stages.get(definition.id) ?? new Map<number, number>();
+            const atOrAbove = [...byLevel.entries()].filter(([level]) => level >= own).reduce((sum, [, players]) => sum + players, 0);
+            return { stageLevel: own, stageHolders: byLevel.get(own) ?? 0,
+              stageTopPercent: Math.max(0.1, Math.round((atOrAbove / population) * 1000) / 10) };
+          })(),
           unlocks: ownUnlocks.map((unlock) => ({
             level: Number(unlock.achievement_level) === 0 ? null : Number(unlock.achievement_level),
             rewardAp: Number(unlock.reward_ap),

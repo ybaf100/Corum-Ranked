@@ -3088,6 +3088,10 @@ void RankedRuntime::parseAchievementState(matjson::Value const& root) {
             card.claimableAp = static_cast<int>(value["claimableAp"].asInt().unwrapOr(0));
             card.holders = static_cast<int>(value["holders"].asInt().unwrapOr(0));
             card.holderPercent = value["holderPercent"].asDouble().unwrapOr(0.0);
+            if (value["stageHolders"].isNumber()) {
+                card.stageHolders = static_cast<int>(value["stageHolders"].asInt().unwrapOr(0));
+                card.stageTopPercent = value["stageTopPercent"].asDouble().unwrapOr(0.0);
+            }
             auto const progress = value["progress"];
             if (progress.isObject()) {
                 card.currentLevel = static_cast<int>(progress["level"].asInt().unwrapOr(0));
