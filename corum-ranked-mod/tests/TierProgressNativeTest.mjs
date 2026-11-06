@@ -42,3 +42,12 @@ test('Survival promotion plays its tier motion first: promotion -> podium -> sco
  assert.match(layer,/!\(input->promoted && runtime\.promotionMotionShown\(\)\)/);
  assert.match(runtime,/resultFlowKey\(\)\+":promotion"/);
 });
+test('lobby animates any LP change since the last visit: digit roll, tier bar, emblem hand-over',()=>{
+ const popup=readFileSync(join(root,'src/RankedPopup.cpp'),'utf8'),motion=readFileSync(join(root,'src/ui/LobbyScoreTransition.cpp'),'utf8');
+ assert.match(popup,/readSeen\("card", survival\)/);assert.match(popup,/writeSeen\("bar", survival, nowTier, nowLp\)/);
+ assert.match(popup,/RollingNumber::create\(seen\.lp, view\.profileScore, "LP"/);
+ assert.match(popup,/LobbyTierTransition::create\(group, oldEmblem, emblem, oldTier, tier, bloom, up\)/);
+ assert.match(popup,/bar->animateFrom\(std::move\(from\), up\)/);
+ // Lobby nodes are driven per frame: no CCEase/CCFade actions on them.
+ assert.doesNotMatch(motion,/CCEase|CCFadeTo|runAction/);
+});

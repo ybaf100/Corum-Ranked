@@ -15,11 +15,17 @@ class TierProgressBar final : public cocos2d::CCNode {
     cocos2d::ccColor3B m_tone{255, 207, 74};
     cocos2d::CCDrawNode* m_draw = nullptr;
     cocos2d::CCLabelBMFont* m_caption = nullptr;
+    cocos2d::CCNode* m_labels = nullptr;
+    cocos2d::CCNodeRGBA* m_probe = nullptr;
+    TierProgressView m_from;
+    float m_anim = 0.0f;
+    bool m_animating = false, m_up = true, m_tierChange = false;
     bool init(TierProgressView view, float width, std::string const& promotionTarget);
     void redraw();
 public:
     static TierProgressBar* create(TierProgressView view, float width, std::string const& promotionTarget = {});
     void update(float dt) override;
+    void animateFrom(TierProgressView from, bool up);
 };
 
 } // namespace corum::ranked::ui

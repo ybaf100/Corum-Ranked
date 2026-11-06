@@ -45,6 +45,7 @@
 #include "ui/PlayerIcon.hpp"
 #include "ui/SeasonTimer.hpp"
 #include "ui/TierProgressBar.hpp"
+#include "ui/LobbyScoreTransition.hpp"
 #include "ui/RankedTranslations.hpp"
 #include "ui/RankedVisuals.hpp"
 #include "ui/RankedInput.hpp"
@@ -2354,6 +2355,23 @@ class CorumRankedLayer final : public CCLayerColor {
         // Keep the rank immediately above the full-size badge and below the
         // streak. Its higher z keeps decorative background halos behind text.
         rankLine->setPosition({leftCenter.x,leftCenter.y + 68.0f}); m_root->addChild(rankLine,8);
+        // After any LP change since the last visit: roll the LP digits, and on a
+        // tier change hand the emblem and tier name over smoothly.
+        auto const nowTier = upper(view.profileTier);
+        SeenScore seen;
+        if (view.profileScoreVisible && profile.placementGames >= profile.placementGamesRequired) {
+            seen = readSeen("card", survival);
+            writeSeen("card", survival, nowTier, view.profileScore);
+        }
+        auto const tierShift = seen.valid && !seen.tier.empty() && seen.tier != nowTier;
+        auto const lpShift = seen.valid && seen.lp != view.profileScore;
+        CCNode* oldEmblem = nullptr;CCNode* bloom = nullptr;
+        if (tierShift) {
+            bloom = corum::ranked::ui::createRankBadgeBackdrop(nowTier, {120.0f, 120.0f}, corum::ranked::ui::RankBadgeDisplay::Matched);
+            bloom->setPosition({leftCenter.x, leftCenter.y + 18.0f});m_root->addChild(bloom, 3);
+            oldEmblem = corum::ranked::ui::createAnimatedRankBadge(seen.tier, {74.0f, 74.0f}, corum::ranked::ui::RankBadgeDisplay::Large);
+            oldEmblem->setPosition({leftCenter.x, leftCenter.y + 18.0f});m_root->addChild(oldEmblem, 4);
+        }
         auto* emblem = corum::ranked::ui::createAnimatedRankBadge(
             view.profileTier,
             {74.0f, 74.0f},
@@ -2365,6 +2383,13 @@ class CorumRankedLayer final : public CCLayerColor {
         auto* tier = makeLabel(corum::ranked::rankTierDisplay(upper(view.profileTier)), 0.54f, {leftCenter.x, leftCenter.y - 25.0f}, tierColor(upper(view.profileTier)), "black");
         corum::ranked::ui::fitMenuLabelWidth(tier, 150.0f, 0.54f, 0.32f);
         m_root->addChild(tier, 4);
+        if (tierShift && oldEmblem) {
+            auto* oldTier = makeLabel(corum::ranked::rankTierDisplay(seen.tier), 0.54f, {leftCenter.x, leftCenter.y - 25.0f}, tierColor(seen.tier), "black");
+            corum::ranked::ui::fitMenuLabelWidth(oldTier, 150.0f, 0.54f, 0.32f);m_root->addChild(oldTier, 4);
+            auto const up = corum::ranked::rankTierOrder(nowTier) > corum::ranked::rankTierOrder(seen.tier);
+            if (auto* motion = corum::ranked::ui::LobbyTierTransition::create(group, oldEmblem, emblem, oldTier, tier, bloom, up))
+                m_root->addChild(motion);
+        }
         auto const placement = profile.placementGames < profile.placementGamesRequired;
         if (placement) {
             auto const completedStages = std::max(
@@ -2395,9 +2420,17 @@ class CorumRankedLayer final : public CCLayerColor {
                 rating->setID("ranked-profile-gold-lp"_spr);
                 rating->setPosition({leftCenter.x,leftCenter.y - 53.0f}); m_root->addChild(rating,4);
             } else {
+                if (lpShift) {
+                    // Changed LP: each changed digit spins into place.
+                    if (auto* rolling = corum::ranked::ui::RollingNumber::create(seen.lp, view.profileScore, "LP", 0.46f, ccc3(240, 244, 250))) {
+                        if (rolling->getContentSize().width > 150.0f) rolling->setScale(150.0f / rolling->getContentSize().width);
+                        rolling->setPosition({leftCenter.x, leftCenter.y - 53.0f});m_root->addChild(rolling, 4);
+                    }
+                } else {
                 auto* rating = makeLabel(fmt::format("{} LP", view.profileScore), 0.46f, {leftCenter.x, leftCenter.y - 53.0f}, ccc3(240, 244, 250), "black");
                 corum::ranked::ui::fitMenuLabelWidth(rating, 150.0f, 0.46f, 0.28f);
                 m_root->addChild(rating, 4);
+                }
             }
         }
         auto const hasTitle = view.achievements.equippedTitle.active;
@@ -2446,8 +2479,28 @@ class CorumRankedLayer final : public CCLayerColor {
         m_root = savedRoot; m_menu = savedMenu;
     }
 
+    // Last tier / LP the lobby showed per mode, so the next visit after any
+    // LP change animates from it (digit roll, tier bar, emblem on a tier change).
+    struct SeenScore { std::string tier; int lp = 0; bool valid = false; };
+    static std::string seenKey(char const* what, bool survival) {
+        auto* account = GJAccountManager::get();
+        return fmt::format("lobby-seen-{}:{}:{}", what, account ? account->m_accountID : 0, survival ? "survival" : "solo");
+    }
+    static SeenScore readSeen(char const* what, bool survival) {
+        auto const raw = Mod::get()->getSavedValue<std::string>(seenKey(what, survival));
+        auto const bar = raw.find('|');
+        if (bar == std::string::npos) return {};
+        auto const lp = numFromString<int>(raw.substr(bar + 1));
+        if (!lp) return {};
+        return {raw.substr(0, bar), lp.unwrap(), true};
+    }
+    static void writeSeen(char const* what, bool survival, std::string const& tier, int lp) {
+        Mod::get()->setSavedValue(seenKey(what, survival), fmt::format("{}|{}", tier, lp));
+    }
+
     // Tier bar under the start button (Solo and Survival).
-    corum::ranked::TierProgressView tierProgressFor(RuntimeView const& view, bool survival) const {
+    corum::ranked::TierProgressView tierProgressFor(RuntimeView const& view, bool survival,
+        std::optional<SeenScore> as = std::nullopt) const {
         corum::ranked::TierProgressInput input;
         if (survival) {
             auto const& sur = view.survival;
@@ -2467,15 +2520,28 @@ class CorumRankedLayer final : public CCLayerColor {
             input.rank = view.standing.rank;input.target = view.standing.target;
             input.ladderTier = corum::ranked::goldRankTier(input.tier);
         }
+        // The previous visit's tier/LP, for the bar's starting point.
+        if (as) {
+            input.tier = as->tier;input.score = as->lp;input.promotionActive = false;input.demotionWarning = false;
+            input.ladderTier = survival ? upper(input.bands.back().tier) == input.tier : corum::ranked::goldRankTier(input.tier);
+        }
         return corum::ranked::tierProgress(input);
     }
     void addTierProgress(RuntimeView const& view, bool survival, CCPoint at) {
         auto progress = tierProgressFor(view, survival);
         if (progress.kind == corum::ranked::TierProgressKind::Hidden) return;
         auto const target = survival ? view.survival.profile.promotion.targetTier : view.promotion.targetTier;
-        if (auto* bar = corum::ranked::ui::TierProgressBar::create(std::move(progress), 166.0f, upper(target))) {
+        auto const seen = readSeen("bar", survival);
+        auto const nowTier = progress.tier;auto const nowLp = progress.score;
+        if (auto* bar = corum::ranked::ui::TierProgressBar::create(progress, 166.0f, upper(target))) {
             bar->setPosition(at);m_root->addChild(bar, 6);
+            if (seen.valid && (seen.tier != nowTier || seen.lp != nowLp)) {
+                auto from = tierProgressFor(view, survival, seen);
+                auto const up = seen.tier == nowTier ? nowLp >= seen.lp : corum::ranked::rankTierOrder(nowTier) > corum::ranked::rankTierOrder(seen.tier);
+                if (from.kind != corum::ranked::TierProgressKind::Hidden) bar->animateFrom(std::move(from), up);
+            }
         }
+        writeSeen("bar", survival, nowTier, nowLp);
     }
 
     void renderModePanel(RuntimeView const& view, corum::ranked::RankedMode mode) {
