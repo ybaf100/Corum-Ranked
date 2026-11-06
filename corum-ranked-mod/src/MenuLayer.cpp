@@ -2,6 +2,7 @@
 #include "RankedRuntime.hpp"
 #include "SurvivalRuntime.hpp"
 #include "domain/SurvivalMenuClock.hpp"
+#include "debug/DebugLogUploader.hpp"
 #include <array>
 #include "ui/RankedVisuals.hpp"
 #include "ui/RankedTranslations.hpp"
@@ -173,6 +174,22 @@ class $modify(CorumRankedMenuLayer, MenuLayer) {
         survivalClock->addChild(clockText, 5);
         addChild(survivalClock, 21);
 
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+        // Debug builds: send this session's and the two previous Geode logs.
+        {
+            auto* face = corum::ranked::ui::surface({76.0f, 18.0f}, {38.0f, 9.0f},
+                corum::ranked::ui::Orange, corum::ranked::ui::Surface, 236, true);
+            auto* text = corum::ranked::ui::menuLabel(corum::ranked::i18n::text("debug-send-logs", "SEND RECENT LOGS"), 0.18f,
+                {38.0f, 9.0f}, corum::ranked::ui::Text, corum::ranked::ui::FontWeight::ExtraBold);
+            corum::ranked::ui::fitFullMenuLabel(text, 70.0f, 14.0f, 0.18f);
+            text->setID("corum-ranked-debug-logs-text"_spr);
+            face->addChild(text, 5);
+            auto* logs = CCMenuItemSpriteExtra::create(face, this, menu_selector(CorumRankedMenuLayer::onSendLogs));
+            logs->setID("corum-ranked-debug-logs"_spr);
+            logs->setPosition({0.0f, -46.0f});
+            menu->addChild(logs);
+        }
+#endif
         schedule(schedule_selector(CorumRankedMenuLayer::rankedTick), 0.25f);
         if (corum::ranked::RankedRuntime::get().view().stage == corum::ranked::RuntimeStage::Matched) {
             scheduleOnce(schedule_selector(CorumRankedMenuLayer::reopenRanked), 0.35f);
@@ -187,6 +204,9 @@ class $modify(CorumRankedMenuLayer, MenuLayer) {
 
     void rankedTick(float) {
         corum::ranked::RankedRuntime::get().tick();
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+        syncLogButton();
+#endif
 
         auto* root = getChildByID("survival-freeplay-menu-clock"_spr);
         if (!root) return;
@@ -210,6 +230,17 @@ class $modify(CorumRankedMenuLayer, MenuLayer) {
 
         placeSurvivalMenuClock(this,root,CCDirector::sharedDirector()->getWinSize());
     }
+
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+    void onSendLogs(CCObject*) { corum::ranked::DebugLogUploader::get().start(); }
+    void syncLogButton() {
+        auto* text = typeinfo_cast<CCLabelBMFont*>(getChildByIDRecursive("corum-ranked-debug-logs-text"_spr));
+        if (!text) return;
+        auto const& status = corum::ranked::DebugLogUploader::get().status();
+        auto const caption = status.empty() ? corum::ranked::i18n::text("debug-send-logs", "SEND RECENT LOGS") : status;
+        if (caption != text->getString()) { text->setString(caption.c_str());corum::ranked::ui::fitFullMenuLabel(text, 70.0f, 14.0f, 0.18f); }
+    }
+#endif
 
     void onRanked(CCObject*) {
         // During queue Free Play the queue lobby is still in the scene stack.

@@ -35,8 +35,8 @@ struct SurvivalVoteCard {
 };
 inline constexpr std::array<SurvivalVoteCard, 4> SurvivalVoteCards {{
     {"EASY", "survival-vote-easy", "EASY", "survival-vote-easy-desc", "Vote for an easier match overall.", "EASY", 1},
-    {"NORMAL", "survival-vote-normal", "NORMAL", "survival-vote-normal-desc", "Vote for a moderate match overall.", "HARD", 3},
-    {"HARD", "survival-vote-hard", "HARD", "survival-vote-hard-desc", "Vote for a harder match overall.", "DEMON", 6},
+    {"NORMAL", "survival-vote-normal", "NORMAL", "survival-vote-normal-desc", "Vote for a moderate match overall.", "NORMAL", 3},
+    {"HARD", "survival-vote-hard", "HARD", "survival-vote-hard-desc", "Vote for a harder match overall.", "HARD", 6},
     {"NONE", "survival-vote-none", "NO PREFERENCE", "survival-vote-none-desc",
         "No preference. A random hidden vote goes to one of the other three.", "N/A", 0},
 }};
@@ -52,6 +52,11 @@ inline float survivalVoteCardEntry(float elapsedSeconds, std::size_t index) {
     auto const t = std::clamp((elapsedSeconds - 0.09f * static_cast<float>(index)) / 0.42f, 0.0f, 1.0f);
     return 1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t);
 }
+
+// A pick waits this long before it is sent; tapping another card changes it.
+inline constexpr float SurvivalVoteConfirmSeconds = 1.0f;
+// The timer turns red for the last seconds of the window.
+inline constexpr int SurvivalVoteUrgentSeconds = 3;
 
 // Whole seconds left in the window, never negative.
 inline int survivalVoteSecondsLeft(std::optional<std::int64_t> closesInMs) {

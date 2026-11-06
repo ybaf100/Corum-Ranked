@@ -27,9 +27,13 @@ class SurvivalDifficultyVote final : public cocos2d::CCNode {
     SurvivalVoteStage m_stage = SurvivalVoteStage::Hidden;
     float m_entry = 0.0f, m_leave = 0.0f, m_pulse = 0.0f;
     int m_chosen = -1;
+    // Picked but not yet sent: a 1 s window to change the card.
+    int m_pending = -1;
+    float m_pendingFor = 0.0f;
     std::string m_statusText;
     bool init(cocos2d::CCSize size, std::function<void(std::string const&)> vote);
     void onCard(cocos2d::CCObject* sender);
+    void commitPending();
 public:
     static SurvivalDifficultyVote* create(cocos2d::CCSize size, std::function<void(std::string const&)> vote);
     void present(SurvivalVoteStage stage, std::string const& myBallot, std::optional<std::int64_t> closesInMs,

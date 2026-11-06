@@ -359,18 +359,25 @@ export class QueueService {
    * within the maximum rating range, as a rating distance and a stable angle
    * hashed from the entry (no ids, names or ratings are exposed). */
   private async radar(entry: QueueRow, now: Date, maximumRange: number) {
-    const rows = await this.database.query<{ player_id: string; joined_at: Date | string; hidden_mmr_snapshot: number }>(
-      `SELECT player_id, joined_at, hidden_mmr_snapshot FROM ranked_queue_entries
-       WHERE status = 'QUEUED' AND player_id <> $1 AND last_heartbeat_at > $2
-         AND abs(hidden_mmr_snapshot - $3) <= $4
-       ORDER BY abs(hidden_mmr_snapshot - $3), player_id LIMIT 24`,
-      [entry.player_id, new Date(now.getTime() - 30_000).toISOString(), Number(entry.hidden_mmr_snapshot), maximumRange],
+    // Live queued players, plus players matched in the last 5 s (shown as a
+    // yellow "taken" blink before they vanish from the radar).
+    const rows = await this.database.query<{ player_id: string; joined_at: Date | string; hidden_mmr_snapshot: number; matched: boolean }>(
+      `SELECT q.player_id, q.joined_at, q.hidden_mmr_snapshot, q.status = 'MATCHED' AS matched
+       FROM ranked_queue_entries q LEFT JOIN ranked_matches m ON m.id = q.matched_match_id
+       WHERE q.player_id <> $1 AND abs(q.hidden_mmr_snapshot - $3) <= $4
+         AND ((q.status = 'QUEUED' AND q.last_heartbeat_at > $2)
+           OR (q.status = 'MATCHED' AND m.created_at > $5))
+       ORDER BY abs(q.hidden_mmr_snapshot - $3), q.player_id LIMIT 24`,
+      [entry.player_id, new Date(now.getTime() - 30_000).toISOString(), Number(entry.hidden_mmr_snapshot), maximumRange,
+        new Date(now.getTime() - 5_000).toISOString()],
     );
     return rows.rows.map((row) => {
       const seed = createHash("sha256").update(`${row.player_id}:${new Date(row.joined_at).toISOString()}`).digest();
       return {
+        key: seed.subarray(4, 10).toString("hex"),
         distance: Math.round(Math.abs(Number(row.hidden_mmr_snapshot) - Number(entry.hidden_mmr_snapshot))),
         angle: Math.round((seed.readUInt32BE(0) / 0x1_0000_0000) * 3600) / 10,
+        matched: !!row.matched,
       };
     });
   }

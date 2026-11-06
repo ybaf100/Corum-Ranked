@@ -1431,8 +1431,10 @@ void RankedRuntime::pollQueue() {
                 m_view.queueRadar.maximumRange = static_cast<int>(root["maximumRange"].asInt().unwrapOr(0));
                 m_view.queueRadar.contacts.clear();
                 for (auto const& contact : root["radar"].asArray().unwrapOr(std::vector<matjson::Value>{}))
-                    m_view.queueRadar.contacts.emplace_back(static_cast<int>(contact["distance"].asInt().unwrapOr(0)),
-                        static_cast<float>(contact["angle"].asDouble().unwrapOr(0.0)));
+                    m_view.queueRadar.contacts.push_back({contact["key"].asString().unwrapOr(""),
+                        static_cast<int>(contact["distance"].asInt().unwrapOr(0)),
+                        static_cast<float>(contact["angle"].asDouble().unwrapOr(0.0)),
+                        contact["matched"].asBool().unwrapOr(false)});
                 m_view.status = range > 0
                     ? fmt::format("Searching for an opponent (rating range +/-{})...", range)
                     : "Searching for an opponent...";
@@ -3068,6 +3070,8 @@ void RankedRuntime::parseAchievementState(matjson::Value const& root) {
             card.rewardAp = static_cast<int>(value["rewardAp"].asInt().unwrapOr(0));
             card.claimableRewards = static_cast<int>(value["claimableRewards"].asInt().unwrapOr(0));
             card.claimableAp = static_cast<int>(value["claimableAp"].asInt().unwrapOr(0));
+            card.holders = static_cast<int>(value["holders"].asInt().unwrapOr(0));
+            card.holderPercent = value["holderPercent"].asDouble().unwrapOr(0.0);
             auto const progress = value["progress"];
             if (progress.isObject()) {
                 card.currentLevel = static_cast<int>(progress["level"].asInt().unwrapOr(0));

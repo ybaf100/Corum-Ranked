@@ -94,6 +94,8 @@ private:
     cocos2d::CCNode* m_canvas = nullptr;
     cocos2d::CCDrawNode* m_outlines = nullptr;
     cocos2d::CCDrawNode* m_gridLines = nullptr;
+    // "Hidden" tag over each hidden element (still shown dimmed in the editor).
+    std::map<std::string, cocos2d::CCLabelBMFont*, std::less<>> m_hiddenTags;
     CCMenuItemSpriteExtra* m_expandButton = nullptr;
     bool m_toolsCollapsed = false;
     cocos2d::CCLabelBMFont* m_tag = nullptr;

@@ -555,6 +555,13 @@ export class AchievementService {
     );
     const row = await this.lockProfile(transaction, playerId);
     const totalAp = await this.reconcileTotalAp(transaction, playerId);
+    // How many players hold each achievement (any level), for "n명이 달성 (n%)".
+    const holders = new Map((await transaction.query<{ achievement_id: string; holders: string }>(
+      `SELECT achievement_id, count(DISTINCT player_id)::text AS holders FROM ranked_achievement_unlocks GROUP BY achievement_id`,
+    )).rows.map((entry) => [entry.achievement_id, Number(entry.holders)]));
+    const population = Math.max(1, Number((await transaction.query<{ total: string }>(
+      "SELECT count(*)::text AS total FROM ranked_players",
+    )).rows[0]?.total ?? 1));
     const unclaimedRewardCount = unlocks.rows.filter((unlock) => unlock.claimed_at === null).length;
     return {
       totalAp,
@@ -577,6 +584,8 @@ export class AchievementService {
           descriptionKo: concealed && definition.type==="ONE_SHOT" ? definition.hintKo ?? "Hidden" : definition.descriptionKo,
           descriptionEn: concealed && definition.type==="ONE_SHOT" ? definition.hintEn ?? "Hidden" : definition.descriptionEn,
           titleEnabled: definition.titleEnabled && !concealed,
+          holders: holders.get(definition.id) ?? 0,
+          holderPercent: Math.round(((holders.get(definition.id) ?? 0) / population) * 1000) / 10,
           unlocks: ownUnlocks.map((unlock) => ({
             level: Number(unlock.achievement_level) === 0 ? null : Number(unlock.achievement_level),
             rewardAp: Number(unlock.reward_ap),

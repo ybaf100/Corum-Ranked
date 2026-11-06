@@ -146,6 +146,9 @@ struct AchievementCardView {
     bool maxed = false;
     int claimableRewards = 0;
     int claimableAp = 0;
+    // Players holding this achievement (any level) and their share.
+    int holders = 0;
+    double holderPercent = 0.0;
     std::vector<AchievementLevelView> levels;
     std::vector<AchievementRewardView> unlocks;
 };
@@ -445,7 +448,8 @@ struct SurvivalView {
 // players as (rating distance, stable angle in degrees).
 struct SoloQueueRadar {
     int searchRange = 0, maximumRange = 0;
-    std::vector<std::pair<int, float>> contacts;
+    struct Contact { std::string key; int distance = 0; float angle = 0; bool matched = false; };
+    std::vector<Contact> contacts;
 };
 struct RuntimeView {
     SoloQueueRadar queueRadar;

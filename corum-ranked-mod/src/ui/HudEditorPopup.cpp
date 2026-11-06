@@ -695,6 +695,19 @@ void HudEditorPopup::refresh() {
             if (right - left > 2.0f && top - bottom > 2.0f) overlap = true;
         }
     }
+    for (auto const& spec : hudElements(m_mode)) {
+        auto const id = std::string(spec.id);
+        auto const hidden = !transform(id).visible;
+        auto found = m_hiddenTags.find(id);
+        if (hidden && found == m_hiddenTags.end()) {
+            auto* tag = label(i18n::text("hud-hidden-tag", "HIDDEN"), 0.2f, {}, Red, FontWeight::ExtraBold);
+            m_canvas->addChild(tag, 42);
+            found = m_hiddenTags.emplace(id, tag).first;
+        }
+        if (found == m_hiddenTags.end()) continue;
+        found->second->setVisible(hidden);
+        if (hidden) { auto const box = elementBox(id); found->second->setPosition({box.getMidX(), box.getMidY()}); }
+    }
     // No borders on unselected elements: the preview reads as the real HUD.
     auto const stroke = overlap ? ccColor4F{1, 0.36f, 0.43f, 1} : ccColor4F{0.25f, 0.88f, 1, 1};
     drawCorners(m_outlines, selectedBox, stroke);

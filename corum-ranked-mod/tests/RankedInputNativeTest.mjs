@@ -149,7 +149,7 @@ int main(){
         lobby.onExit();assert(d.handlers.empty());lobby.onEnter();d.ended(30+round);
         assert(!lobby.m_rankedChildScenePushed && !lobby.m_enteringLevel && menu.m_eState==kCCMenuStateWaiting);
     }
-    assert(lobby.refreshed==4 && lobby.scheduled==2 && lobby.keypad);
+    assert(lobby.refreshed==4 && lobby.scheduled==3 && lobby.keypad); // refresh, radar frame, audio
     RankedRuntime::get().data.match.state="MATCH_RESULT";
     lobby.clearUi();menu.item=&button;d.began(99);d.ended(99);assert(button.activations==4);
     // Covering a scene must not orphan a still-owned rank reveal layer.

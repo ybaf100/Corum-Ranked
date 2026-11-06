@@ -55,7 +55,8 @@ test('beta.152 crash: closing the queue forgets every arena node before the next
  const lobby=read('src/RankedPopup.cpp');
  const close=lobby.slice(lobby.indexOf('if (!self->m_queueShown && self->m_queueContents) {'));
  const block=close.slice(0,close.indexOf('}'));
- for(const name of ['m_queueRingCyan','m_queueRingGold','m_queueSweep','m_queueOpponentBox','m_queueCenter','m_queueOpponentMark','m_queueOpponentLabel','m_queueHeading'])
+ for(const name of ['m_queueOpponentBox','m_queueCenter','m_queueOpponentMark','m_queueOpponentLabel','m_queueHeading','m_queueRadar','m_queueRangeLabel'])
   assert.match(block,new RegExp('self->'+name+' = '),name);
- assert.match(lobby,/void syncQueueRings\(bool found, bool cyanRing\) \{\n        if \(!m_queueContents\) return;/);
+ // The per-frame arena draw never touches a radar without live queue contents.
+ assert.match(lobby,/if \(!m_queueRadar \|\| !m_queueContents\) return;/);
 });

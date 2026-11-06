@@ -3073,6 +3073,25 @@ CorumRankedPlayLayer* localSafetyLayer() {
 }
 } // namespace
 
+// Gameplay keys (1P/2P) mashed while a ranked level is leaving (round
+// result / elimination hand-off) or retained under the Survival board reached
+// the native PlayLayer and crashed. Ranked levels accept button input only
+// while they are the running scene and not exiting.
+class $modify(CorumRankedInputGuard, GJBaseGameLayer) {
+    void handleButton(bool down, int button, bool isPlayer1) {
+        auto* layer = PlayLayer::get();
+        if (layer && static_cast<GJBaseGameLayer*>(layer) == this) {
+            auto* managed = static_cast<CorumRankedPlayLayer*>(layer);
+            auto const ranked = managed->m_fields->survivalLiveLevel || managed->m_fields->survivalLevel ||
+                managed->m_fields->survivalFreePlayHud || managed->m_fields->rankedInitialized;
+            auto* director = CCDirector::sharedDirector();
+            if (ranked && (managed->m_fields->autoExitRequested || managed->m_fields->safetyRetired || !layer->isRunning() ||
+                layer->getParent() != director->getRunningScene() || director->getNextScene())) return;
+        }
+        GJBaseGameLayer::handleButton(down, button, isPlayer1);
+    }
+};
+
 // One final viewport owner. Ordinary gameplay delegates unchanged; only a
 // scoped missing-camera fallback borrows the dummy as a native camera target.
 class $modify(CorumRankedSpectatorCameraHook, GJBaseGameLayer) {

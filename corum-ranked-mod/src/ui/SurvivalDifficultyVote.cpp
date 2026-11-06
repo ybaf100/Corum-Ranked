@@ -62,7 +62,14 @@ void SurvivalDifficultyVote::onCard(CCObject* sender) {
     if (!item || m_stage != SurvivalVoteStage::Choosing || !m_vote) return;
     auto const index = item->getTag();
     if (index < 0 || index >= static_cast<int>(SurvivalVoteCards.size())) return;
-    m_chosen = index;m_vote(SurvivalVoteCards[static_cast<std::size_t>(index)].ballot);
+    // Not sent yet: the pick can still change for SurvivalVoteConfirmSeconds.
+    m_pending = index;m_pendingFor = 0.0f;
+}
+
+void SurvivalDifficultyVote::commitPending() {
+    if (m_pending < 0 || !m_vote) return;
+    m_chosen = m_pending;m_pending = -1;
+    m_vote(SurvivalVoteCards[static_cast<std::size_t>(m_chosen)].ballot);
 }
 
 float SurvivalDifficultyVote::boardShrink() const {
@@ -74,7 +81,7 @@ float SurvivalDifficultyVote::boardShrink() const {
 void SurvivalDifficultyVote::present(SurvivalVoteStage stage, std::string const& myBallot,
     std::optional<std::int64_t> closesInMs, int voted, int total, float dt) {
     if (stage != m_stage) {
-        if (stage == SurvivalVoteStage::Choosing) { m_entry = 0;m_leave = 0;m_chosen = -1; }
+        if (stage == SurvivalVoteStage::Choosing) { m_entry = 0;m_leave = 0;m_chosen = -1;m_pending = -1; }
         if (stage == SurvivalVoteStage::Chosen) { m_leave = 0;m_pulse = 0;if (m_entry <= 0) m_entry = 1; }
         m_stage = stage;
     }
@@ -83,28 +90,47 @@ void SurvivalDifficultyVote::present(SurvivalVoteStage stage, std::string const&
     auto const visible = showing() || (m_stage == SurvivalVoteStage::Closed && m_leave < .7f && m_entry > 0);
     setVisible(visible);
     if (!visible) return;
-    if (m_stage == SurvivalVoteStage::Choosing) m_entry += dt;
-    else { m_leave += dt;m_pulse += dt; }
+    if (m_stage == SurvivalVoteStage::Choosing) {
+        m_entry += dt;
+        if (m_pending >= 0) {
+            m_pendingFor += dt;
+            // Send at 1 s, or at once when the window is about to close.
+            if (m_pendingFor >= SurvivalVoteConfirmSeconds || (closesInMs && *closesInMs < 300)) commitPending();
+        }
+    }
+    else { m_leave += dt;m_pulse += dt;m_pending = -1; }
     auto const leave = std::clamp(m_leave / .30f, 0.0f, 1.0f);
     for (std::size_t i = 0; i < m_cards.size(); ++i) {
         auto& card = m_cards[i];
         auto const entry = survivalVoteCardEntry(m_entry, i);
         auto const chosen = static_cast<int>(i) == m_chosen;
-        auto fade = m_stage == SurvivalVoteStage::Choosing ? 1.0f : chosen ? 1.0f - std::clamp((m_leave - .55f) / .25f, 0.0f, 1.0f) : 1.0f - leave;
-        if (m_stage == SurvivalVoteStage::Closed) fade = std::min(fade, 1.0f - std::clamp(m_leave / .3f, 0.0f, 1.0f));
+        auto const pending = static_cast<int>(i) == m_pending;
+        // After the vote: the other cards vanish in place quickly; the chosen
+        // card pulses, then fades out while growing slightly (no falling cards).
+        auto fade = m_stage == SurvivalVoteStage::Choosing ? (m_pending >= 0 && !pending ? 0.55f : 1.0f)
+            : chosen ? 1.0f - std::clamp((m_leave - .45f) / .20f, 0.0f, 1.0f) : 1.0f - std::clamp(m_leave / .18f, 0.0f, 1.0f);
+        if (m_stage == SurvivalVoteStage::Closed) fade = std::min(fade, 1.0f - std::clamp(m_leave / .2f, 0.0f, 1.0f));
         auto const opacity = static_cast<GLubyte>(std::clamp(entry * fade, 0.0f, 1.0f) * 255);
         card.body->setOpacity(opacity);propagateModeOpacity(card.body, opacity);
-        card.item->setPosition({card.item->getPositionX(), card.baseY - (1.0f - entry) * 24.0f - (!chosen ? leave * 12.0f : 0.0f)});
-        auto const pulse = chosen && m_stage != SurvivalVoteStage::Choosing ? 1.0f + .06f * std::sin(std::min(m_pulse / .7f, 1.0f) * 3.14159265f) : 1.0f;
-        card.item->setScale(pulse);
+        card.item->setPosition({card.item->getPositionX(), card.baseY - (1.0f - entry) * 24.0f});
+        auto scale = 1.0f;
+        if (pending) scale = 1.05f;
+        else if (chosen && m_stage != SurvivalVoteStage::Choosing)
+            scale = 1.0f + .06f * std::sin(std::min(m_pulse / .45f, 1.0f) * 3.14159265f) + .06f * std::clamp((m_leave - .45f) / .20f, 0.0f, 1.0f);
+        card.item->setScale(scale);
         card.item->setEnabled(m_stage == SurvivalVoteStage::Choosing);
     }
     auto const titleOpacity = static_cast<GLubyte>(std::clamp(std::min(m_entry / .32f, 1.0f - leave), 0.0f, 1.0f) * 255);
     m_title->setOpacity(titleOpacity);m_status->setOpacity(titleOpacity);
     m_title->setPositionY(getContentSize().height * .56f - (1.0f - std::clamp(m_entry / .42f, 0.0f, 1.0f)) * 16.0f);
-    auto const status = fmt::format("{}  ·  {}",
-        fmt::format(fmt::runtime(i18n::text("survival-vote-time", "TIME LEFT {}s")), survivalVoteSecondsLeft(closesInMs)),
+    auto const secondsLeft = survivalVoteSecondsLeft(closesInMs);
+    auto status = fmt::format("{}  ·  {}",
+        fmt::format(fmt::runtime(i18n::text("survival-vote-time", "TIME LEFT {}s")), secondsLeft),
         fmt::format(fmt::runtime(i18n::text("survival-vote-count", "VOTED {}/{}")), std::max(0, voted), std::max(0, total)));
+    if (m_pending >= 0) status = fmt::format(fmt::runtime(i18n::text("survival-vote-confirming", "CONFIRMING IN {}s · TAP ANOTHER CARD TO CHANGE")),
+        std::max(1, static_cast<int>(std::ceil(SurvivalVoteConfirmSeconds - m_pendingFor))));
+    // Last seconds of the window: the timer line turns red.
+    m_status->setColor(m_stage == SurvivalVoteStage::Choosing && secondsLeft <= SurvivalVoteUrgentSeconds ? Red : TextMuted);
     if (status != m_statusText) { m_statusText = status;m_status->setString(status.c_str());fitMenuLabelWidth(m_status, getContentSize().width - 40, .26f, .18f); }
 }
 

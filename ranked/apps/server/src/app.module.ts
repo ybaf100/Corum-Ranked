@@ -1,3 +1,4 @@
+import { DebugLogsModule } from "./debug-logs/debug-logs.module.js";
 import { Module } from "@nestjs/common";
 import { SurvivalModule } from "./survival/survival.module.js";
 import { RankedConfigModule } from "./config/ranked-config.module.js";
@@ -29,6 +30,7 @@ import { HistoryModule } from "./history/history.module.js";
     QueueModule,
     MatchModule,
     DebugBotModule,
+    DebugLogsModule,
     DebugSpectateModule,
     LeaderboardModule,
     PlacementModule,

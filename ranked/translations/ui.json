@@ -2950,5 +2950,29 @@
   "hud-tools-open": {
     "en": "TOOLS",
     "ko": "도구 열기"
+  },
+  "achievement-holders": {
+    "en": "{} players ({}%)",
+    "ko": "{}명이 달성 ({}%)"
+  },
+  "debug-send-logs": {
+    "en": "SEND RECENT LOGS",
+    "ko": "최근 로그 보내기"
+  },
+  "debug-logs-sending": {
+    "en": "SENDING LOGS... {}/{}",
+    "ko": "로그 전송 중 {}/{}"
+  },
+  "debug-logs-done": {
+    "en": "LOGS SENT",
+    "ko": "로그 전송 완료"
+  },
+  "debug-logs-failed": {
+    "en": "LOG UPLOAD FAILED",
+    "ko": "로그 전송 실패"
+  },
+  "survival-vote-confirming": {
+    "en": "CONFIRMING IN {}s · TAP ANOTHER CARD TO CHANGE",
+    "ko": "{}초 후 확정 · 다른 난이도를 눌러 변경"
   }
 }
