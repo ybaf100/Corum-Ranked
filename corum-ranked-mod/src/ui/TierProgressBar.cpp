@@ -3,6 +3,8 @@
 #include "RankedVisuals.hpp"
 #include "RankedTranslations.hpp"
 #include "../domain/RankTierPresentation.hpp"
+#include "../domain/AchievementStyle.hpp"
+#include <chrono>
 #include <algorithm>
 #include <cmath>
 
@@ -18,11 +20,11 @@ void quad(CCDrawNode* node, float x0, float y0, float x1, float y1, ccColor4F co
     node->drawPolygon(points, 4, color, 0, {0, 0, 0, 0});
 }
 
-ccColor4F hue(float h, float alpha) {
-    h = h - std::floor(h);
-    auto const k = [&](float n) { auto const t = std::fmod(n + h * 6.0f, 6.0f); return 1.0f - std::max(0.0f, std::min({t, 4.0f - t, 1.0f})); };
-    // Bright, slightly softened rainbow (HSV s=0.65, v=1).
-    return {1.0f - 0.65f * (1.0f - k(5.0f)), 1.0f - 0.65f * (1.0f - k(3.0f)), 1.0f - 0.65f * (1.0f - k(1.0f)), alpha};
+// The Mythic (V) achievement rainbow: the same seven pastels, flowing along
+// the bar once every 3 s.
+ccColor4F mythicPastel(float position, double seconds, float alpha) {
+    auto const c = achievementPastelAt(position, seconds);
+    return {c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, alpha};
 }
 
 CCNode* rankChip(int rank) {
@@ -138,13 +140,13 @@ void TierProgressBar::redraw() {
     quad(m_draw, left, y0, right, y1, {10 / 255.0f, 19 / 255.0f, 36 / 255.0f, k});
     auto const fill = std::clamp(m_view.fill, 0.0f, 1.0f);
     if (leader) {
-        // #1: the whole bar in a slowly drifting rainbow.
-        constexpr int segments = 32;
+        // #1: the whole bar in the Mythic achievement's moving pastel rainbow.
+        auto const seconds = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        constexpr int segments = 42;
         for (int i = 0; i < segments; ++i) {
             auto const a = left + m_width * static_cast<float>(i) / segments, b = left + m_width * static_cast<float>(i + 1) / segments;
-            quad(m_draw, a, y0, b + 0.3f, y1, hue(static_cast<float>(i) / segments - m_time * 0.12f, k));
+            quad(m_draw, a, y0, b + 0.3f, y1, mythicPastel(static_cast<float>(i) / segments, seconds, k));
         }
-        quad(m_draw, left, y1 - 1.5f, right, y1, {1, 1, 1, 0.35f * k});
     } else if (fill > 0.0f) {
         auto const color = m_view.kind == TierProgressKind::Warning ? Red
             : m_view.kind == TierProgressKind::Promotion ? Gold : m_view.kind == TierProgressKind::Near ? Green : m_tone;
