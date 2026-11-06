@@ -2955,7 +2955,8 @@ class CorumRankedLayer final : public CCLayerColor {
             m_queueRangeLabel = makeLabel("",0.16f,{ring.x,ring.y + ringRadius + 2.0f},corum::ranked::ui::TextMuted,"semibold");
             m_queueContents->addChild(m_queueRangeLabel,5);
             m_queueCenter = makeLabel(tr("searching","SEARCHING..."),0.24f,{ring.x,ring.y + 10.0f},kGold,"black");
-            corum::ranked::ui::fitMenuLabelWidth(m_queueCenter,ringRadius * 1.6f,0.24f,0.14f); m_queueContents->addChild(m_queueCenter,5);
+            // Both centre lines fit inside the radar hub (radius 23).
+            corum::ranked::ui::fitMenuLabelWidth(m_queueCenter,36.0f,0.24f,0.12f); m_queueContents->addChild(m_queueCenter,5);
             m_queueWait = makeLabel("",0.40f,{ring.x,ring.y - 6.0f},corum::ranked::ui::Text,"black"); m_queueContents->addChild(m_queueWait,5);
             auto* hint = makeLabel(tr("find-match","FIND A 1V1 MATCH"),0.21f,{qx,-38.0f},corum::ranked::ui::TextMuted,"semibold");
             corum::ranked::ui::fitMenuLabelWidth(hint,half * 2.0f - 16.0f,0.21f,0.15f); m_queueContents->addChild(hint,5);
@@ -3011,12 +3012,15 @@ class CorumRankedLayer final : public CCLayerColor {
         if (!m_queueContents->isVisible()) return;
         auto const k = static_cast<float>(m_queueContents->getOpacity()) / 255.0f;
         auto const found = m_queueSurvivalArena ? corum::ranked::SurvivalRuntime::get().matchFoundHold() : m_soloFoundHoldUntil.has_value();
-        constexpr float outer = 46.0f, inner = 24.8f;
+        // The centre hub holds the SEARCHING caption and the wait clock; the
+        // search ring, sweep and contacts stay in the band outside it, so the
+        // growing ring never crosses the text.
+        constexpr float outer = 46.0f, inner = 24.8f, hub = 23.0f;
         auto const& radar = RankedRuntime::get().view().queueRadar;
         auto const maximum = std::max(1, radar.maximumRange);
         auto const range = std::clamp(radar.searchRange, 0, maximum);
         auto const search = m_queueSurvivalArena || radar.maximumRange <= 0 ? 44.0f
-            : std::max(outer * 0.18f, outer * static_cast<float>(range) / static_cast<float>(maximum));
+            : inner + 1.5f + (outer - inner - 1.5f) * static_cast<float>(range) / static_cast<float>(maximum);
         if (found) drawQueueCircle(outer, {1.0f, 0.81f, 0.29f, 0.85f * k}, 0.8f);
         else if (!m_queueSurvivalArena) drawQueueCircle(outer, {0.25f, 0.88f, 1.0f, 0.30f * k}, 0.6f);
         if (!found) {
@@ -3027,15 +3031,24 @@ class CorumRankedLayer final : public CCLayerColor {
             for (int i = 0; i < steps; ++i) {
                 auto const a = m_queueSweepAngle - 0.8377580f * static_cast<float>(steps - i) / steps;
                 auto const b = m_queueSweepAngle - 0.8377580f * static_cast<float>(steps - i - 1) / steps;
-                CCPoint points[] {{0, 0}, {std::cos(a) * search, std::sin(a) * search}, {std::cos(b) * search, std::sin(b) * search}};
-                m_queueRadar->drawPolygon(points, 3, {0.25f, 0.88f, 1.0f, 0.20f * k * static_cast<float>(i + 1) / steps}, 0, {0, 0, 0, 0});
+                CCPoint points[] {{std::cos(a) * hub, std::sin(a) * hub}, {std::cos(a) * search, std::sin(a) * search},
+                    {std::cos(b) * search, std::sin(b) * search}, {std::cos(b) * hub, std::sin(b) * hub}};
+                m_queueRadar->drawPolygon(points, 4, {0.25f, 0.88f, 1.0f, 0.20f * k * static_cast<float>(i + 1) / steps}, 0, {0, 0, 0, 0});
             }
+        }
+        {
+            // Dark hub disc behind the centre text.
+            CCPoint disc[40];
+            for (int i = 0; i < 40; ++i) { auto const a = 6.28318530718f * static_cast<float>(i) / 40.0f; disc[i] = {std::cos(a) * hub, std::sin(a) * hub}; }
+            m_queueRadar->drawPolygon(disc, 40, {0.02f, 0.05f, 0.11f, 0.92f * k}, 0, {0, 0, 0, 0});
         }
         if (!m_queueSurvivalArena) {
             if (!found) drawQueueCircle(search, {0.25f, 0.88f, 1.0f, 0.75f * k}, 0.7f);
             updateRadarBlips(dt, range, maximum, outer);
             for (auto const& [key, blip] : m_radarBlips) {
-                CCPoint const at {std::cos(blip.angle) * blip.radius, std::sin(blip.angle) * blip.radius};
+                // Contacts keep their relative distance, mapped into the band.
+                auto const r = inner + 1.5f + (outer - inner - 1.5f) * std::clamp(blip.radius / outer, 0.0f, 1.0f);
+                CCPoint const at {std::cos(blip.angle) * r, std::sin(blip.angle) * r};
                 if (blip.matched) {
                     auto const t = blip.matchedFor / 0.8f;
                     auto const on = static_cast<int>(blip.matchedFor * 12.0f) % 2 == 0;
@@ -3116,12 +3129,12 @@ class CorumRankedLayer final : public CCLayerColor {
             }
             if (m_queueCenter) {
                 auto const center = found ? tr("match-found","MATCH FOUND") : tr("searching","SEARCHING...");
-                if (center != m_queueCenter->getString()) { m_queueCenter->setString(center.c_str()); corum::ranked::ui::fitMenuLabelWidth(m_queueCenter,64.0f,0.24f,0.14f); }
+                if (center != m_queueCenter->getString()) { m_queueCenter->setString(center.c_str()); corum::ranked::ui::fitMenuLabelWidth(m_queueCenter,36.0f,0.24f,0.12f); }
             }
             // Still anonymous on MATCH FOUND: only the slot turns gold.
             if (m_queueOpponentMark) m_queueOpponentMark->setColor(found ? kGold : corum::ranked::ui::TextMuted);
             if (m_queueOpponentLabel) m_queueOpponentLabel->setColor(found ? kGold : corum::ranked::ui::TextMuted);
-            if (m_queueWait) m_queueWait->setString(fmt::format("{:02}:{:02}",waiting / 60,waiting % 60).c_str());
+            if (m_queueWait) { m_queueWait->setString(fmt::format("{:02}:{:02}",waiting / 60,waiting % 60).c_str()); corum::ranked::ui::fitMenuLabelWidth(m_queueWait,40.0f,0.40f,0.26f); }
             if (m_queueLeave) m_queueLeave->setEnabled(!found && RankedRuntime::get().view().stage == RuntimeStage::Queued);
         }
     }

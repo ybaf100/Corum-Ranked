@@ -1,6 +1,8 @@
 #include "SeasonTimer.hpp"
 #include "RankedVisuals.hpp"
 #include "RankedTranslations.hpp"
+#include <cmath>
+#include <vector>
 
 using namespace geode::prelude;
 namespace corum::ranked::ui {
@@ -11,41 +13,88 @@ SeasonTimer* SeasonTimer::create(bool compact) {
     delete node; return nullptr;
 }
 
+namespace {
+constexpr float Tau = 6.28318530718f;
+
+ccColor4F rgba(ccColor3B color, float alpha) { return {color.r / 255.0f, color.g / 255.0f, color.b / 255.0f, alpha}; }
+
+// Polygons only: CCDrawNode dots/segments use a texcoord shader that leaves a
+// visible square behind them under straight-alpha blending.
+void disc(CCDrawNode* node, CCPoint center, float radius, ccColor4F color, int segments = 28) {
+    std::vector<CCPoint> points;
+    points.reserve(static_cast<std::size_t>(segments));
+    for (int i = 0; i < segments; ++i) {
+        auto const a = Tau * static_cast<float>(i) / static_cast<float>(segments);
+        points.push_back(center + CCPoint{std::cos(a) * radius, std::sin(a) * radius});
+    }
+    node->drawPolygon(points.data(), static_cast<unsigned>(points.size()), color, 0, {0, 0, 0, 0});
+}
+
+void ring(CCDrawNode* node, float inner, float outer, ccColor4F color, int segments = 36) {
+    for (int i = 0; i < segments; ++i) {
+        auto const a = Tau * static_cast<float>(i) / static_cast<float>(segments);
+        auto const b = Tau * static_cast<float>(i + 1) / static_cast<float>(segments);
+        CCPoint quad[] {{std::cos(a) * inner, std::sin(a) * inner}, {std::cos(a) * outer, std::sin(a) * outer},
+            {std::cos(b) * outer, std::sin(b) * outer}, {std::cos(b) * inner, std::sin(b) * inner}};
+        node->drawPolygon(quad, 4, color, 0, {0, 0, 0, 0});
+    }
+}
+
+// A radial bar from r0 to r1 at angle a (clock angle: 0 = 12 o'clock).
+void radial(CCDrawNode* node, float angle, float r0, float r1, float halfWidth, ccColor4F color) {
+    CCPoint const dir {std::sin(angle), std::cos(angle)}, side {dir.y, -dir.x};
+    CCPoint quad[] {dir * r0 - side * halfWidth, dir * r1 - side * halfWidth, dir * r1 + side * halfWidth, dir * r0 + side * halfWidth};
+    node->drawPolygon(quad, 4, color, 0, {0, 0, 0, 0});
+}
+}
+
 bool SeasonTimer::init(bool compact) {
     if (!CCNode::init()) return false;
     setID("ranked-season-timer"_spr);
-    m_clock = compact ? 9.0f : 11.0f;
+    // Small stopwatch-style dial: it marks the countdown, the text carries it.
+    m_clock = compact ? 6.0f : 7.0f;
     m_face = CCDrawNode::create();
     m_face->setBlendFunc({GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA});
     addChild(m_face, 1);
     m_hand = CCNode::create();
     auto* hand = CCDrawNode::create();
-    hand->drawSegment({0, -1.2f}, {0, m_clock * 0.72f}, m_clock * 0.09f, {0.95f, 0.97f, 1.0f, 1.0f});
+    hand->setBlendFunc({GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA});
+    // Tapered hand with a short tail, drawn pointing at 12.
+    auto const r = m_clock;
+    CCPoint blade[] {{-0.11f * r, -0.22f * r}, {0.11f * r, -0.22f * r}, {0.035f * r, 0.74f * r}, {-0.035f * r, 0.74f * r}};
+    hand->drawPolygon(blade, 4, {0.96f, 0.97f, 1.0f, 1.0f}, 0, {0, 0, 0, 0});
     m_hand->addChild(hand);
     addChild(m_hand, 2);
+    m_cap = CCDrawNode::create();
+    m_cap->setBlendFunc({GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA});
+    addChild(m_cap, 3);
     m_season = menuLabel("", compact ? 0.20f : 0.23f, {}, TextMuted, FontWeight::ExtraBold);
-    m_season->setAnchorPoint({0.0f, 0.5f});addChild(m_season, 3);
+    m_season->setAnchorPoint({0.0f, 0.5f});addChild(m_season, 4);
     m_remaining = menuLabel("", compact ? 0.24f : 0.28f, {}, Gold, FontWeight::Black);
-    m_remaining->setAnchorPoint({0.0f, 0.5f});addChild(m_remaining, 3);
+    m_remaining->setAnchorPoint({0.0f, 0.5f});addChild(m_remaining, 4);
     drawFace(Gold);
     return true;
 }
 
 void SeasonTimer::drawFace(ccColor3B tone) {
+    auto const r = m_clock;
     m_face->clear();
-    auto const color = ccColor4F{tone.r / 255.0f, tone.g / 255.0f, tone.b / 255.0f, 1.0f};
-    m_face->drawDot({}, m_clock, {10 / 255.0f, 19 / 255.0f, 36 / 255.0f, 1.0f});
-    constexpr int segments = 36;
-    for (int i = 0; i < segments; ++i) {
-        auto const a = 6.28318530718f * i / segments, b = 6.28318530718f * (i + 1) / segments;
-        m_face->drawSegment({std::cos(a) * m_clock, std::sin(a) * m_clock}, {std::cos(b) * m_clock, std::sin(b) * m_clock}, m_clock * 0.08f, color);
+    // Soft halo, dark dial, crisp rim.
+    ring(m_face, r, r + 1.1f, rgba(tone, 0.16f));
+    disc(m_face, {}, r, {10 / 255.0f, 19 / 255.0f, 36 / 255.0f, 0.96f});
+    ring(m_face, r - 0.9f, r, rgba(tone, 1.0f));
+    // Stopwatch crown and button.
+    radial(m_face, 0.0f, r + 0.4f, r + 1.9f, 0.55f, rgba(tone, 1.0f));
+    radial(m_face, 0.0f, r + 1.9f, r + 2.6f, 1.25f, rgba(tone, 1.0f));
+    radial(m_face, Tau / 8.0f, r + 0.3f, r + 1.4f, 0.5f, rgba(tone, 0.85f));
+    // Twelve ticks; quarters are longer.
+    for (int i = 0; i < 12; ++i) {
+        auto const major = i % 3 == 0;
+        radial(m_face, Tau * static_cast<float>(i) / 12.0f, r * (major ? 0.56f : 0.68f), r * 0.80f,
+            major ? 0.42f : 0.26f, rgba(tone, major ? 0.95f : 0.45f));
     }
-    for (int i = 0; i < 4; ++i) {
-        auto const a = 1.57079632679f * i;
-        m_face->drawSegment({std::cos(a) * m_clock * 0.62f, std::sin(a) * m_clock * 0.62f},
-            {std::cos(a) * m_clock * 0.82f, std::sin(a) * m_clock * 0.82f}, m_clock * 0.07f, {color.r, color.g, color.b, 0.8f});
-    }
-    m_face->drawDot({}, m_clock * 0.16f, color);
+    m_cap->clear();
+    disc(m_cap, {}, r * 0.17f, rgba(tone, 1.0f), 14);
 }
 
 bool SeasonTimer::present(SeasonView const& season, bool modeEnabled, std::int64_t serverNowMs) {
@@ -69,13 +118,13 @@ bool SeasonTimer::present(SeasonView const& season, bool modeEnabled, std::int64
     if (remaining != m_remainingText) { m_remainingText = remaining; m_remaining->setString(remaining.c_str()); }
     m_remaining->setColor(tone);
     // Lay out [clock] label remaining, centred on this node.
-    auto const gap = m_clock * 0.55f;
+    auto const dialGap = 5.0f, textGap = 5.0f, dial = m_clock + 1.1f;
     auto const seasonWidth = m_season->getScaledContentSize().width, remainingWidth = m_remaining->getScaledContentSize().width;
-    auto const total = m_clock * 2 + gap + seasonWidth + gap + remainingWidth;
+    auto const total = dial * 2 + dialGap + seasonWidth + textGap + remainingWidth;
     auto x = -total / 2.0f;
-    m_face->setPosition({x + m_clock, 0});m_hand->setPosition({x + m_clock, 0});
-    x += m_clock * 2 + gap;
-    m_season->setPosition({x, 0});x += seasonWidth + gap;
+    m_face->setPosition({x + dial, -0.6f});m_hand->setPosition({x + dial, -0.6f});m_cap->setPosition({x + dial, -0.6f});
+    x += dial * 2 + dialGap;
+    m_season->setPosition({x, 0});x += seasonWidth + textGap;
     m_remaining->setPosition({x, 0});
     m_hand->setRotation(seasonHandAngle(serverNowMs));
     return true;

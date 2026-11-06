@@ -366,6 +366,22 @@ void HudEditorPopup::buildSurvivalPreview() {
     }
 }
 
+// An unavailable button gets a dark veil over its whole face (CCLayerColor
+// chrome does not reliably follow cascaded opacity, so dimming alone left the
+// HIDE button looking unchanged on the timer).
+static void markUnavailable(CCMenuItemSpriteExtra* item, bool unavailable) {
+    if (!item) return;
+    constexpr int tag = 9301;
+    auto* veil = static_cast<CCLayerColor*>(item->getChildByTag(tag));
+    if (!veil && unavailable) {
+        veil = CCLayerColor::create({4, 8, 18, 190});
+        veil->setContentSize(item->getContentSize());
+        veil->setTag(tag);
+        item->addChild(veil, 100);
+    }
+    if (veil) veil->setVisible(unavailable);
+}
+
 CCMenuItemSpriteExtra* HudEditorPopup::toolbarButton(std::string const& text, CCSize size, CCPoint offset,
     SEL_MenuHandler selector, ccColor3B accent, CCLabelBMFont** caption, int tag) {
     auto* face = surface(size, {}, accent, SurfaceRaised, 250, true);
@@ -563,7 +579,12 @@ void HudEditorPopup::refreshList() {
         row.toggle->setCascadeOpacityEnabled(true);
         row.toggle->setOpacity(hideable ? 255 : 70);
         propagateHudOpacity(row.toggle, hideable ? 255 : 70);
-        if (!hideable) row.toggleCaption->setColor(TextMuted);
+        markUnavailable(row.toggle, !hideable);
+        if (!hideable) {
+            row.toggleCaption->setString(i18n::text("hud-always-shown", "LOCKED").c_str());
+            row.toggleCaption->setColor(TextMuted);
+            fitMenuLabelWidth(row.toggleCaption, 32.0f, 0.18f, 0.1f);
+        }
     }
 }
 
@@ -753,6 +774,11 @@ void HudEditorPopup::refresh() {
             if (auto* text = typeinfo_cast<CCLabelBMFont*>(child)) text->setColor(enabled ? Text : TextMuted);
     };
     enable(m_visibleButton, hideable);
+    markUnavailable(m_visibleButton, !hideable);
+    if (!hideable) {
+        m_visibleCaption->setString(i18n::text("hud-always-shown", "LOCKED").c_str());
+        fitMenuLabelWidth(m_visibleCaption, 76.0f, 0.26f, 0.14f);
+    }
     enable(m_smallerButton, movable && selected.scale > HudMinimumScale + 0.001f);
     enable(m_largerButton, movable && selected.scale < HudMaximumScale - 0.001f);
     enable(m_transparentButton, selected.opacity > HudMinimumOpacity + 0.001f);

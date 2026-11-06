@@ -3026,5 +3026,9 @@
   "admin-season-scope": {
     "en": "Choose Solo Ranked or Survival for its season.",
     "ko": "시즌은 솔랭 또는 서바이벌에서 설정하세요."
+  },
+  "hud-always-shown": {
+    "en": "LOCKED",
+    "ko": "고정"
   }
 }

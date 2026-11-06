@@ -382,6 +382,7 @@ inline constexpr std::array kTranslations {
     CatalogTranslation{"history-view-level", "VIEW LEVEL", "맵 보기"},
     CatalogTranslation{"history-your-record", "YOUR RECORD", "내 기록"},
     CatalogTranslation{"history-your-round-win", "YOU WIN THIS ROUND", "내 라운드 승리"},
+    CatalogTranslation{"hud-always-shown", "LOCKED", "고정"},
     CatalogTranslation{"hud-collapse", "HIDE TOOLS", "접기"},
     CatalogTranslation{"hud-editor-hint", "Drag to move · tap to select · fine move 1px · applies from the next match", "드래그로 이동 · 눌러서 선택 · 미세 이동 1px · 다음 경기부터 적용"},
     CatalogTranslation{"hud-editor-short", "SETUP", "설정"},

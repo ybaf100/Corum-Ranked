@@ -165,6 +165,7 @@ struct CCNode:CCObject{
  static CCNode* create(){return new CCNode;}bool init(){return true;}
  void addChild(CCNode* c,int order=0){c->parent=this;c->z=order;children.push_back(c);}
  std::vector<CCNode*>& getChildrenExt(){return children;}
+ CCNode* getChildByTag(int t){for(auto* c:children)if(c->getTag()==t)return c;return nullptr;}
  void setPosition(CCPoint p){position=p;}CCPoint getPosition()const{return position;}float getPositionX()const{return position.x;}
  void setAnchorPoint(CCPoint p){anchor=p;}CCPoint getAnchorPoint()const{return anchor;}
  void setContentSize(CCSize s){content=s;}virtual CCSize getContentSize()const{return content;}
@@ -284,7 +285,7 @@ int main(){
  any=false;includeBox(clock,editor->m_canvas,clock,box,any);assert(box.getMinX()>=0&&box.getMinY()>=0);
  assert(editor->m_working.at("timer").anchor==HudAnchor::BottomLeft);
  // The timer cannot be hidden, but can be made transparent (and back).
- auto* hide=button(editor,"HIDE");assert(hide&&!hide->isEnabled());
+ auto* hide=button(editor,"LOCKED");assert(hide&&!hide->isEnabled());assert(hide->getChildByTag(9301)&&hide->getChildByTag(9301)->isVisible());
  // Unavailable actions are greyed: the timer cannot be hidden.
  assert(hide->getOpacity()==70);editor->onToggleVisible(nullptr);
  assert(editor->m_working.at("timer").visible);
