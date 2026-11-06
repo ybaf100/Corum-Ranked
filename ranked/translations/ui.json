@@ -2956,8 +2956,8 @@
     "ko": "{}명이 달성 ({}%)"
   },
   "debug-send-logs": {
-    "en": "SEND RECENT LOGS",
-    "ko": "최근 로그 보내기"
+    "en": "SEND LOGS",
+    "ko": "로그 보내기"
   },
   "debug-logs-sending": {
     "en": "SENDING LOGS... {}/{}",
@@ -3030,5 +3030,45 @@
   "hud-always-shown": {
     "en": "LOCKED",
     "ko": "고정"
+  },
+  "debug-logs-title": {
+    "en": "SEND LOGS",
+    "ko": "로그 보내기"
+  },
+  "debug-logs-hint": {
+    "en": "Pick up to {} files to send to the developer",
+    "ko": "파일을 최대 {}개까지 선택해 개발자에게 보내세요"
+  },
+  "debug-logs-game": {
+    "en": "GAME LOGS",
+    "ko": "게임 로그"
+  },
+  "debug-logs-crash": {
+    "en": "CRASH LOGS",
+    "ko": "크래시 로그"
+  },
+  "debug-logs-current": {
+    "en": "NOW",
+    "ko": "현재"
+  },
+  "debug-logs-selected": {
+    "en": "{} / {} selected",
+    "ko": "{} / {}개 선택"
+  },
+  "debug-logs-send": {
+    "en": "SEND {}",
+    "ko": "{}개 보내기"
+  },
+  "debug-logs-busy": {
+    "en": "SENDING...",
+    "ko": "보내는 중..."
+  },
+  "debug-logs-none": {
+    "en": "No logs",
+    "ko": "로그 없음"
+  },
+  "debug-logs-no-crash": {
+    "en": "No crash logs",
+    "ko": "크래시 로그 없음"
   }
 }

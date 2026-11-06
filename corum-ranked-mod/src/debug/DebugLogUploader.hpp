@@ -7,8 +7,8 @@
 
 namespace corum::ranked {
 
-// Debug builds only: "Send recent logs" from the main menu sends the current
-// and the two previous Geode log files to the server in small text chunks.
+// Debug builds only: "Send logs" from the main menu sends the Geode logs and
+// crash logs the player picked to the server in small text chunks.
 struct DebugLogChunk {
     int fileIndex = 0;
     std::string fileName;
@@ -24,14 +24,38 @@ std::vector<DebugLogChunk> debugLogChunks(int fileIndex, std::string const& file
     std::size_t tailBytes = 1'000'000, std::size_t chunkBytes = 40'000);
 
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+} // namespace corum::ranked
+#include <cstdint>
+#include <filesystem>
+namespace corum::ranked {
+
+// One Geode log or crash log the player can pick in the Send Logs popup.
+struct DebugLogFile {
+    std::filesystem::path path;
+    std::string name;
+    bool crash = false;
+    bool current = false; // this game session's own log
+    std::uintmax_t bytes = 0;
+    std::filesystem::file_time_type modified{};
+};
+
+inline constexpr std::size_t DebugLogMaxFiles = 6;
+
+// Main-menu popup: pick game logs and crash logs to send.
+void showDebugLogPopup();
+
 class DebugLogUploader {
 public:
     static DebugLogUploader& get();
-    void start();
+    // Newest Geode logs and crash logs (up to 6 each), newest first.
+    static std::vector<DebugLogFile> listFiles();
+    void start(std::vector<DebugLogFile> const& files);
     bool busy() const { return m_busy; }
     // Empty when idle; otherwise the progress, done or failure caption.
     std::string const& status() const { return m_status; }
+    void clearStatus() { if (!m_busy) m_status.clear(); }
 private:
+    void fail(std::string const& reason);
     void sendNext();
     std::vector<DebugLogChunk> m_chunks;
     std::size_t m_next = 0;

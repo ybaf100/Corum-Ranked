@@ -46,6 +46,7 @@ std::vector<DebugLogChunk> debugLogChunks(int fileIndex, std::string const& file
 #include <Geode/binding/GJAccountManager.hpp>
 #include <Geode/utils/random.hpp>
 #include <Geode/utils/web.hpp>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -58,42 +59,62 @@ geode::async::TaskHolder<web::WebResponse> request;
 
 DebugLogUploader& DebugLogUploader::get() { static DebugLogUploader uploader; return uploader; }
 
-void DebugLogUploader::start() {
+std::vector<DebugLogFile> DebugLogUploader::listFiles() {
+    auto collect = [](std::filesystem::path const& directory, bool crash, std::size_t limit) {
+        std::vector<DebugLogFile> files;
+        std::error_code error;
+        for (auto const& entry : std::filesystem::directory_iterator(directory, error)) {
+            if (!entry.is_regular_file(error)) continue;
+            auto const extension = entry.path().extension().string();
+            if (extension != ".log" && extension != ".txt") continue;
+            DebugLogFile file;
+            file.path = entry.path();file.name = entry.path().filename().string();file.crash = crash;
+            file.bytes = entry.file_size(error);file.modified = entry.last_write_time(error);
+            files.push_back(std::move(file));
+        }
+        std::sort(files.begin(), files.end(), [](auto const& a, auto const& b) { return a.modified > b.modified; });
+        if (files.size() > limit) files.resize(limit);
+        return files;
+    };
+    auto logs = collect(dirs::getGeodeDir() / "logs", false, 6);
+    if (!logs.empty()) logs.front().current = true;
+    auto crashes = collect(dirs::getCrashlogsDir(), true, 6);
+    logs.insert(logs.end(), crashes.begin(), crashes.end());
+    return logs;
+}
+
+void DebugLogUploader::fail(std::string const& reason) {
+    log::warn("[DebugLogs] {}", reason);
+    m_busy = false;m_status = i18n::text("debug-logs-failed", "LOG UPLOAD FAILED");
+}
+
+void DebugLogUploader::start(std::vector<DebugLogFile> const& files) {
     if (m_busy) return;
     // From the main menu there is usually no Ranked session yet (for example
     // right after a crash); the upload then names the GD account instead.
     auto* account = GJAccountManager::get();
     m_accountId = account ? account->m_accountID : 0;
     m_username = account ? std::string(account->m_username) : std::string();
-    if (RankedRuntime::get().spectatorLiveSessionToken().empty() && (m_accountId <= 0 || m_username.empty())) {
-        log::warn("[DebugLogs] no Ranked session and no logged-in GD account");
-        m_status = i18n::text("debug-logs-failed", "LOG UPLOAD FAILED");return;
-    }
-    // Newest three Geode logs: this session and the two before it.
-    std::vector<std::filesystem::path> files;
-    std::error_code error;
-    auto const directory = dirs::getGeodeDir() / "logs";
-    for (auto const& entry : std::filesystem::directory_iterator(directory, error))
-        if (entry.is_regular_file(error) && entry.path().extension() == ".log") files.push_back(entry.path());
-    std::sort(files.begin(), files.end(), [](auto const& a, auto const& b) {
-        std::error_code ea, eb;
-        return std::filesystem::last_write_time(a, ea) > std::filesystem::last_write_time(b, eb);
-    });
-    if (files.size() > 3) files.resize(3);
+    if (RankedRuntime::get().spectatorLiveSessionToken().empty() && (m_accountId <= 0 || m_username.empty()))
+        return fail("no Ranked session and no logged-in GD account");
+    if (files.empty()) return fail("no files selected");
     m_chunks.clear();
-    for (std::size_t index = 0; index < files.size(); ++index) {
-        std::ifstream input(files[index], std::ios::binary);
+    auto const count = std::min(files.size(), DebugLogMaxFiles);
+    for (std::size_t index = 0; index < count; ++index) {
+        std::ifstream input(files[index].path, std::ios::binary);
         std::stringstream buffer;buffer << input.rdbuf();
-        auto chunks = debugLogChunks(static_cast<int>(index), files[index].filename().string(), buffer.str());
+        // Crash logs are marked in the name so the Discord files say what they are.
+        auto name = (files[index].crash ? std::string("crash_") : std::string()) + files[index].name;
+        std::string safe;
+        for (char c : name) safe.push_back(std::isalnum(static_cast<unsigned char>(c)) || std::string_view("._-+:() ").find(c) != std::string_view::npos ? c : '_');
+        if (safe.size() > 120) safe.resize(120);
+        auto chunks = debugLogChunks(static_cast<int>(index), safe, buffer.str());
         m_chunks.insert(m_chunks.end(), chunks.begin(), chunks.end());
     }
-    if (m_chunks.empty()) {
-        log::warn("[DebugLogs] no .log files in {}", directory.string());
-        m_status = i18n::text("debug-logs-failed", "LOG UPLOAD FAILED");return;
-    }
-    m_files = static_cast<int>(files.size());
+    if (m_chunks.empty()) return fail("selected files could not be read");
+    m_files = static_cast<int>(count);
     m_uploadId = utils::random::generateUUID();m_next = 0;m_busy = true;
-    log::info("[DebugLogs] upload={} files={} chunks={}", m_uploadId, files.size(), m_chunks.size());
+    log::info("[DebugLogs] upload={} files={} chunks={}", m_uploadId, count, m_chunks.size());
     sendNext();
 }
 
@@ -121,14 +142,12 @@ void DebugLogUploader::sendNext() {
             // The last chunk reports whether the rebuilt .log files reached Discord.
             auto const reply = response.json().unwrapOr(matjson::Value());
             if (m_next + 1 == m_chunks.size() && !reply["delivered"].asBool().unwrapOr(false)) {
-                log::warn("[DebugLogs] upload={} stored but not delivered to Discord", m_uploadId);
-                m_busy = false;m_status = i18n::text("debug-logs-failed", "LOG UPLOAD FAILED");return;
+                return fail(fmt::format("upload={} stored but not delivered to Discord", m_uploadId));
             }
             ++m_next;sendNext();return;
         }
-        log::warn("[DebugLogs] upload={} chunk={} status={} body={}", m_uploadId, m_next, response.code(),
-            response.string().unwrapOr("").substr(0, 200));
-        m_busy = false;m_status = i18n::text("debug-logs-failed", "LOG UPLOAD FAILED");
+        fail(fmt::format("upload={} chunk={} status={} body={}", m_uploadId, m_next, response.code(),
+            response.string().unwrapOr("").substr(0, 200)));
     });
 }
 

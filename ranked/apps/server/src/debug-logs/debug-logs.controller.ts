@@ -11,9 +11,9 @@ interface Uploader { playerId: string; clientVersion: string }
 
 const UPLOADS_PER_DAY = 12;
 
-/** "Send recent logs" from the Debug client's main menu: the current and the
- * two previous Geode log files arrive in chunks, are rebuilt into .log files
- * and posted to the debug-log Discord webhook. Delivered chunks are removed. */
+/** "Send logs" from the Debug client's main menu: the Geode logs and crash
+ * logs the player picked (up to six) arrive in chunks, are rebuilt into .log
+ * files and posted to the debug-log Discord webhook. Delivered chunks are removed. */
 @Controller("api/ranked/debug/logs")
 export class DebugLogsController {
   private readonly logger = new Logger(DebugLogsController.name);
@@ -92,13 +92,12 @@ export class DebugLogsController {
       file.text += chunk.content; files.set(chunk.file_index, file);
     }
     const form = new FormData();
-    const labels = ["current", "previous", "older"];
     form.append("payload_json", JSON.stringify({
       content: `Debug logs · ${player?.gd_username ?? "unknown"} · ${chunks[0]?.client_version ?? "unknown"} · ${this.clock.now().toISOString()}`,
       allowed_mentions: { parse: [] },
     }));
     [...files.entries()].sort(([a], [b]) => a - b).forEach(([index, file], position) => {
-      const name = `${labels[index] ?? `log${index}`}-${file.name.replace(/[^A-Za-z0-9._-]/g, "_")}`.replace(/(\.log)?$/, ".log");
+      const name = `${index + 1}-${file.name.replace(/[^A-Za-z0-9._-]/g, "_")}`.replace(/(\.log|\.txt)?$/, ".log");
       form.append(`files[${position}]`, new Blob([file.text], { type: "text/plain" }), name);
     });
     const response = await fetch(webhook, { method: "POST", body: form, signal: AbortSignal.timeout(30_000) });

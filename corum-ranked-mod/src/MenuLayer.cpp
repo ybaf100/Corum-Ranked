@@ -232,7 +232,7 @@ class $modify(CorumRankedMenuLayer, MenuLayer) {
     }
 
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
-    void onSendLogs(CCObject*) { corum::ranked::DebugLogUploader::get().start(); }
+    void onSendLogs(CCObject*) { corum::ranked::showDebugLogPopup(); }
     void syncLogButton() {
         auto* text = typeinfo_cast<CCLabelBMFont*>(getChildByIDRecursive("corum-ranked-debug-logs-text"_spr));
         if (!text) return;

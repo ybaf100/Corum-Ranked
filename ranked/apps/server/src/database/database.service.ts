@@ -61,6 +61,7 @@ const REQUIRED_MIGRATIONS = [
   "0038_debug_log_uploads.sql",
   "0039_debug_log_delivery.sql",
   "0040_ranked_seasons.sql",
+  "0041_debug_log_six_files.sql",
 ] as const;
 
 export interface RankedSchemaStatus {
