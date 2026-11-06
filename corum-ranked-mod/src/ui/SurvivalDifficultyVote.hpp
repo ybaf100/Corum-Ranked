@@ -6,6 +6,8 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace corum::ranked::ui {
 
@@ -17,6 +19,9 @@ class SurvivalDifficultyVote final : public cocos2d::CCNode {
         CCMenuItemSpriteExtra* item = nullptr;
         cocos2d::CCNodeRGBA* body = nullptr;
         cocos2d::CCNode* chrome = nullptr;
+        // Chrome layers with their own alpha: CCLayerColor does not follow the
+        // cascaded opacity, so they are faded explicitly.
+        std::vector<std::pair<cocos2d::CCLayerColor*, GLubyte>> layers;
         float baseY = 0.0f;
     };
     std::array<Card, 4> m_cards{};

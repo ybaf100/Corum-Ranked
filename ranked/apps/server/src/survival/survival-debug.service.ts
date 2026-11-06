@@ -1,12 +1,12 @@
 import { DemandWorker, databaseWork } from "../database/database-work.js";
 import type { AchievementUnlockNotice } from "../achievement/achievement.service.js";
-import {survivalResultRoster} from "./survival-result-roster.js";
+import {survivalResultRoster,survivalSeriesResult} from "./survival-result-roster.js";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException,
   type OnApplicationBootstrap, type OnApplicationShutdown } from "@nestjs/common";
 import { timingSafeEqual } from "node:crypto";
 import { forceSurvivalDebugRank,  survivalCurrentRound,
   survivalDebugLp, survivalLiveView, survivalSettlementInputs,  type RandomSource, type SurvivalCommand,
-  type SurvivalBotDriverState,type SurvivalMatch, type SurvivalRatingProfile } from "@corum-ranked/rules";
+  type SurvivalBotDriverState,type SurvivalMatch, type SurvivalRatingProfile,type SurvivalPromotionSeries } from "@corum-ranked/rules";
 import { driveSurvivalBots } from "./survival-bot-driver.js";
 import { lockSurvivalAdmission } from "./survival-admission.js";
 import { DATABASE, type DatabasePort, type SqlExecutor } from "../database/database.port.js";
@@ -28,6 +28,7 @@ export interface SurvivalDebugResult {
   matchId:string; debug:true; won:boolean; rank:number; tiedPlayers:number; requestedDelta:number; actualDelta:number;
   profileBefore:SurvivalRatingProfile; profileAfter:SurvivalRatingProfile;
   promoted:boolean; demoted:boolean; protected:boolean; warningRecoveryLp:number|null;
+  promotionStarted?:boolean; promotionSucceeded?:boolean; promotionFailed?:boolean; promotion?:SurvivalPromotionSeries|null; promotionMarksBefore?:number;
   bands:{tier:string;minimum:number}[]; standings:ReturnType<typeof survivalResultRoster>;finalStandings?:boolean;
   completedAt:string; completionKind:string;achievementUnlocks?:readonly AchievementUnlockNotice[];
 }
@@ -263,7 +264,7 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
     const result:SurvivalDebugResult={matchId:match.id,debug:true,won:(match.winnerIds??[match.winnerId]).includes("human"),rank:human.rank,tiedPlayers:human.tiedPlayers,requestedDelta:human.delta,
       actualDelta:rating.actualDelta,profileBefore:{lp:Number(ledger.lp_before),tier:ledger.tier_before,demotionWarning:ledger.warning_before},
       profileAfter:rating.profile,promoted:rating.promoted,demoted:rating.demoted,protected:rating.protected,
-      warningRecoveryLp:rating.warningRecoveryLp,bands,standings:survivalResultRoster(match,new Map([[row.human_player_id,{profileAfter:rating.profile,actualDelta:rating.actualDelta}]])),
+      warningRecoveryLp:rating.warningRecoveryLp,bands,...survivalSeriesResult(rating),standings:survivalResultRoster(match,new Map([[row.human_player_id,{profileAfter:rating.profile,actualDelta:rating.actualDelta}]])),
       completedAt:new Date(match.finishedAt??this.clock.now().getTime()).toISOString(),completionKind:match.completionKind??"NORMAL",finalStandings:terminal(match)};
     await this.db.transaction(async tx=>{
       // The ledger's unique key closes a crash between payment and this result

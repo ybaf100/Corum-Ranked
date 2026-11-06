@@ -31,7 +31,11 @@ bool SurvivalDifficultyVote::init(CCSize size, std::function<void(std::string co
     m_status = menuLabel("", .26f, {w / 2, h * .56f - 20}, TextMuted, FontWeight::SemiBold);addChild(m_status, 5);
     m_menu = CCMenu::create();m_menu->setPosition(CCPointZero);addChild(m_menu, 6);
     auto const gap = 10.0f;
-    auto const cardW = std::min(126.0f, (w - 40 - gap * 3) / 4), cardH = std::min(150.0f, h * .42f);
+    // Cards sit between the timer line and the bottom buttons (SURRENDER,
+    // debug Force), which span roughly y 8-36.
+    constexpr float bottom = 44.0f;
+    auto const cardW = std::min(126.0f, (w - 40 - gap * 3) / 4);
+    auto const cardH = std::clamp(h * .56f - 30.0f - bottom, 80.0f, 150.0f);
     for (std::size_t i = 0; i < SurvivalVoteCards.size(); ++i) {
         auto const& spec = SurvivalVoteCards[i];
         auto* body = CCNodeRGBA::create();body->setCascadeOpacityEnabled(true);body->setContentSize({cardW, cardH});
@@ -49,9 +53,12 @@ bool SurvivalDifficultyVote::init(CCSize size, std::function<void(std::string co
         auto* item = CCMenuItemSpriteExtra::create(body, this, menu_selector(SurvivalDifficultyVote::onCard));
         item->setTag(static_cast<int>(i));
         auto const x = w / 2 + (static_cast<float>(i) - 1.5f) * (cardW + gap);
-        auto const y = std::max(cardH / 2 + 6, h * .56f - 32 - cardH / 2);
+        auto const y = bottom + cardH / 2;
         item->setPosition({x, y});m_menu->addChild(item);
-        m_cards[i] = {item, body, chrome, y};
+        std::vector<std::pair<CCLayerColor*, GLubyte>> layers;
+        for (auto* child : CCArrayExt<CCNode*>(chrome->getChildren()))
+            if (auto* layer = typeinfo_cast<CCLayerColor*>(child)) layers.emplace_back(layer, layer->getOpacity());
+        m_cards[i] = {item, body, chrome, std::move(layers), y};
     }
     setVisible(false);
     return true;
@@ -112,6 +119,9 @@ void SurvivalDifficultyVote::present(SurvivalVoteStage stage, std::string const&
         if (m_stage == SurvivalVoteStage::Closed) fade = std::min(fade, 1.0f - std::clamp(m_leave / .2f, 0.0f, 1.0f));
         auto const opacity = static_cast<GLubyte>(std::clamp(entry * fade, 0.0f, 1.0f) * 255);
         card.body->setOpacity(opacity);propagateModeOpacity(card.body, opacity);
+        for (auto const& [layer, base] : card.layers) layer->setOpacity(static_cast<GLubyte>(base * opacity / 255));
+        // A faded card leaves nothing behind over the returning board.
+        card.item->setVisible(opacity > 3);
         card.item->setPosition({card.item->getPositionX(), card.baseY - (1.0f - entry) * 24.0f});
         auto scale = 1.0f;
         if (pending) scale = 1.05f;

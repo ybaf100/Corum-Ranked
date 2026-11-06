@@ -904,6 +904,20 @@ std::optional<ScoreAnimationInput> SurvivalRuntime::scoreAnimation() const {
     input.afterTier=result["profileAfter"]["tier"].asString().unwrapOr("");input.promoted=result["promoted"].asBool().unwrapOr(false);input.demoted=result["demoted"].asBool().unwrapOr(false);
     input.survivalRank=static_cast<int>(result["rank"].asInt().unwrapOr(16));
     input.won=input.after>input.before;input.demotionWarning=result["profileAfter"]["demotionWarning"].asBool().unwrapOr(false);
+    // Promotion series, shown like Solo: the series after this match (its mark
+    // included, also when it just ended) with the marks it had before.
+    if(auto const& series=result["promotion"];series.isObject()){
+        input.promotion.active=true;input.promotion.sourceTier=series["sourceTier"].asString().unwrapOr("");
+        input.promotion.targetTier=series["targetTier"].asString().unwrapOr("");
+        input.promotion.cutoff=static_cast<int>(series["cutoff"].asInt().unwrapOr(0));
+        input.promotion.gamesRequired=std::clamp(static_cast<int>(series["chances"].asInt().unwrapOr(1)),1,9);input.promotion.winsRequired=1;
+        for(auto const& mark:series["results"].asArray().unwrapOr(std::vector<matjson::Value>{}))input.promotion.results.push_back(mark.asString().unwrapOr("LOSS"));
+        input.promotionStarted=result["promotionStarted"].asBool().unwrapOr(false);
+        input.promotionFailed=result["promotionFailed"].asBool().unwrapOr(false);
+        input.promotionInProgress=!input.promotionStarted;
+        input.previousMarks=std::clamp(static_cast<int>(result["promotionMarksBefore"].asInt().unwrapOr(0)),0,static_cast<int>(input.promotion.results.size()));
+        input.promoted=input.promoted || result["promotionSucceeded"].asBool().unwrapOr(false);
+    }
     for(auto const& b:result["bands"].asArray().unwrapOr(std::vector<matjson::Value>{}))input.bands.push_back({b["tier"].asString().unwrapOr(""),static_cast<int>(b["minimum"].asInt().unwrapOr(0))});
     if(!validScoreBands(input.bands))return std::nullopt;return input;
 }

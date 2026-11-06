@@ -57,13 +57,9 @@ bool SeasonTimer::init(bool compact) {
     m_face->setBlendFunc({GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA});
     addChild(m_face, 1);
     m_hand = CCNode::create();
-    auto* hand = CCDrawNode::create();
-    hand->setBlendFunc({GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA});
-    // Tapered hand with a short tail, drawn pointing at 12.
-    auto const r = m_clock;
-    CCPoint blade[] {{-0.11f * r, -0.22f * r}, {0.11f * r, -0.22f * r}, {0.035f * r, 0.74f * r}, {-0.035f * r, 0.74f * r}};
-    hand->drawPolygon(blade, 4, {0.96f, 0.97f, 1.0f, 1.0f}, 0, {0, 0, 0, 0});
-    m_hand->addChild(hand);
+    m_handDraw = CCDrawNode::create();
+    m_handDraw->setBlendFunc({GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA});
+    m_hand->addChild(m_handDraw);
     addChild(m_hand, 2);
     m_cap = CCDrawNode::create();
     m_cap->setBlendFunc({GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA});
@@ -76,25 +72,34 @@ bool SeasonTimer::init(bool compact) {
     return true;
 }
 
+ccColor3B SeasonTimer::toneColor() const {
+    return m_tone == SeasonTone::Gold ? Gold : m_tone == SeasonTone::Red ? Red : TextMuted;
+}
+
+// Draw nodes have no opacity: every colour carries m_alpha, the opacity the
+// labels inherit from the lobby card while it fades.
 void SeasonTimer::drawFace(ccColor3B tone) {
-    auto const r = m_clock;
-    m_face->clear();
+    auto const r = m_clock, k = m_alpha;
+    m_face->clear();m_handDraw->clear();
+    // Tapered hand with a short tail, drawn pointing at 12.
+    CCPoint blade[] {{-0.11f * r, -0.22f * r}, {0.11f * r, -0.22f * r}, {0.035f * r, 0.74f * r}, {-0.035f * r, 0.74f * r}};
+    m_handDraw->drawPolygon(blade, 4, {0.96f, 0.97f, 1.0f, k}, 0, {0, 0, 0, 0});
     // Soft halo, dark dial, crisp rim.
-    ring(m_face, r, r + 1.1f, rgba(tone, 0.16f));
-    disc(m_face, {}, r, {10 / 255.0f, 19 / 255.0f, 36 / 255.0f, 0.96f});
-    ring(m_face, r - 0.9f, r, rgba(tone, 1.0f));
+    ring(m_face, r, r + 1.1f, rgba(tone, 0.16f * k));
+    disc(m_face, {}, r, {10 / 255.0f, 19 / 255.0f, 36 / 255.0f, 0.96f * k});
+    ring(m_face, r - 0.9f, r, rgba(tone, 1.0f * k));
     // Stopwatch crown and button.
-    radial(m_face, 0.0f, r + 0.4f, r + 1.9f, 0.55f, rgba(tone, 1.0f));
-    radial(m_face, 0.0f, r + 1.9f, r + 2.6f, 1.25f, rgba(tone, 1.0f));
-    radial(m_face, Tau / 8.0f, r + 0.3f, r + 1.4f, 0.5f, rgba(tone, 0.85f));
+    radial(m_face, 0.0f, r + 0.4f, r + 1.9f, 0.55f, rgba(tone, 1.0f * k));
+    radial(m_face, 0.0f, r + 1.9f, r + 2.6f, 1.25f, rgba(tone, 1.0f * k));
+    radial(m_face, Tau / 8.0f, r + 0.3f, r + 1.4f, 0.5f, rgba(tone, 0.85f * k));
     // Twelve ticks; quarters are longer.
     for (int i = 0; i < 12; ++i) {
         auto const major = i % 3 == 0;
         radial(m_face, Tau * static_cast<float>(i) / 12.0f, r * (major ? 0.56f : 0.68f), r * 0.80f,
-            major ? 0.42f : 0.26f, rgba(tone, major ? 0.95f : 0.45f));
+            major ? 0.42f : 0.26f, rgba(tone, (major ? 0.95f : 0.45f) * k));
     }
     m_cap->clear();
-    disc(m_cap, {}, r * 0.17f, rgba(tone, 1.0f), 14);
+    disc(m_cap, {}, r * 0.17f, rgba(tone, 1.0f * k), 14);
 }
 
 bool SeasonTimer::present(SeasonView const& season, bool modeEnabled, std::int64_t serverNowMs) {
@@ -112,8 +117,12 @@ bool SeasonTimer::present(SeasonView const& season, bool modeEnabled, std::int64
         case SeasonCountdownKind::StartsHours: remaining = fmt::format(fmt::runtime(i18n::text("season-starts-hours", "Starts in {}h {}m")), countdown.hours, countdown.minutes); break;
         default: break;
     }
-    auto const tone = countdown.tone == SeasonTone::Gold ? Gold : countdown.tone == SeasonTone::Red ? Red : TextMuted;
-    if (countdown.tone != m_tone) { m_tone = countdown.tone; drawFace(tone); }
+    // Follow the card's fade: the labels inherit the lobby card opacity.
+    auto const alpha = static_cast<float>(m_season->getDisplayedOpacity()) / 255.0f;
+    if (countdown.tone != m_tone || std::abs(alpha - m_alpha) > 0.01f) {
+        m_tone = countdown.tone;m_alpha = alpha;drawFace(toneColor());
+    }
+    auto const tone = toneColor();
     if (label != m_seasonText) { m_seasonText = label; m_season->setString(label.c_str()); }
     if (remaining != m_remainingText) { m_remainingText = remaining; m_remaining->setString(remaining.c_str()); }
     m_remaining->setColor(tone);

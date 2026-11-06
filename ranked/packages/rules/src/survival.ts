@@ -182,6 +182,11 @@ export interface SurvivalRatingUpdate {
   readonly promotionStarted?: boolean;
   readonly promotionSucceeded?: boolean;
   readonly promotionFailed?: boolean;
+  /** The series as it stands after this match (this match's mark included),
+   * also when it just ended; for the result screen. Absent outside a series. */
+  readonly series?: SurvivalPromotionSeries;
+  /** Marks the series already had before this match. */
+  readonly seriesMarksBefore?: number;
 }
 
 /**
@@ -205,15 +210,18 @@ export function updateSurvivalRating(before: SurvivalRatingProfile, delta: numbe
       const target = config.tierBands.find(band => band.tier === series.targetTier) ?? config.tierBands[Math.min(index + 1, config.tierBands.length - 1)]!;
       const lp = Math.max(series.cutoff, target.minimumLp) + SURVIVAL_PROMOTION_SCORE_BONUS;
       return { profile: { lp, tier: target.tier, demotionWarning: false, promotion: null }, actualDelta: lp - before.lp,
-        promoted: true, demoted: false, protected: false, warningRecoveryLp: null, promotionSucceeded: true };
+        promoted: true, demoted: false, protected: false, warningRecoveryLp: null, promotionSucceeded: true,
+        series: { ...series, results, ranks }, seriesMarksBefore: series.results.length };
     }
     if (results.length >= series.chances) {
       const lp = Math.max(floor, series.cutoff - SURVIVAL_PROMOTION_FAILURE_PENALTY);
       return { profile: { lp, tier: before.tier, demotionWarning: false, promotion: null }, actualDelta: lp - before.lp,
-        promoted: false, demoted: false, protected: false, warningRecoveryLp: null, promotionFailed: true };
+        promoted: false, demoted: false, protected: false, warningRecoveryLp: null, promotionFailed: true,
+        series: { ...series, results, ranks }, seriesMarksBefore: series.results.length };
     }
     return { profile: { lp: before.lp, tier: before.tier, demotionWarning: false, promotion: { ...series, results, ranks } }, actualDelta: 0,
-      promoted: false, demoted: false, protected: false, warningRecoveryLp: null };
+      promoted: false, demoted: false, protected: false, warningRecoveryLp: null,
+      series: { ...series, results, ranks }, seriesMarksBefore: series.results.length };
   }
   let lp = Math.max(0, before.lp + delta), tier = before.tier, warning = before.demotionWarning;
   let promoted = false, demoted = false, protectedLoss = false;
@@ -228,7 +236,8 @@ export function updateSurvivalRating(before: SurvivalRatingProfile, delta: numbe
     const promotion: SurvivalPromotionSeries = { sourceTier: before.tier, targetTier: next.tier, cutoff,
       chances: rule.chances, top16: rule.top16, top64: rule.top64, results: [], ranks: [] };
     return { profile: { lp: held, tier: before.tier, demotionWarning: false, promotion }, actualDelta: held - before.lp,
-      promoted: false, demoted: false, protected: false, warningRecoveryLp: null, promotionStarted: true };
+      promoted: false, demoted: false, protected: false, warningRecoveryLp: null, promotionStarted: true,
+      series: promotion, seriesMarksBefore: 0 };
   }
   if (earnedIndex > index) {
     tier = earned.tier; warning = false; promoted = true;

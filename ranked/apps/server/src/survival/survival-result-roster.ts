@@ -1,4 +1,4 @@
-import {survivalSettlementInputs,survivalTierForLp,type SurvivalMatch} from "@corum-ranked/rules";
+import {survivalSettlementInputs,survivalTierForLp,type SurvivalMatch,type SurvivalRatingUpdate} from "@corum-ranked/rules";
 export interface SurvivalPaidResult {profileAfter:{tier:string;lp:number};actualDelta:number;}
 /** A tier becomes an after-tier only from an accepted ledger result. Bots have
  * no GD/profile account; their virtual rating is explicitly computed here. */
@@ -17,4 +17,11 @@ export function survivalResultRoster(match:SurvivalMatch,paid:ReadonlyMap<string
    bestProgress:current?.highestProgress??0,currentProgress:active?.currentProgress??active?.highestProgress??0,
    attemptId:active?.id??null,attemptActive:!!active,eliminated:p.eliminationStage!==null};
  });
+}
+
+/** Promotion series fields of a settled result: the series after this match
+ * (its mark included, also when it just ended) for the result screen. */
+export function survivalSeriesResult(rating:Pick<SurvivalRatingUpdate,"promotionStarted"|"promotionSucceeded"|"promotionFailed"|"series"|"seriesMarksBefore">){
+  return {promotionStarted:rating.promotionStarted??false,promotionSucceeded:rating.promotionSucceeded??false,promotionFailed:rating.promotionFailed??false,
+    promotion:rating.series??null,promotionMarksBefore:rating.seriesMarksBefore??0};
 }

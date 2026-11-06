@@ -13,6 +13,8 @@ class SeasonTimer final : public cocos2d::CCNode {
     cocos2d::CCDrawNode* m_face = nullptr;
     cocos2d::CCNode* m_hand = nullptr;
     cocos2d::CCDrawNode* m_cap = nullptr;
+    cocos2d::CCDrawNode* m_handDraw = nullptr;
+    float m_alpha = 1.0f;
     cocos2d::CCLabelBMFont* m_season = nullptr;
     cocos2d::CCLabelBMFont* m_remaining = nullptr;
     float m_clock = 11.0f;
@@ -20,6 +22,7 @@ class SeasonTimer final : public cocos2d::CCNode {
     SeasonTone m_tone = SeasonTone::Gold;
     bool init(bool compact);
     void drawFace(cocos2d::ccColor3B tone);
+    cocos2d::ccColor3B toneColor() const;
 public:
     static SeasonTimer* create(bool compact);
     // Returns false when there is nothing to show (no time set).

@@ -2,12 +2,12 @@ import {Optional} from "@nestjs/common";
 import {SurvivalSpectatorLiveService} from "./survival-spectator-live.service.js";
 import { DemandWorker } from "../database/database-work.js";
 import type { AchievementUnlockNotice } from "../achievement/achievement.service.js";
-import {survivalResultRoster} from "./survival-result-roster.js";
+import {survivalResultRoster,survivalSeriesResult} from "./survival-result-roster.js";
 import { SurvivalConfigService } from "../config/survival-config.service.js";
 import { survivalQueueView } from "./survival-queue.view.js";
 import { BadRequestException,ConflictException,ForbiddenException,Inject,Injectable,Logger,type OnApplicationBootstrap,type OnApplicationShutdown } from "@nestjs/common";
 import { SURVIVAL_RESULT_MS, reduceSurvivalMatch,survivalCurrentRound,survivalLiveView,survivalMarkAbsent,survivalSettlementInputs,survivalEntryDeadlineAt,
-  RankedDomainError,type SurvivalBotDriverState,type SurvivalMatch,type SurvivalCommand,type SurvivalRatingProfile } from "@corum-ranked/rules";
+  RankedDomainError,type SurvivalBotDriverState,type SurvivalMatch,type SurvivalCommand,type SurvivalRatingProfile,type SurvivalPromotionSeries } from "@corum-ranked/rules";
 import { DATABASE,type DatabasePort,type SqlExecutor } from "../database/database.port.js";
 import { SERVER_CLOCK,type ServerClock } from "../common/runtime.module.js";
 import { SessionService } from "../session/session.service.js";
@@ -25,6 +25,7 @@ export interface SurvivalOnlineResult {
   matchId:string;debug:false;botFilled:boolean;rank:number;tiedPlayers:number;won?:boolean;requestedDelta:number;actualDelta:number;
   profileBefore:SurvivalRatingProfile;profileAfter:SurvivalRatingProfile;
   promoted:boolean;demoted:boolean;protected:boolean;warningRecoveryLp:number|null;
+  promotionStarted?:boolean;promotionSucceeded?:boolean;promotionFailed?:boolean;promotion?:SurvivalPromotionSeries|null;promotionMarksBefore?:number;
   bands:{tier:string;minimum:number}[];
   standings:ReturnType<typeof survivalResultRoster>;
   completedAt:string;completionKind:string;finalStandings?:boolean;achievementUnlocks?:readonly AchievementUnlockNotice[];
@@ -162,6 +163,7 @@ export class SurvivalOnlineService implements OnApplicationBootstrap,OnApplicati
       const result:SurvivalOnlineResult={matchId:match.id,debug:false,botFilled:match.players.some(p=>p.kind==="BOT"),won:(match.winnerIds??[match.winnerId]).includes(row.participant_id),rank:input.rank,tiedPlayers:input.tiedPlayers,
         requestedDelta:input.delta,actualDelta:rating.actualDelta,profileBefore:{lp:Number(ledger.lp_before),tier:ledger.tier_before,demotionWarning:ledger.warning_before},
         profileAfter:rating.profile,promoted:rating.promoted,demoted:rating.demoted,protected:rating.protected,warningRecoveryLp:rating.warningRecoveryLp,bands,
+        ...survivalSeriesResult(rating),
         standings:survivalResultRoster(match,new Map([[row.player_id,{profileAfter:rating.profile,actualDelta:rating.actualDelta}]])),
         completedAt:new Date(match.finishedAt??this.clock.now().getTime()).toISOString(),completionKind:match.completionKind??"NORMAL"};
       await this.db.transaction(async tx=>{

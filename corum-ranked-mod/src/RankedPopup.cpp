@@ -2374,8 +2374,17 @@ class CorumRankedLayer final : public CCLayerColor {
             auto* pending = makeLabel(view.survival.error.empty() ? tr("syncing", "SYNCING...") : tr("connection-issue", "CONNECTION ISSUE"), 0.25f, {leftCenter.x,leftCenter.y - 53}, kGold, "semibold");
             m_root->addChild(pending,4);
         } else if (profile.promotion.active) {
-            addRatingMarks(profile.promotion.results, profile.promotion.gamesRequired, {leftCenter.x, leftCenter.y - 49.0f}, 16.0f, 0.30f,
+            addRatingMarks(profile.promotion.results, profile.promotion.gamesRequired, {leftCenter.x, leftCenter.y - 47.0f}, 16.0f, 0.30f,
                 survival ? &source.survival.promotionRanks : nullptr);
+            if (survival) {
+                // The requirement sits right under the series it belongs to.
+                auto const& sur = source.survival;
+                auto const required = sur.promotionRequiredRank > 0 ? sur.promotionRequiredRank : sur.promotionTop16;
+                auto const text = required<=1 ? tr("survival-promotion-win","Promotion: win a match") :
+                    fmt::format(fmt::runtime(tr("survival-promotion-requirement","Promotion: finish rank {} or better")),required);
+                auto* condition = makeLabel(text,0.19f,{leftCenter.x,leftCenter.y - 62.0f},kGold,"semibold");
+                corum::ranked::ui::fitMenuLabelWidth(condition,170,0.19f,0.12f); m_root->addChild(condition,8);
+            }
         } else {
             if (view.profileTier == "GOLD") {
                 auto* rating = corum::ranked::ui::standingLine(standing,0.42f,view.profileScore);
@@ -2393,7 +2402,7 @@ class CorumRankedLayer final : public CCLayerColor {
             auto* equippedTitle = makeLabel(
                 achievementTitleText(view.achievements.equippedTitle),
                 0.20f,
-                {leftCenter.x, leftCenter.y - 68.0f},
+                {leftCenter.x, leftCenter.y - (survival && profile.promotion.active && view.survival.loaded ? 76.0f : 68.0f)},
                 achievementTitleColor(view.achievements.equippedTitle),
                 "semibold"
             );
@@ -2419,15 +2428,7 @@ class CorumRankedLayer final : public CCLayerColor {
             if (survival) m_seasonSurvival = timer; else m_seasonSolo = timer;
         }
         corum::ranked::ui::fitMenuLabelWidth(modeName,150,0.35f,0.25f); m_root->addChild(modeName,8);
-        if (survival && source.survival.profile.promotion.active) {
-            auto const& sur = source.survival;
-            // Requirement under the current 16/64 setting; chances are the slots below the tier.
-            auto const required = sur.promotionRequiredRank > 0 ? sur.promotionRequiredRank : sur.promotionTop16;
-            auto const text = required<=1 ? tr("survival-promotion-win","Promotion: win a match") :
-                fmt::format(fmt::runtime(tr("survival-promotion-requirement","Promotion: finish rank {} or better")),required);
-            auto* condition = makeLabel(text,0.17f,{0,80},kGold,"semibold");
-            corum::ranked::ui::fitMenuLabelWidth(condition,174,0.17f,0.12f); m_root->addChild(condition,8);
-        } else if (survival && source.survival.warningRecoveryLp) {
+        if (survival && !source.survival.profile.promotion.active && source.survival.warningRecoveryLp) {
             auto const text = fmt::format(fmt::runtime(tr("lp-warning-recovery","Clears at {} LP")),*source.survival.warningRecoveryLp);
             auto* condition = makeLabel(text,0.17f,{0,80},kRed,"semibold");
             corum::ranked::ui::fitMenuLabelWidth(condition,174,0.17f,0.12f); m_root->addChild(condition,8);
