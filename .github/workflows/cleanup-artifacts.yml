@@ -1,6 +1,9 @@
 name: Clean up Actions artifacts
 # Manual only: deletes every stored artifact in this repository to free the
 # account's Actions artifact storage quota. Release packages live in R2.
+# Ranked build uploads expire after one day; run this when an upload step
+# reports "Artifact storage quota has been hit" (usage is recalculated
+# by GitHub every few hours, so a retry may still fail right after it).
 on:
   workflow_dispatch:
 permissions:
