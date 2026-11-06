@@ -55,7 +55,7 @@ jobs:
         with:
           name: Corum-Ranked-Server-${{ github.sha }}
           path: image.tar.gz*
-          retention-days: 3
+          retention-days: 1
           if-no-files-found: error
   publish-debug:
     needs: [policy, validation, debug]

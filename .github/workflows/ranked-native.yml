@@ -89,6 +89,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: Achievement-v2-shader-preview
+          retention-days: 1
           path: ${{ runner.temp }}/achievement-effects
       - name: Validate release packaging and publication
         run: |

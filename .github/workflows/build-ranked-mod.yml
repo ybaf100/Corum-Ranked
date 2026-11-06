@@ -91,6 +91,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: corum-platform-release-${{ matrix.config.target }}
+          retention-days: 1
           path: ${{ steps.native.outputs.build-output }}/*.geode
           if-no-files-found: error
 
@@ -138,6 +139,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ needs.metadata.outputs.artifact_name }}
+          retention-days: 1
           path: |
             dist/hwanhee1.corum_ranked.geode
             dist/release.json

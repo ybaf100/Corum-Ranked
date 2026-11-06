@@ -1,0 +1,27 @@
+name: Clean up Actions artifacts
+# Manual only: deletes every stored artifact in this repository to free the
+# account's Actions artifact storage quota. Release packages live in R2.
+on:
+  workflow_dispatch:
+permissions:
+  actions: write
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete all repository artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          deleted=0
+          while :; do
+            ids=$(gh api "repos/$REPO/actions/artifacts?per_page=100" --jq '.artifacts[].id')
+            [ -z "$ids" ] && break
+            for id in $ids; do
+              gh api -X DELETE "repos/$REPO/actions/artifacts/$id" && deleted=$((deleted+1))
+            done
+          done
+          echo "Deleted $deleted artifacts"
+          echo "Deleted $deleted artifacts" >> "$GITHUB_STEP_SUMMARY"
