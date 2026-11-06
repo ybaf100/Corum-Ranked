@@ -12,17 +12,25 @@ jobs:
     steps:
       - name: Delete all repository artifacts
         env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
+          TOKEN: ${{ github.token }}
+          API: ${{ github.api_url }}/repos/${{ github.repository }}/actions/artifacts
         run: |
           set -uo pipefail
-          # One pass over every page; expired artifacts no longer use storage.
-          gh api --paginate "repos/$REPO/actions/artifacts?per_page=100" \
-            --jq '.artifacts[] | select(.expired | not) | "\(.id) \(.size_in_bytes)"' > artifacts.txt
-          total=$(wc -l < artifacts.txt); bytes=$(awk '{s+=$2} END {print s+0}' artifacts.txt)
+          call() { curl -sS --fail-with-body --max-time 30 --retry 2 -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" "$@"; }
+          # Collect live (non-expired) artifacts page by page, then delete each once.
+          : > live.txt
+          for page in $(seq 1 200); do
+            body=$(call "$API?per_page=100&page=$page") || { echo "list page $page failed"; break; }
+            count=$(jq '.artifacts | length' <<<"$body")
+            jq -r '.artifacts[] | select(.expired | not) | "\(.id) \(.size_in_bytes)"' <<<"$body" >> live.txt
+            echo "page $page: $count listed (total_count $(jq .total_count <<<"$body"))"
+            [ "$count" -lt 100 ] && break
+          done
+          total=$(wc -l < live.txt); bytes=$(awk '{s+=$2} END {print s+0}' live.txt)
           echo "Live artifacts: $total ($((bytes/1048576)) MiB)"
           deleted=0; failed=0
           while read -r id size; do
-            if gh api -X DELETE "repos/$REPO/actions/artifacts/$id" >/dev/null; then deleted=$((deleted+1)); else failed=$((failed+1)); fi
-          done < artifacts.txt
+            if call -X DELETE "$API/$id" >/dev/null; then deleted=$((deleted+1)); else failed=$((failed+1)); fi
+            [ $(( (deleted+failed) % 50 )) -eq 0 ] && echo "progress: $deleted deleted, $failed failed"
+          done < live.txt
           echo "Deleted $deleted of $total artifacts ($((bytes/1048576)) MiB), failed $failed" | tee -a "$GITHUB_STEP_SUMMARY"
