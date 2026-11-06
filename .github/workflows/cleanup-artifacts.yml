@@ -8,20 +8,21 @@ permissions:
 jobs:
   cleanup:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Delete all repository artifacts
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
-          set -euo pipefail
-          deleted=0
-          while :; do
-            ids=$(gh api "repos/$REPO/actions/artifacts?per_page=100" --jq '.artifacts[].id')
-            [ -z "$ids" ] && break
-            for id in $ids; do
-              gh api -X DELETE "repos/$REPO/actions/artifacts/$id" && deleted=$((deleted+1))
-            done
-          done
-          echo "Deleted $deleted artifacts"
-          echo "Deleted $deleted artifacts" >> "$GITHUB_STEP_SUMMARY"
+          set -uo pipefail
+          # One pass over every page; expired artifacts no longer use storage.
+          gh api --paginate "repos/$REPO/actions/artifacts?per_page=100" \
+            --jq '.artifacts[] | select(.expired | not) | "\(.id) \(.size_in_bytes)"' > artifacts.txt
+          total=$(wc -l < artifacts.txt); bytes=$(awk '{s+=$2} END {print s+0}' artifacts.txt)
+          echo "Live artifacts: $total ($((bytes/1048576)) MiB)"
+          deleted=0; failed=0
+          while read -r id size; do
+            if gh api -X DELETE "repos/$REPO/actions/artifacts/$id" >/dev/null; then deleted=$((deleted+1)); else failed=$((failed+1)); fi
+          done < artifacts.txt
+          echo "Deleted $deleted of $total artifacts ($((bytes/1048576)) MiB), failed $failed" | tee -a "$GITHUB_STEP_SUMMARY"
