@@ -176,6 +176,7 @@ export const environmentFixture = (): ServerEnvironment => ({
   sessionTokenSecret: "test-only-not-a-production-secret",
   corsOrigins: [],
   discordRelay: null,
+  debugLogWebhookUrl: null,
     debugBot: null,
     debugSpectate: null,
 });

@@ -59,6 +59,7 @@ const REQUIRED_MIGRATIONS = [
   "0036_survival_badge_source_round.sql",
   "0037_survival_promotion_series.sql",
   "0038_debug_log_uploads.sql",
+  "0039_debug_log_delivery.sql",
 ] as const;
 
 export interface RankedSchemaStatus {

@@ -81,6 +81,7 @@ void DebugLogUploader::start() {
         m_chunks.insert(m_chunks.end(), chunks.begin(), chunks.end());
     }
     if (m_chunks.empty()) { m_status = i18n::text("debug-logs-failed", "LOG UPLOAD FAILED");return; }
+    m_files = static_cast<int>(files.size());
     m_uploadId = utils::random::generateUUID();m_next = 0;m_busy = true;
     log::info("[DebugLogs] upload={} files={} chunks={}", m_uploadId, files.size(), m_chunks.size());
     sendNext();
@@ -94,12 +95,20 @@ void DebugLogUploader::sendNext() {
     auto const& chunk = m_chunks[m_next];
     matjson::Value body;
     body["uploadId"] = m_uploadId;body["fileIndex"] = chunk.fileIndex;body["fileName"] = chunk.fileName;
-    body["part"] = chunk.part;body["totalParts"] = chunk.totalParts;body["content"] = chunk.content;
+    body["part"] = chunk.part;body["totalParts"] = chunk.totalParts;body["totalFiles"] = m_files;body["content"] = chunk.content;
     web::WebRequest http;
     http.header("Authorization", "Bearer " + RankedRuntime::get().spectatorLiveSessionToken());
     http.timeout(std::chrono::seconds(20));http.bodyJSON(body);
     request.spawn(http.post("https://api.52-74-37-130.sslip.io/api/ranked/debug/logs"), [this](web::WebResponse response) {
-        if (response.code() >= 200 && response.code() < 300) { ++m_next;sendNext();return; }
+        if (response.code() >= 200 && response.code() < 300) {
+            // The last chunk reports whether the rebuilt .log files reached Discord.
+            auto const reply = response.json().unwrapOr(matjson::Value());
+            if (m_next + 1 == m_chunks.size() && !reply["delivered"].asBool().unwrapOr(false)) {
+                log::warn("[DebugLogs] upload={} stored but not delivered to Discord", m_uploadId);
+                m_busy = false;m_status = i18n::text("debug-logs-failed", "LOG UPLOAD FAILED");return;
+            }
+            ++m_next;sendNext();return;
+        }
         log::warn("[DebugLogs] upload={} chunk={} status={}", m_uploadId, m_next, response.code());
         m_busy = false;m_status = i18n::text("debug-logs-failed", "LOG UPLOAD FAILED");
     });

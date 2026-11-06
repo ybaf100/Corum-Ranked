@@ -20,6 +20,8 @@ export interface ServerEnvironment {
   readonly sessionTokenSecret: string;
   readonly corsOrigins: readonly string[];
   readonly discordRelay: DiscordRelayEnvironment | null;
+  /** Debug-build log uploads are delivered here as .log attachments. */
+  readonly debugLogWebhookUrl: string | null;
   readonly debugBot: DebugBotEnvironment | null;
   readonly debugSpectate: { readonly password: string } | null;
 }
@@ -51,6 +53,18 @@ export interface DiscordRelayEnvironment {
   readonly retryMaximumMs: number;
   readonly maximumAttempts: number;
 }
+
+/** An official HTTPS Discord webhook URL, or null when unset/placeholder. */
+const discordWebhook = (value: string | undefined): string | null => {
+  const text = value?.trim() || "";
+  if (!text || /^<.+>$/.test(text)) return null;
+  const url = new URL(text);
+  if (url.protocol !== "https:" || !["discord.com", "canary.discord.com", "ptb.discord.com", "discordapp.com"].includes(url.hostname) ||
+    !url.pathname.startsWith("/api/webhooks/")) {
+    throw new RankedDomainError("INVALID_CONFIG", "Discord webhook URLs must be official HTTPS Discord webhooks");
+  }
+  return url.toString();
+};
 
 const requireValue = (environment: NodeJS.ProcessEnv, key: string): string => {
   const value = environment[key]?.trim();
@@ -299,6 +313,7 @@ export const loadServerEnvironment = (
     sessionTokenSecret,
     corsOrigins,
     discordRelay,
+    debugLogWebhookUrl: discordWebhook(environment.DEBUG_LOG_DISCORD_WEBHOOK_URL) ?? discordRelay?.webhookUrl ?? null,
     debugBot,
     debugSpectate: environment.ENABLE_DEBUG_SPECTATE?.trim().toLowerCase() === "true"
       ? { password: requireValue(environment, "DEBUG_SPECTATE_PASSWORD") }
