@@ -151,14 +151,9 @@ void TierProgressBar::redraw() {
     auto const left = -m_width / 2.0f, right = m_width / 2.0f, y0 = BarY - BarH / 2.0f, y1 = BarY + BarH / 2.0f;
     m_draw->clear();
     auto const leader = m_view.kind == TierProgressKind::Leader;
-    auto const edgeColor = m_up ? Gold : Red;
-    auto const border = edge ? edgeColor : m_view.kind == TierProgressKind::Warning ? Red
-        : m_view.kind == TierProgressKind::Promotion || m_view.kind == TierProgressKind::RankChase ? Gold : m_tone;
-    // Frame, track.
-    quad(m_draw, left - 1.5f, y0 - 1.5f, right + 1.5f, y1 + 1.5f, rgba(border, (leader ? 0.9f : 0.55f) * k));
-    quad(m_draw, left, y0, right, y1, {10 / 255.0f, 19 / 255.0f, 36 / 255.0f, k});
     auto fill = std::clamp(m_view.fill, 0.0f, 1.0f);
-    auto edge = false, labelsAlpha = 1.0f;
+    auto edge = false;
+    auto labelsAlpha = 1.0f;
     if (m_animating) {
         auto const seg = [&](float a, float b) { return std::clamp((m_anim - a) / (b - a), 0.0f, 1.0f); };
         auto const ease = [](float x) { return x < 0.5f ? 4 * x * x * x : 1 - std::pow(-2 * x + 2, 3.0f) / 2; };
@@ -172,6 +167,12 @@ void TierProgressBar::redraw() {
         }
     }
     if (m_labels) propagateModeOpacity(m_labels, static_cast<GLubyte>(std::lround(255.0f * labelsAlpha * k)));
+    auto const edgeColor = m_up ? Gold : Red;
+    auto const border = edge ? edgeColor : m_view.kind == TierProgressKind::Warning ? Red
+        : m_view.kind == TierProgressKind::Promotion || m_view.kind == TierProgressKind::RankChase ? Gold : m_tone;
+    // Frame, track.
+    quad(m_draw, left - 1.5f, y0 - 1.5f, right + 1.5f, y1 + 1.5f, rgba(border, (leader ? 0.9f : 0.55f) * k));
+    quad(m_draw, left, y0, right, y1, {10 / 255.0f, 19 / 255.0f, 36 / 255.0f, k});
     if (leader) {
         // #1: the whole bar in the Mythic achievement's moving pastel rainbow.
         auto const seconds = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
