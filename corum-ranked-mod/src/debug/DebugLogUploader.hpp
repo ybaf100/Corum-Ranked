@@ -35,7 +35,8 @@ private:
     void sendNext();
     std::vector<DebugLogChunk> m_chunks;
     std::size_t m_next = 0;
-    int m_files = 0;
+    int m_files = 0, m_accountId = 0;
+    std::string m_username;
     std::string m_uploadId, m_status;
     bool m_busy = false;
 };

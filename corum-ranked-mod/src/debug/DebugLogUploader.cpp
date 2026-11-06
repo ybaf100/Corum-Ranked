@@ -43,6 +43,7 @@ std::vector<DebugLogChunk> debugLogChunks(int fileIndex, std::string const& file
 #include "../RankedRuntime.hpp"
 #include "../ui/RankedTranslations.hpp"
 #include <Geode/Geode.hpp>
+#include <Geode/binding/GJAccountManager.hpp>
 #include <Geode/utils/random.hpp>
 #include <Geode/utils/web.hpp>
 #include <filesystem>
@@ -59,7 +60,13 @@ DebugLogUploader& DebugLogUploader::get() { static DebugLogUploader uploader; re
 
 void DebugLogUploader::start() {
     if (m_busy) return;
-    if (RankedRuntime::get().spectatorLiveSessionToken().empty()) {
+    // From the main menu there is usually no Ranked session yet (for example
+    // right after a crash); the upload then names the GD account instead.
+    auto* account = GJAccountManager::get();
+    m_accountId = account ? account->m_accountID : 0;
+    m_username = account ? std::string(account->m_username) : std::string();
+    if (RankedRuntime::get().spectatorLiveSessionToken().empty() && (m_accountId <= 0 || m_username.empty())) {
+        log::warn("[DebugLogs] no Ranked session and no logged-in GD account");
         m_status = i18n::text("debug-logs-failed", "LOG UPLOAD FAILED");return;
     }
     // Newest three Geode logs: this session and the two before it.
@@ -80,7 +87,10 @@ void DebugLogUploader::start() {
         auto chunks = debugLogChunks(static_cast<int>(index), files[index].filename().string(), buffer.str());
         m_chunks.insert(m_chunks.end(), chunks.begin(), chunks.end());
     }
-    if (m_chunks.empty()) { m_status = i18n::text("debug-logs-failed", "LOG UPLOAD FAILED");return; }
+    if (m_chunks.empty()) {
+        log::warn("[DebugLogs] no .log files in {}", directory.string());
+        m_status = i18n::text("debug-logs-failed", "LOG UPLOAD FAILED");return;
+    }
     m_files = static_cast<int>(files.size());
     m_uploadId = utils::random::generateUUID();m_next = 0;m_busy = true;
     log::info("[DebugLogs] upload={} files={} chunks={}", m_uploadId, files.size(), m_chunks.size());
@@ -97,9 +107,16 @@ void DebugLogUploader::sendNext() {
     body["uploadId"] = m_uploadId;body["fileIndex"] = chunk.fileIndex;body["fileName"] = chunk.fileName;
     body["part"] = chunk.part;body["totalParts"] = chunk.totalParts;body["totalFiles"] = m_files;body["content"] = chunk.content;
     web::WebRequest http;
-    http.header("Authorization", "Bearer " + RankedRuntime::get().spectatorLiveSessionToken());
+    auto const& token = RankedRuntime::get().spectatorLiveSessionToken();
+    std::string url = "https://api.52-74-37-130.sslip.io/api/ranked/debug/logs";
+    if (!token.empty()) http.header("Authorization", "Bearer " + token);
+    else {
+        url += "/menu";
+        body["gdAccountId"] = fmt::format("{}", m_accountId);body["gdUsername"] = m_username;
+        body["clientVersion"] = Mod::get()->getVersion().toVString();body["clientBuildChannel"] = "debug";
+    }
     http.timeout(std::chrono::seconds(20));http.bodyJSON(body);
-    request.spawn(http.post("https://api.52-74-37-130.sslip.io/api/ranked/debug/logs"), [this](web::WebResponse response) {
+    request.spawn(http.post(url), [this](web::WebResponse response) {
         if (response.code() >= 200 && response.code() < 300) {
             // The last chunk reports whether the rebuilt .log files reached Discord.
             auto const reply = response.json().unwrapOr(matjson::Value());
@@ -109,7 +126,8 @@ void DebugLogUploader::sendNext() {
             }
             ++m_next;sendNext();return;
         }
-        log::warn("[DebugLogs] upload={} chunk={} status={}", m_uploadId, m_next, response.code());
+        log::warn("[DebugLogs] upload={} chunk={} status={} body={}", m_uploadId, m_next, response.code(),
+            response.string().unwrapOr("").substr(0, 200));
         m_busy = false;m_status = i18n::text("debug-logs-failed", "LOG UPLOAD FAILED");
     });
 }

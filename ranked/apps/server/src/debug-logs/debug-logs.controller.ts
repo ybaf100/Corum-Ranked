@@ -1,11 +1,13 @@
-import { Body, ConflictException, Controller, HttpCode, Inject, Logger, Post, UseGuards } from "@nestjs/common";
+import { Body, ConflictException, Controller, HttpCode, Inject, Logger, NotFoundException, Post, UseGuards } from "@nestjs/common";
 import { CurrentSession } from "../session/current-session.decorator.js";
 import { SessionGuard } from "../session/session.guard.js";
 import type { RankedSessionContext } from "../session/session.types.js";
 import { DATABASE, type DatabasePort } from "../database/database.port.js";
 import { SERVER_CLOCK, type ServerClock } from "../common/runtime.module.js";
 import { SERVER_ENVIRONMENT, type ServerEnvironment } from "../config/server-environment.js";
-import { DebugLogChunkDto } from "./debug-logs.dto.js";
+import { DebugLogChunkDto, DebugLogMenuChunkDto } from "./debug-logs.dto.js";
+
+interface Uploader { playerId: string; clientVersion: string }
 
 const UPLOADS_PER_DAY = 12;
 
@@ -13,7 +15,6 @@ const UPLOADS_PER_DAY = 12;
  * two previous Geode log files arrive in chunks, are rebuilt into .log files
  * and posted to the debug-log Discord webhook. Delivered chunks are removed. */
 @Controller("api/ranked/debug/logs")
-@UseGuards(SessionGuard)
 export class DebugLogsController {
   private readonly logger = new Logger(DebugLogsController.name);
   public constructor(@Inject(DATABASE) private readonly db: DatabasePort,
@@ -22,8 +23,27 @@ export class DebugLogsController {
 
   @Post()
   @HttpCode(200)
+  @UseGuards(SessionGuard)
   public async chunk(@CurrentSession() session: RankedSessionContext, @Body() body: DebugLogChunkDto) {
     if (session.clientBuildChannel !== "debug") throw new ConflictException("DEBUG_BUILD_REQUIRED");
+    return this.store({ playerId: session.playerId, clientVersion: session.clientVersion ?? "unknown" }, body);
+  }
+
+  /** Main menu (no Ranked session yet, e.g. right after a crash): the Debug
+   * client names its GD account as session creation does. Only players who
+   * already have a Ranked record can upload, under the same daily limit. */
+  @Post("menu")
+  @HttpCode(200)
+  public async menuChunk(@Body() body: DebugLogMenuChunkDto) {
+    const player = (await this.db.query<{ id: string }>(
+      "SELECT id::text AS id FROM ranked_players WHERE gd_account_id = $1 AND lower(gd_username) = lower($2)",
+      [body.gdAccountId, body.gdUsername],
+    )).rows[0];
+    if (!player) throw new NotFoundException("RANKED_PLAYER_REQUIRED");
+    return this.store({ playerId: player.id, clientVersion: body.clientVersion }, body);
+  }
+
+  private async store(session: Uploader, body: DebugLogChunkDto) {
     if (body.part >= body.totalParts) throw new ConflictException("INVALID_LOG_PART");
     const totalFiles = body.totalFiles ?? 1;
     if (body.fileIndex >= totalFiles) throw new ConflictException("INVALID_LOG_FILE");
@@ -41,7 +61,7 @@ export class DebugLogsController {
         `INSERT INTO ranked_debug_log_chunks (upload_id, player_id, client_version, file_index, file_name, part, total_parts, total_files, content, received_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          ON CONFLICT (upload_id, file_index, part) DO NOTHING`,
-        [body.uploadId, session.playerId, session.clientVersion ?? "unknown", body.fileIndex, body.fileName,
+        [body.uploadId, session.playerId, session.clientVersion, body.fileIndex, body.fileName,
           body.part, body.totalParts, totalFiles, body.content.replace(/\u0000/g, ""), now.toISOString()],
       );
       const progress = await tx.query<{ file_index: number; parts: string; total_parts: number }>(
@@ -59,7 +79,7 @@ export class DebugLogsController {
     return { received: true, complete: true, delivered };
   }
 
-  private async deliver(uploadId: string, session: RankedSessionContext): Promise<boolean> {
+  private async deliver(uploadId: string, session: Uploader): Promise<boolean> {
     const webhook = this.environment.debugLogWebhookUrl;
     if (!webhook) { this.logger.warn(`debug log upload=${uploadId} stored; no Discord webhook configured`); return false; }
     const chunks = (await this.db.query<{ file_index: number; file_name: string; content: string; client_version: string }>(
