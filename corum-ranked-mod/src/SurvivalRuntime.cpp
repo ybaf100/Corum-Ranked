@@ -359,6 +359,19 @@ void SurvivalRuntime::completeResultScreen(bool score){
     auto const key=resultFlowKey();auto const old=Mod::get()->getSavedValue<int>(key);
     Mod::get()->setSavedValue(key,std::max(old,score?2:1));(void)Mod::get()->saveData();
 }
+bool SurvivalRuntime::promotionMotionShown() const {
+    return Mod::get()->getSavedValue<bool>(resultFlowKey()+":promotion");
+}
+bool SurvivalRuntime::promotionMotionPending() const {
+    if(!m_view.result.isObject() || (m_view.state!="FINAL_RESULT"&&!m_view.ownEliminated) || promotionMotionShown())return false;
+    if(Mod::get()->getSavedValue<int>(resultFlowKey())>=2)return false;
+    auto const input=scoreAnimation();
+    return input && input->promoted && input->beforeTier!=input->afterTier;
+}
+void SurvivalRuntime::completePromotionMotion(){
+    if(!m_view.result.isObject())return;
+    Mod::get()->setSavedValue(resultFlowKey()+":promotion",true);(void)Mod::get()->saveData();
+}
 SurvivalFlowStage SurvivalRuntime::flowStage() const {
     if(m_view.state!="FINAL_RESULT" && outcomeChoice()!=SurvivalOutcomeChoice::PersonalResult && !(m_view.ownEliminated&&Mod::get()->getSavedValue<bool>(resultFlowKey()+":requested")))return survivalFlowStage(m_view.state,m_view.presentationGate,m_view.ownEliminated,outcomeChoice());
     bool podium=false;for(auto const& p:m_view.participants.asArray().unwrapOr(std::vector<matjson::Value>{}))

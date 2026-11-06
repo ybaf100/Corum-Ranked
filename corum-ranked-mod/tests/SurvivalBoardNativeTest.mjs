@@ -237,7 +237,7 @@ struct RankedRuntime{
  std::chrono::steady_clock::time_point m_nextModeConfigAt{};Request m_modeConfigRequest;EnvironmentPolicy m_environmentPolicy;std::vector<InstalledModSnapshot> m_installedMods;
  struct{RuntimeStage stage=RuntimeStage::Matched;std::string error;int revision=0;bool soloEnabled=false,survivalEnabled=false,survivalConfigReady=false;int survivalPlayerCount=16;
   struct{bool active=false;}environmentWarning;struct{std::string matchId="retained";}match;}m_view;
- int configLoads=0,seasonLoads=0;void observeSeasons(matjson::Value const&){++seasonLoads;}void fetchConfig(){++configLoads;}auto captureInstalledMods(){return std::vector<InstalledModSnapshot>{};}
+ int configLoads=0,seasonLoads=0;void observeSeasons(matjson::Value const&){++seasonLoads;}void observeSoloTierBands(matjson::Value const&){}void fetchConfig(){++configLoads;}auto captureInstalledMods(){return std::vector<InstalledModSnapshot>{};}
  void setStage(RuntimeStage s,std::string const&){m_view.stage=s;}
  void showEnvironmentWarning(EnvironmentDecision const&,bool block){m_view.environmentWarning.active=true;if(block)m_view.stage=RuntimeStage::Blocked;}
  void fetchModeAvailability();void recheckEnvironment();

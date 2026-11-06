@@ -44,6 +44,7 @@
 #include "ui/PlacementGradeBadge.hpp"
 #include "ui/PlayerIcon.hpp"
 #include "ui/SeasonTimer.hpp"
+#include "ui/TierProgressBar.hpp"
 #include "ui/RankedTranslations.hpp"
 #include "ui/RankedVisuals.hpp"
 #include "ui/RankedInput.hpp"
@@ -908,7 +909,9 @@ class CorumRankedLayer final : public CCLayerColor {
                 view.achievements.equippedTitle.achievementId,view.achievements.equippedTitle.level.value_or(0),
                 view.achievements.totalAp,view.achievements.unclaimedRewardCount,
                 CCDirector::sharedDirector()->getWinSize().width,CCDirector::sharedDirector()->getWinSize().height) + fmt::format(":sur-record:{}:{}:format:{}",view.survival.wins,view.survival.losses,view.survivalPlayerCount)
-                + fmt::format(":season:{}:{}:{}",seasonShared(view),view.soloSeason.targetAtMs.has_value(),view.survivalSeason.targetAtMs.has_value());
+                + fmt::format(":season:{}:{}:{}",seasonShared(view),view.soloSeason.targetAtMs.has_value(),view.survivalSeason.targetAtMs.has_value())
+                + fmt::format(":tierbar:{}:{}:{}:{}:{}:{}",view.profileScore,view.standing.target?view.standing.target->score:-1,view.soloTierBands.size(),
+                    view.survival.tierBands.size(),view.survival.standing.target?view.survival.standing.target->score:-1,view.survival.standing.rank.value_or(0));
         }
         if (view.match.placement) {
             if (view.placement.state == "STAGE_RESULT" && !view.placement.stageResults.empty()) {
@@ -2443,6 +2446,38 @@ class CorumRankedLayer final : public CCLayerColor {
         m_root = savedRoot; m_menu = savedMenu;
     }
 
+    // Tier bar under the start button (Solo and Survival).
+    corum::ranked::TierProgressView tierProgressFor(RuntimeView const& view, bool survival) const {
+        corum::ranked::TierProgressInput input;
+        if (survival) {
+            auto const& sur = view.survival;
+            if (!sur.loaded || sur.tierBands.empty()) return {};
+            input.tier = upper(sur.profile.displayedTier);input.score = sur.profile.visibleRankedScore.value_or(0);input.scoreKnown = true;
+            input.bands = sur.tierBands;
+            input.promotionActive = sur.profile.promotion.active;input.promotionGames = sur.profile.promotion.gamesRequired;
+            input.promotionResults = sur.profile.promotion.results;input.demotionWarning = sur.profile.demotionWarning;
+            input.rank = sur.standing.rank;input.target = sur.standing.target;
+            input.ladderTier = upper(input.bands.back().tier) == input.tier;
+        } else {
+            if (!view.profileScoreVisible || view.soloTierBands.empty()) return {};
+            input.tier = upper(view.profileTier);input.score = view.profileScore;input.scoreKnown = true;
+            input.bands = view.soloTierBands;
+            input.promotionActive = view.promotion.active;input.promotionGames = view.promotion.gamesRequired;
+            input.promotionResults = view.promotion.results;input.demotionWarning = view.demotionWarning;
+            input.rank = view.standing.rank;input.target = view.standing.target;
+            input.ladderTier = corum::ranked::goldRankTier(input.tier);
+        }
+        return corum::ranked::tierProgress(input);
+    }
+    void addTierProgress(RuntimeView const& view, bool survival, CCPoint at) {
+        auto progress = tierProgressFor(view, survival);
+        if (progress.kind == corum::ranked::TierProgressKind::Hidden) return;
+        auto const target = survival ? view.survival.profile.promotion.targetTier : view.promotion.targetTier;
+        if (auto* bar = corum::ranked::ui::TierProgressBar::create(std::move(progress), 166.0f, upper(target))) {
+            bar->setPosition(at);m_root->addChild(bar, 6);
+        }
+    }
+
     void renderModePanel(RuntimeView const& view, corum::ranked::RankedMode mode) {
         if (!m_lobbyPanel) return;
         setLobbyNodeInput(m_lobbyPanel,false);
@@ -2497,18 +2532,21 @@ class CorumRankedLayer final : public CCLayerColor {
             m_menu->addChild(play);
             addHudEditorButton({rightCenter.x + 71.0f, rightCenter.y + 18.0f},
                 view.stage == RuntimeStage::Ready && !lobbyQueueActive(), "ranked-hud-editor-button"_spr);
+            // With a tier bar below, the caption and hint move up a little.
+            auto const tierBar = !view.placement.required &&
+                tierProgressFor(view, false).kind != corum::ranked::TierProgressKind::Hidden;
             auto* actionText = makeLabel(
                 view.placement.required
                     ? (view.placement.active && view.placement.state == "STAGE_RESULT"
                         ? tr("continue-placement", "CONTINUE PLACEMENT")
                         : tr("start-placement", "START PLACEMENT"))
                     : tr("start-queue", "START QUEUE"),
-                0.44f,
-                {rightCenter.x, rightCenter.y - 40.0f},
+                tierBar ? 0.40f : 0.44f,
+                {rightCenter.x, rightCenter.y - (tierBar ? 30.0f : 40.0f)},
                 kAccent,
                 "black"
             );
-            corum::ranked::ui::fitMenuLabelWidth(actionText,170,0.44f,0.26f);
+            corum::ranked::ui::fitMenuLabelWidth(actionText,170,tierBar ? 0.40f : 0.44f,0.26f);
             m_root->addChild(actionText, 4);
             auto* actionHint = makeLabel(
                 view.placement.required
@@ -2516,13 +2554,14 @@ class CorumRankedLayer final : public CCLayerColor {
                         ? fmt::format("STAGE {} / {} SAVED", view.placement.currentStageIndex, view.placement.totalStages)
                         : tr("choose-first-pool", "CHOOSE YOUR FIRST STAGE POOL"))
                     : tr("find-match", "FIND A 1V1 MATCH"),
-                0.27f,
-                {rightCenter.x, rightCenter.y - 68.0f},
+                tierBar ? 0.23f : 0.27f,
+                {rightCenter.x, rightCenter.y - (tierBar ? 48.0f : 68.0f)},
                 corum::ranked::ui::TextMuted,
                 "semibold"
             );
-            corum::ranked::ui::fitMenuLabelWidth(actionHint,170,0.27f,0.19f);
+            corum::ranked::ui::fitMenuLabelWidth(actionHint,170,tierBar ? 0.23f : 0.27f,0.17f);
             m_root->addChild(actionHint, 4);
+            if (tierBar) addTierProgress(view, false, {rightCenter.x, rightCenter.y - 80.0f});
         } else if (view.stage == RuntimeStage::Queued || view.stage == RuntimeStage::JoiningQueue) {
             auto* spinner = LoadingSpinner::create(58.0f);
             spinner->setPosition({rightCenter.x, rightCenter.y + 18.0f});
@@ -2560,10 +2599,13 @@ class CorumRankedLayer final : public CCLayerColor {
             queue->setPosition({94,18}); m_menu->addChild(queue);
             queue->setEnabled(online); queue->setCascadeOpacityEnabled(true); queue->setOpacity(online?255:100);
             addHudEditorButton({165,18},view.stage==RuntimeStage::Ready && !lobbyQueueActive(),"survival-hud-editor-button"_spr);
-            auto* hint = makeLabel(tr("start-queue", "START QUEUE"),0.44f,{94,-40},online?kCyan:corum::ranked::ui::TextMuted,"black");
-            corum::ranked::ui::fitMenuLabelWidth(hint,170,0.44f,0.26f); m_root->addChild(hint,5);
-            auto* details = makeLabel(online?fmt::format(fmt::runtime(tr("survival-online-ready-format","2-{} PLAYERS")),view.survivalPlayerCount):tr("mode-disabled","MODE DISABLED"),0.27f,{94,-68},corum::ranked::ui::TextMuted,"semibold");
-            corum::ranked::ui::fitMenuLabelWidth(details,170,0.27f,0.19f); m_root->addChild(details,5);
+            auto const retry = !view.survival.loaded || !view.survival.error.empty();
+            auto const tierBar = !retry && tierProgressFor(view, true).kind != corum::ranked::TierProgressKind::Hidden;
+            auto* hint = makeLabel(tr("start-queue", "START QUEUE"),tierBar?0.40f:0.44f,{94,tierBar?-30.0f:-40.0f},online?kCyan:corum::ranked::ui::TextMuted,"black");
+            corum::ranked::ui::fitMenuLabelWidth(hint,170,tierBar?0.40f:0.44f,0.26f); m_root->addChild(hint,5);
+            auto* details = makeLabel(online?fmt::format(fmt::runtime(tr("survival-online-ready-format","2-{} PLAYERS")),view.survivalPlayerCount):tr("mode-disabled","MODE DISABLED"),tierBar?0.23f:0.27f,{94,tierBar?-48.0f:-68.0f},corum::ranked::ui::TextMuted,"semibold");
+            corum::ranked::ui::fitMenuLabelWidth(details,170,tierBar?0.23f:0.27f,0.17f); m_root->addChild(details,5);
+            if (tierBar) addTierProgress(view, true, {94, -80.0f});
             if (!view.survival.loaded || !view.survival.error.empty()) {
                 addButton(tr("retry","RETRY"),{94,-88},menu_selector(CorumRankedLayer::onRetrySurvival),false,0.44f);
             }

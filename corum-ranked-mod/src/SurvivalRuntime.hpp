@@ -73,6 +73,10 @@ public:
     SurvivalFlowStage flowStage() const;
     std::string resultFlowKey() const;
     void completeResultScreen(bool score);
+    // A promotion plays its tier motion first: promotion -> podium -> score -> result.
+    bool promotionMotionPending() const;
+    bool promotionMotionShown() const;
+    void completePromotionMotion();
     void markPersonalResultRequested();
     void chooseOutcome(SurvivalOutcomeChoice);
     bool observing() const{return m_view.ownEliminated && outcomeChoice()==SurvivalOutcomeChoice::Observe;}

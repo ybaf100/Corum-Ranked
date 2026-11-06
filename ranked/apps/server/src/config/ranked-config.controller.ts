@@ -54,6 +54,9 @@ export class RankedConfigController {
       // Countdowns are absolute instants: each client subtracts server-synced
       // time, so the remaining time is right in every time zone.
       seasons,
+      // Tier bar under the start button: each Solo tier's lower LP bound.
+      soloTierBands: [...snapshot.operational.tierBands].sort((a, b) => a.minInclusive - b.minInclusive)
+        .map(({ tier, minInclusive }) => ({ tier, minInclusive })),
       modes: { soloRanked: { ready: true, enabled: snapshot.operational.enabled },
         survival: this.survival?.getStatus() ?? { ready: false, enabled: false } },
       rules: snapshot.operational.rules,

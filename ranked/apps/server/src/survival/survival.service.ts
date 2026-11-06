@@ -44,7 +44,10 @@ export class SurvivalService {
     const standing = await this.standing(playerId);
     const recordSummary=(await readSurvivalRecords(this.database,[playerId]))[playerId]!;
     return {onlineAvailable:true,serverNow:now.toISOString(),enabled:snapshot.config.enabled,
-      profile:this.project(row,snapshot.config),standing,recordSummary};
+      profile:this.project(row,snapshot.config),standing,recordSummary,
+      // Tier bar under the start button: each displayed tier group's lower LP bound.
+      tierBands:snapshot.config.tierBands.filter((band,index,all)=>all.findIndex(other=>other.group===band.group)===index)
+        .map(band=>({tier:band.group,minInclusive:band.minimumLp}))};
   }
 
   private async ensureProfile(transaction: SqlExecutor, playerId: string, config: SurvivalConfig, now: Date): Promise<void> {

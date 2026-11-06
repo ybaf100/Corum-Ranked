@@ -446,6 +446,8 @@ struct SurvivalView {
     // Required rank under the current 16/64 setting and the rank achieved in each series match.
     int promotionRequiredRank=0;
     std::vector<int> promotionRanks;
+    // Tier group lower bounds, for the lobby tier bar.
+    std::vector<TierCutoffView> tierBands;
 };
 
 // Solo queue radar: the current rating search radius and anonymous queued
@@ -459,6 +461,8 @@ struct RuntimeView {
     SoloQueueRadar queueRadar;
     // Season per mode (Admin): label and end/start instant.
     SeasonView soloSeason, survivalSeason;
+    // Solo tier lower bounds, for the lobby tier bar.
+    std::vector<TierCutoffView> soloTierBands;
     int lobbyOffline=0,lobbyOnline=0;bool lobbyPopulationKnown=false;
     bool soloEnabled = false, survivalEnabled = false, survivalConfigReady = false;
     int survivalPlayerCount=16;
@@ -505,6 +509,7 @@ public:
     void finishAdmission();
     [[nodiscard]] std::int64_t serverNowMillis() const;
     void observeSeasons(matjson::Value const& seasons);
+    void observeSoloTierBands(matjson::Value const& bands);
     void retireDecisiveAttempt();
     void takeOverSession();
     void leaveRanked();

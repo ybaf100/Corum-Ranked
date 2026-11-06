@@ -63,7 +63,7 @@ class SurvivalGameLayer final : public CCLayerColor {
     CCMenuItemSpriteExtra* m_liveWatch=nullptr;
     std::optional<WeakRef<ui::RankedConfirmPopup>> m_confirmation;
     std::optional<WeakRef<ui::RankedJukeboxPopup>> m_jukebox;
-    std::string m_launchedContext,m_resultMotion,m_gridContext,m_confirmationContext;
+    std::string m_launchedContext,m_resultMotion,m_promotionMotion,m_gridContext,m_confirmationContext;
     std::string m_eliminationKey,m_pendingLaunch;
     // Round-result snapshot: fixed for the whole 5.5 s presentation even if a
     // poll replaces the standings. Reveal state is per participant ID, so a
@@ -418,12 +418,28 @@ class SurvivalGameLayer final : public CCLayerColor {
             if(score)owner->addChild(score,1100);else{owner->m_motion=false;owner->m_resultMotion.clear();owner->setKeypadEnabled(true);}
         });
     }
+    // Promotion: the tier motion comes first (then podium, score, result).
+    void beginPromotionMotion() {
+        auto& runtime=SurvivalRuntime::get();auto const key=runtime.resultFlowKey();
+        if(m_promotionMotion==key || m_motion)return;
+        auto const input=runtime.scoreAnimation();if(!input)return;
+        m_promotionMotion=key;m_motion=true;setKeypadEnabled(false);
+        auto const weak=WeakRef<SurvivalGameLayer>(this);
+        auto done=[weak,key]{
+            if(SurvivalRuntime::get().resultFlowKey()==key)SurvivalRuntime::get().completePromotionMotion();
+            if(auto owner=weak.lock();owner&&owner->m_promotionMotion==key){owner->m_motion=false;owner->setKeypadEnabled(true);}
+        };
+        auto* transition=ui::RankTransitionLayer::create(input->beforeTier,input->afterTier,ui::RankTransitionType::Promotion,
+            text("promoted","PROMOTED"),text("skip","SKIP"),text("continue","CONTINUE"),done,false);
+        if(transition)addChild(transition,1200);else done();
+    }
     void beginResultMotion() {
         auto& runtime=SurvivalRuntime::get();auto const& view=runtime.view();
         if(!view.result.isObject() || m_resultMotion==runtime.resultFlowKey())return;
         auto input=runtime.scoreAnimation();if(!input)return;m_resultMotion=runtime.resultFlowKey();m_motion=true;setKeypadEnabled(false);
         auto const weak=WeakRef<SurvivalGameLayer>(this);auto const context=runtime.resultFlowKey();auto finish=[weak,context,input=*input]{if(auto owner=weak.lock())owner->scoreMotion(input,context);};
-        if((input->promoted || input->demoted) && input->beforeTier!=input->afterTier){
+        // A promotion already played its motion before the podium.
+        if((input->promoted || input->demoted) && input->beforeTier!=input->afterTier && !(input->promoted && runtime.promotionMotionShown())){
             auto* transition=ui::RankTransitionLayer::create(input->beforeTier,input->afterTier,input->promoted?ui::RankTransitionType::Promotion:ui::RankTransitionType::Demotion,
                 text(input->promoted?"promoted":"demoted",input->promoted?"PROMOTED":"DEMOTED"),text("skip","SKIP"),text("continue","CONTINUE"),finish,true);
             if(transition){addChild(transition,1200);return;}
@@ -447,7 +463,8 @@ public:
         if(m_navigationContext!=navigationContext){m_navigationContext=navigationContext;m_browsingBoard=false;m_manualMap=false;m_entrySyncAfter.reset();m_replayRequestedContext.clear();m_launchedContext.clear();++m_boardVisit;}
         auto const stage=runtime.flowStage();auto const outcome=stage==SurvivalFlowStage::EliminatedChoice || stage==SurvivalFlowStage::PersonalResult || stage==SurvivalFlowStage::Ceremony || stage==SurvivalFlowStage::ScoreAnimation;
         if(outcome){
-            if(stage==SurvivalFlowStage::ScoreAnimation)beginResultMotion();
+            if((stage==SurvivalFlowStage::Ceremony||stage==SurvivalFlowStage::ScoreAnimation) && runtime.promotionMotionPending())beginPromotionMotion();
+            else if(stage==SurvivalFlowStage::ScoreAnimation)beginResultMotion();
             syncAudio(view);if(m_selection->isVisible())m_selection->hideSelection();if(view.nextMap["map"].isObject())m_selection->prepareServerMap(runtime.preparationView());m_grid->setVisible(false);m_pager->setVisible(false);m_heading->setVisible(false);m_map->setVisible(false);m_status->setVisible(false);m_boardClock->setVisible(false);m_spinner->setVisible(false);
             for(auto* button:{m_liveWatch,m_resume,m_continue,m_surrender,m_freePlay,m_backToMap,m_viewBoard,m_force})if(button)button->setVisible(false);
             m_outcome->setVisible(!m_motion);if(!m_motion){m_outcome->present(view,stage,dt);

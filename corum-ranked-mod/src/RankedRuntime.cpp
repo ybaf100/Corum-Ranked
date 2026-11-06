@@ -223,6 +223,17 @@ corum::ranked::AchievementUnlockNoticeView parseAchievementNotice(matjson::Value
     return notice;
 }
 
+std::vector<corum::ranked::TierCutoffView> parseTierBands(matjson::Value const& value) {
+    std::vector<corum::ranked::TierCutoffView> bands;
+    for (auto const& band : value.asArray().unwrapOr(std::vector<matjson::Value>{})) {
+        auto const cutoff = band["minInclusive"].asInt();
+        if (!cutoff.isOk()) return {};
+        bands.push_back({band["tier"].asString().unwrapOr(""), static_cast<int>(cutoff.unwrap())});
+    }
+    std::sort(bands.begin(), bands.end(), [](auto const& a, auto const& b) { return a.minimum < b.minimum; });
+    return bands;
+}
+
 corum::ranked::StandingView parseStanding(matjson::Value const& value) {
     corum::ranked::StandingView view;
     if (!value.isObject()) return view;
@@ -686,6 +697,10 @@ void RankedRuntime::begin() {
     fetchConfig();
 }
 
+void RankedRuntime::observeSoloTierBands(matjson::Value const& bands) {
+    if (bands.isArray()) m_view.soloTierBands = parseTierBands(bands);
+}
+
 void RankedRuntime::observeSeasons(matjson::Value const& seasons) {
     auto read = [&](char const* key) {
         SeasonView season;auto const& value = seasons[key];
@@ -778,7 +793,7 @@ void RankedRuntime::fetchConfig() {
             m_view.survivalEnabled = root["modes"]["survival"]["enabled"].asBool().unwrapOr(false);
             m_view.survivalConfigReady = root["modes"]["survival"]["ready"].asBool().unwrapOr(false);
         m_view.survivalPlayerCount=root["modes"]["survival"]["matchPlayerCount"].asInt().unwrapOr(16)==64?64:16;
-        observeSeasons(root["seasons"]);
+        observeSeasons(root["seasons"]);observeSoloTierBands(root["soloTierBands"]);
 
             EnvironmentPolicy policy;
             if (root.contains("modRestrictionEnabled") && !root["modRestrictionEnabled"].isBool()) {
@@ -4311,7 +4326,7 @@ void RankedRuntime::fetchModeAvailability() {
         m_view.survivalEnabled = root["modes"]["survival"]["enabled"].asBool().unwrapOr(false);
         m_view.survivalConfigReady = root["modes"]["survival"]["ready"].asBool().unwrapOr(false);
         m_view.survivalPlayerCount=root["modes"]["survival"]["matchPlayerCount"].asInt().unwrapOr(16)==64?64:16;
-        observeSeasons(root["seasons"]);
+        observeSeasons(root["seasons"]);observeSoloTierBands(root["soloTierBands"]);
     });
 }
 
@@ -4350,6 +4365,7 @@ void RankedRuntime::fetchSurvivalProfile() {
         auto const recovery = profile["warningRecoveryLp"].asInt();
         sur.warningRecoveryLp = recovery.isOk() ? std::optional<int>(static_cast<int>(recovery.unwrap())) : std::nullopt;
         sur.standing = parseStanding(root["standing"]);
+        if (root["tierBands"].isArray()) sur.tierBands = parseTierBands(root["tierBands"]);
         observeServerNow(root); ++m_view.revision;
     });
 }

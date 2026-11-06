@@ -100,7 +100,7 @@ test('result settlement animation starts automatically once, waits for real sett
 #include <string>
 struct Value{bool ready=false;bool isObject()const{return ready;}};
 struct ScoreAnimationInput{bool promoted=false,demoted=false;std::string beforeTier="RED",afterTier="RED";};
-struct SurvivalRuntime{struct View{std::string id="match";Value result;}v;std::optional<ScoreAnimationInput> input;static auto&get(){static SurvivalRuntime r;return r;}auto const&view(){return v;}std::string resultFlowKey()const{return v.id;}auto scoreAnimation(){return input;}};
+struct SurvivalRuntime{struct View{std::string id="match";Value result;}v;std::optional<ScoreAnimationInput> input;static auto&get(){static SurvivalRuntime r;return r;}auto const&view(){return v;}std::string resultFlowKey()const{return v.id;}auto scoreAnimation(){return input;}bool promotionMotionShown()const{return false;}};
 struct Mod{std::string saved;static Mod*get(){static Mod m;return &m;}template<class T>T getSavedValue(char const*){return saved;}void setSavedValue(char const*,std::string s){saved=s;}};
 template<class T>struct WeakRef{T*p;WeakRef(T*p):p(p){}struct Lock{T*p;explicit operator bool()const{return p;}T*operator->(){return p;}};Lock lock()const{return {p};}};
 std::string text(char const*,char const*s){return s;}
