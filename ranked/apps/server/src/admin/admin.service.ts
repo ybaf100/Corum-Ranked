@@ -12,6 +12,7 @@ import { SERVER_CLOCK, type ServerClock } from "../common/runtime.module.js";
 import { sessionAliveSince } from "../session/session-presence.policy.js";
 import { signalAfterCommit } from "../database/database-work.js";
 import { readRankedAudioVolumes } from "../config/ranked-audio-volume.js";
+import { readRankedSeasons } from "../config/ranked-seasons.js";
 
 @Injectable()
 export class AdminService {
@@ -36,6 +37,8 @@ export class AdminService {
     if(["RESET_DB","RESET_HISTORY"].includes(body.action) && !body.scope)throw new BadRequestException("Choose the reset scope explicitly");
     if(common && scope!=="COMMON")throw new BadRequestException("Achievements and audio belong to COMMON");
     if(scope==="COMMON" && ["SET_LP","SET_MMR","SET_BOTH","DELETE_BOTS"].includes(body.action))throw new BadRequestException("Choose a rating mode");
+    const seasonAction=body.action==="GET_SEASONS" || body.action==="SET_SEASON";
+    if(body.action==="SET_SEASON" && scope==="COMMON")throw new BadRequestException("Choose Solo Ranked or Survival for its season");
     const modeAction=body.action==="GET_SURVIVAL_MODE" || body.action==="SET_SURVIVAL_MODE";
     if(modeAction && (scope!=="SURVIVAL" || !this.survivalConfig))throw new BadRequestException("Choose Survival for its operating format");
     if(body.action==="SET_SURVIVAL_MODE" && body.matchPlayerCount!==16 && body.matchPlayerCount!==64)throw new BadRequestException("Choose 16 or 64 players");
@@ -50,6 +53,18 @@ export class AdminService {
           AND s.last_heartbeat_at>$4 AND lower(p.gd_username)='hwanhee1'
         FOR UPDATE OF s`,[session.sessionId,session.playerId,now.toISOString(),sessionAliveSince(now)]);
       if (!caller.rows.length) throw new ForbiddenException("Admin session expired");
+      if(seasonAction){
+        if(body.action==="SET_SEASON"){
+          const target=body.seasonTargetAt===undefined||body.seasonTargetAt===null?null:new Date(body.seasonTargetAt);
+          if(target && !Number.isFinite(target.getTime()))throw new BadRequestException("Enter a valid date and time");
+          await tx.query(`INSERT INTO ranked_seasons(mode,preseason,season_number,target_at,updated_at,updated_by_account_id)
+            VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(mode) DO UPDATE SET preseason=EXCLUDED.preseason,season_number=EXCLUDED.season_number,
+            target_at=EXCLUDED.target_at,updated_at=EXCLUDED.updated_at,updated_by_account_id=EXCLUDED.updated_by_account_id`,
+            [scope,body.preseason??body.seasonNumber===undefined,body.seasonNumber??0,target?target.toISOString():null,now.toISOString(),session.gdAccountId]);
+        }
+        const seasons=await readRankedSeasons(tx);
+        return {ok:true,scope,seasons,message:body.action==="SET_SEASON"?`Season saved for ${scope}.`:"Seasons loaded."};
+      }
       if(modeAction){
         const count=await this.survivalConfig!.operationMode(tx,body.action==="SET_SURVIVAL_MODE"?body.matchPlayerCount:undefined);
         if(body.action==="SET_SURVIVAL_MODE")signalAfterCommit(tx,"survival-queue");

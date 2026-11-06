@@ -43,6 +43,7 @@
 #include "ui/HudEditorPopup.hpp"
 #include "ui/PlacementGradeBadge.hpp"
 #include "ui/PlayerIcon.hpp"
+#include "ui/SeasonTimer.hpp"
 #include "ui/RankedTranslations.hpp"
 #include "ui/RankedVisuals.hpp"
 #include "ui/RankedInput.hpp"
@@ -479,6 +480,9 @@ class CorumRankedLayer final : public CCLayerColor {
     float m_queueSweepAngle = 0.0f;
     SteadyClock::time_point m_radarFrameAt{};
     struct RadarBlip { float radius = 0, angle = 0, age = 0, fade = 0, matchedFor = 0; bool leaving = false, matched = false; };
+    // Season timers: one shared under the title, or one per mode card. Ref
+    // keeps a detached node valid; only timers still in the scene update.
+    Ref<corum::ranked::ui::SeasonTimer> m_seasonShared, m_seasonSolo, m_seasonSurvival;
     std::map<std::string, RadarBlip> m_radarBlips;
     CCMenuItemSpriteExtra *m_queueLeave = nullptr, *m_queueFill = nullptr;
     float m_statusTextWidth = 0;
@@ -714,7 +718,20 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     void audioFrame(float) { RankedAudioManager::get().tick(); }
-    void radarFrame(float) { drawQueueArena(); }
+    void radarFrame(float) { drawQueueArena(); updateSeasonTimers(); }
+    void updateSeasonTimers() {
+        auto const& view = RankedRuntime::get().view();
+        auto const now = RankedRuntime::get().serverNowMillis();
+        auto present = [&](corum::ranked::ui::SeasonTimer* timer, corum::ranked::SeasonView const& season, bool enabled) {
+            if (timer && timer->getParent()) timer->present(season, enabled, now);
+        };
+        present(m_seasonShared.data(), view.soloSeason, view.soloEnabled);
+        present(m_seasonSolo.data(), view.soloSeason, view.soloEnabled);
+        present(m_seasonSurvival.data(), view.survivalSeason, view.survivalEnabled);
+    }
+    bool seasonShared(RuntimeView const& view) const {
+        return corum::ranked::seasonTimerShared(view.soloSeason, view.soloEnabled, view.survivalSeason, view.survivalEnabled);
+    }
 
     void refresh(float) {
         auto& runtime = RankedRuntime::get();
@@ -890,7 +907,8 @@ class CorumRankedLayer final : public CCLayerColor {
                 view.survival.standing.rank.value_or(0),view.survival.standing.total,
                 view.achievements.equippedTitle.achievementId,view.achievements.equippedTitle.level.value_or(0),
                 view.achievements.totalAp,view.achievements.unclaimedRewardCount,
-                CCDirector::sharedDirector()->getWinSize().width,CCDirector::sharedDirector()->getWinSize().height) + fmt::format(":sur-record:{}:{}:format:{}",view.survival.wins,view.survival.losses,view.survivalPlayerCount);
+                CCDirector::sharedDirector()->getWinSize().width,CCDirector::sharedDirector()->getWinSize().height) + fmt::format(":sur-record:{}:{}:format:{}",view.survival.wins,view.survival.losses,view.survivalPlayerCount)
+                + fmt::format(":season:{}:{}:{}",seasonShared(view),view.soloSeason.targetAtMs.has_value(),view.survivalSeason.targetAtMs.has_value());
         }
         if (view.match.placement) {
             if (view.placement.state == "STAGE_RESULT" && !view.placement.stageResults.empty()) {
@@ -2392,7 +2410,14 @@ class CorumRankedLayer final : public CCLayerColor {
         record->setID("ranked-profile-record"_spr); m_root->addChild(record,8);
 
 
-        auto* modeName = makeLabel(survival ? "SURVIVAL" : "SOLO RANKED",0.35f,{0,115},survival ? kCyan : kGold,"black");
+        // Separate seasons: each card carries its own timer under the mode name.
+        auto const& cardSeason = survival ? source.survivalSeason : source.soloSeason;
+        auto const perCardTimer = !seasonShared(source) && cardSeason.targetAtMs.has_value();
+        auto* modeName = makeLabel(survival ? "SURVIVAL" : "SOLO RANKED",0.35f,{0,perCardTimer ? 128.0f : 115.0f},survival ? kCyan : kGold,"black");
+        if (perCardTimer) if (auto* timer = corum::ranked::ui::SeasonTimer::create(true)) {
+            timer->setPosition({0, 113}); m_root->addChild(timer, 8);
+            if (survival) m_seasonSurvival = timer; else m_seasonSolo = timer;
+        }
         corum::ranked::ui::fitMenuLabelWidth(modeName,150,0.35f,0.25f); m_root->addChild(modeName,8);
         if (survival && source.survival.profile.promotion.active) {
             auto const& sur = source.survival;
@@ -3240,6 +3265,15 @@ class CorumRankedLayer final : public CCLayerColor {
             else addButton(tr("retry","RETRY"),{size.width/2,size.height/2-45},menu_selector(CorumRankedLayer::onRetry),false,0.65f);
             return;
         }
+        m_seasonShared = nullptr; m_seasonSolo = nullptr; m_seasonSurvival = nullptr;
+        if (seasonShared(view) && view.soloSeason.targetAtMs) {
+            // Both modes share the season: one timer between the title and the population.
+            if (auto* timer = corum::ranked::ui::SeasonTimer::create(false)) {
+                timer->setPosition({size.width / 2, size.height - 47});
+                m_root->addChild(timer, 7); m_seasonShared = timer;
+                if (auto* population = m_root->getChildByID("ranked-lobby-population"_spr)) population->setPositionY(size.height - 61);
+            }
+        }
         auto const layout = corum::ranked::modeLobbyLayout(size.width,size.height);
         auto const selected = m_modeTransition.selected();
         m_lobbySurvival = makeLobbyGroup({selected == corum::ranked::RankedMode::SoloRanked ? layout.rightX : layout.leftX,layout.centerY},layout.scale,"survival-profile-card"_spr);
@@ -3248,6 +3282,7 @@ class CorumRankedLayer final : public CCLayerColor {
         renderModeCard(view,corum::ranked::RankedMode::Survival,m_lobbySurvival);
         renderModeCard(view,corum::ranked::RankedMode::SoloRanked,m_lobbySolo);
         renderLobbyTools(view);
+        updateSeasonTimers();
         if (selected) {
             renderModePanel(view,*selected);
             auto* hidden = *selected == corum::ranked::RankedMode::Survival ? m_lobbySolo : m_lobbySurvival;

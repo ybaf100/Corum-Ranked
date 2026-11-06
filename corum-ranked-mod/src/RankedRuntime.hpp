@@ -21,6 +21,7 @@
 #include <string>
 #include <unordered_set>
 #include <vector>
+#include "domain/SeasonPresentation.hpp"
 
 namespace corum::ranked {
 
@@ -453,6 +454,8 @@ struct SoloQueueRadar {
 };
 struct RuntimeView {
     SoloQueueRadar queueRadar;
+    // Season per mode (Admin): label and end/start instant.
+    SeasonView soloSeason, survivalSeason;
     int lobbyOffline=0,lobbyOnline=0;bool lobbyPopulationKnown=false;
     bool soloEnabled = false, survivalEnabled = false, survivalConfigReady = false;
     int survivalPlayerCount=16;
@@ -498,6 +501,7 @@ public:
     void begin();
     void finishAdmission();
     [[nodiscard]] std::int64_t serverNowMillis() const;
+    void observeSeasons(matjson::Value const& seasons);
     void retireDecisiveAttempt();
     void takeOverSession();
     void leaveRanked();

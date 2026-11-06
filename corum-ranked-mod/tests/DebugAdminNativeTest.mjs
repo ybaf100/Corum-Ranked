@@ -66,10 +66,10 @@ namespace geode::async{template<class T>struct TaskHolder{std::shared_ptr<web::J
  void cancel(){if(job)job->cancelled=true;}template<class F>void spawn(web::Operation op,F f){job=std::make_shared<web::Job>(web::Job{op,f,false});web::jobs.push_back(job);}};}
 namespace async=geode::async;
 ${strip(read('../src/domain/RankedMode.hpp'))}
-namespace corum::ranked{enum class RuntimeStage{Ready,Matched,Error};
+namespace corum::ranked{inline std::optional<std::int64_t> parseIso8601Millis(std::string_view){return 1700000000000;}enum class RuntimeStage{Ready,Matched,Error};
 struct RankedRuntime{struct View{RuntimeStage stage=RuntimeStage::Ready;bool soloEnabled=true,survivalEnabled=true;bool accountActiveElsewhere=true;}v;std::string token="session";int reloads=0,takeovers=0,volumeUpdates=0;
  static RankedRuntime& get(){static RankedRuntime r;return r;}auto const& view()const{return v;}std::string spectatorLiveSessionToken()const{return token;}
- void applyAudioVolumes(matjson::Value const&){++volumeUpdates;}void applyAdminProjection(matjson::Value const&,std::string const&){++reloads;}void begin(){++reloads;}void takeOverSession(){++takeovers;v.accountActiveElsewhere=false;}};
+ void applyAudioVolumes(matjson::Value const&){++volumeUpdates;}void observeSeasons(matjson::Value const&){++reloads;}void applyAdminProjection(matjson::Value const&,std::string const&){++reloads;}void begin(){++reloads;}void takeOverSession(){++takeovers;v.accountActiveElsewhere=false;}};
 inline int bots=0;void showDebugBotPasswordPopup(){++bots;}
 namespace i18n{std::string text(char const*,char const* english){return english;}}
 namespace ui{inline constexpr ccColor3B Red{255,60,60},Blue{80,120,220},Cyan{64,224,255},Gold{255,205,65},Surface{8,15,25},SurfaceRaised{18,25,40},Text{230,235,244},TextMuted{150,150,150};

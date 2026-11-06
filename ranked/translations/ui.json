@@ -2974,5 +2974,57 @@
   "survival-vote-confirming": {
     "en": "CONFIRMING IN {}s · TAP ANOTHER CARD TO CHANGE",
     "ko": "{}초 후 확정 · 다른 난이도를 눌러 변경"
+  },
+  "season-preseason": {
+    "en": "PRESEASON",
+    "ko": "프리시즌"
+  },
+  "season-number": {
+    "en": "SEASON {}",
+    "ko": "시즌 {}"
+  },
+  "season-left-days": {
+    "en": "{}d {}h left",
+    "ko": "{}일 {}시간 남음"
+  },
+  "season-left-clock": {
+    "en": "{}h {}m {}s left",
+    "ko": "{}시간 {}분 {}초 남음"
+  },
+  "season-ended": {
+    "en": "SEASON ENDED",
+    "ko": "시즌 종료"
+  },
+  "season-starts-days": {
+    "en": "Starts in {}d {}h",
+    "ko": "{}일 {}시간 뒤 시작"
+  },
+  "season-starts-hours": {
+    "en": "Starts in {}h {}m",
+    "ko": "{}시간 {}분 뒤 시작"
+  },
+  "admin-season": {
+    "en": "Season",
+    "ko": "시즌"
+  },
+  "admin-season-time": {
+    "en": "End time (enabled) / start time (disabled), local time",
+    "ko": "활성 모드는 종료 시각, 비활성 모드는 시작 시각 · 현지 시간"
+  },
+  "admin-season-save": {
+    "en": "Save",
+    "ko": "저장"
+  },
+  "admin-season-number": {
+    "en": "Enter the season number.",
+    "ko": "시즌 번호를 입력하세요."
+  },
+  "admin-season-time-invalid": {
+    "en": "Enter the time as YYYY-MM-DD HH:MM.",
+    "ko": "시각을 YYYY-MM-DD HH:MM 형식으로 입력하세요."
+  },
+  "admin-season-scope": {
+    "en": "Choose Solo Ranked or Survival for its season.",
+    "ko": "시즌은 솔랭 또는 서바이벌에서 설정하세요."
   }
 }

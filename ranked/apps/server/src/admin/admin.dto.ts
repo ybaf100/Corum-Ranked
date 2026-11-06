@@ -1,5 +1,5 @@
-import { IsIn, IsInt, IsOptional, IsString, Length, Max, Min, Equals } from "class-validator";
-export const ADMIN_ACTIONS = ["UNLOCK_ALL", "SET_LP", "SET_MMR", "SET_BOTH", "DELETE_BOTS", "RESET_HISTORY", "RESET_DB", "GET_AUDIO_VOLUMES", "SET_AUDIO_VOLUME", "GET_SURVIVAL_MODE", "SET_SURVIVAL_MODE"] as const;
+import { IsBoolean, IsIn, IsInt, IsISO8601, IsOptional, IsString, Length, Max, Min, Equals, ValidateIf } from "class-validator";
+export const ADMIN_ACTIONS = ["UNLOCK_ALL", "SET_LP", "SET_MMR", "SET_BOTH", "DELETE_BOTS", "RESET_HISTORY", "RESET_DB", "GET_AUDIO_VOLUMES", "SET_AUDIO_VOLUME", "GET_SURVIVAL_MODE", "SET_SURVIVAL_MODE", "GET_SEASONS", "SET_SEASON"] as const;
 export class AdminActionDto {
   @IsOptional() @IsIn(["SOLO_RANKED","SURVIVAL","COMMON"]) public scope?:"SOLO_RANKED"|"SURVIVAL"|"COMMON";
   @IsString() @Length(1,128) public password!: string;
@@ -11,4 +11,9 @@ export class AdminActionDto {
   @IsOptional() @IsInt() @IsIn([16,64]) public matchPlayerCount?:16|64;
   @IsOptional() @IsInt() @Min(1) @Max(2147483647) public songId?: number;
   @IsOptional() @IsInt() @Min(0) @Max(100) public volumePercent?: number;
+  // SET_SEASON: "Preseason" or "Season n", and the season end (enabled mode)
+  // or mode start (disabled mode) as an absolute instant; null clears it.
+  @IsOptional() @IsBoolean() public preseason?: boolean;
+  @IsOptional() @IsInt() @Min(0) @Max(9999) public seasonNumber?: number;
+  @IsOptional() @ValidateIf((_: unknown, value: unknown) => value !== null) @IsISO8601({ strict: true }) public seasonTargetAt?: string | null;
 }

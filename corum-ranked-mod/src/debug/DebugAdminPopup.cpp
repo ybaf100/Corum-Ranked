@@ -11,6 +11,8 @@
 #include <Geode/ui/Popup.hpp>
 #include <Geode/ui/TextInput.hpp>
 #include <charconv>
+#include <ctime>
+#include "../domain/ServerClock.hpp"
 #include <algorithm>
 #include <cmath>
 
@@ -243,6 +245,116 @@ public:
     void onExit() override {m_closed=true;m_request.cancel();m_password.clear();unschedule(schedule_selector(DebugSurvivalModePopup::refresh));if(!m_exited){m_exited=true;CCTouchDispatcher::get()->unregisterForcePrio(this);}Popup::onExit();}
 };
 
+// Season per mode: "Preseason" or "Season n" and one instant entered in the
+// device's local time. The instant is the season end while the mode is
+// enabled, or the mode's start while Ranked config keeps it disabled.
+class DebugSeasonPopup final : public Popup {
+    TextInput *m_number=nullptr,*m_when=nullptr;
+    CCMenuItemSpriteExtra *m_preseason=nullptr,*m_save=nullptr,*m_reload=nullptr;
+    CCLabelBMFont *m_status=nullptr,*m_zone=nullptr;
+    async::TaskHolder<web::WebResponse> m_request;
+    std::string m_password,m_session,m_scope;
+    bool m_isPreseason=true,m_closed=false,m_exited=false,m_busy=false;
+    bool authorized() const {
+        auto* account=GJAccountManager::get();
+        return account && std::string(account->m_username)=="hwanhee1" && m_session==RankedRuntime::get().spectatorLiveSessionToken();
+    }
+    CCNode* preseasonFace() {
+        auto* node=ui::surface({120,30},{},m_isPreseason?ui::Gold:ui::Blue,ui::SurfaceRaised,255,true);
+        auto* caption=ui::menuLabel(i18n::text("season-preseason","PRESEASON"),.28f,{60,15},m_isPreseason?ui::Gold:ui::Text,ui::FontWeight::ExtraBold);
+        ui::fitMenuLabelWidth(caption,108,.28f,.2f);node->addChild(caption,5);return node;
+    }
+    CCMenuItemSpriteExtra* button(CCMenu* menu,std::string const& text,CCPoint at,int tag,ccColor3B accent) {
+        auto* face=ui::surface({140,30},{},accent,ui::SurfaceRaised,255,true);
+        auto* caption=ui::menuLabel(text,.28f,{70,15},ui::Text,ui::FontWeight::ExtraBold);ui::fitMenuLabelWidth(caption,128,.28f,.2f);face->addChild(caption,5);
+        auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(DebugSeasonPopup::onAction));item->setTag(tag);item->setPosition(at);menu->addChild(item);return item;
+    }
+    // "YYYY-MM-DD HH:MM" in local time <-> an absolute ISO-8601 UTC instant.
+    static std::optional<std::string> localToIso(std::string const& text) {
+        std::tm local{};int y=0,mo=0,d=0,h=0,mi=0;
+        if(std::sscanf(text.c_str(),"%d-%d-%d %d:%d",&y,&mo,&d,&h,&mi)!=5 || mo<1||mo>12||d<1||d>31||h<0||h>23||mi<0||mi>59)return std::nullopt;
+        local.tm_year=y-1900;local.tm_mon=mo-1;local.tm_mday=d;local.tm_hour=h;local.tm_min=mi;local.tm_isdst=-1;
+        auto const when=std::mktime(&local);if(when==static_cast<std::time_t>(-1))return std::nullopt;
+        auto const* utc=std::gmtime(&when);if(!utc)return std::nullopt;
+        char out[32];std::strftime(out,sizeof(out),"%Y-%m-%dT%H:%M:%SZ",utc);return std::string(out);
+    }
+    static std::string isoToLocal(std::string const& iso) {
+        auto const millis=parseIso8601Millis(iso);if(!millis)return {};
+        auto const when=static_cast<std::time_t>(*millis/1000);auto const* local=std::localtime(&when);if(!local)return {};
+        char out[32];std::strftime(out,sizeof(out),"%Y-%m-%d %H:%M",local);return out;
+    }
+    static std::string zoneText() {
+        auto const now=std::time(nullptr);std::tm local=*std::localtime(&now),utc=*std::gmtime(&now);
+        local.tm_isdst=-1;utc.tm_isdst=-1;
+        auto const offset=static_cast<long>(std::difftime(std::mktime(&local),std::mktime(&utc))/60);
+        return fmt::format("UTC{}{:02}:{:02}",offset<0?"-":"+",std::labs(offset)/60,std::labs(offset)%60);
+    }
+    void status(std::string const& message){m_status->setString(message.c_str());ui::fitFullMenuLabel(m_status,324,28,.24f);}
+    void controls(){
+        m_preseason->setNormalImage(preseasonFace());m_preseason->updateSprite();
+        m_number->setVisible(!m_isPreseason);
+        for(auto* item:{m_preseason,m_save,m_reload})item->setEnabled(!m_busy);
+    }
+    bool init(std::string password,std::string scope) {
+        m_session=RankedRuntime::get().spectatorLiveSessionToken();m_scope=std::move(scope);
+        if(password.empty() || !authorized() || !Popup::init(360,250))return false;
+        m_password=std::move(password);m_bgSprite->setVisible(false);setID("ranked-season-admin"_spr);
+        auto* panel=ui::surface({360,250},{180,125},ui::Gold,ui::Surface,255,true);m_mainLayer->addChild(panel);
+        auto* title=ui::menuLabel(fmt::format("{} · {}",i18n::text("admin-season","Season"),m_scope=="SURVIVAL"?i18n::text("survival","SURVIVAL"):i18n::text("solo-ranked","SOLO RANKED")),
+            .38f,{180,226},ui::Gold,ui::FontWeight::Black);ui::fitMenuLabelWidth(title,324,.38f,.26f);panel->addChild(title);
+        auto* menu=CCMenu::create();menu->setPosition(CCPointZero);panel->addChild(menu,20);
+        m_preseason=CCMenuItemSpriteExtra::create(preseasonFace(),this,menu_selector(DebugSeasonPopup::onAction));m_preseason->setTag(1);m_preseason->setPosition({90,186});menu->addChild(m_preseason);
+        m_number=TextInput::create(120,"Season n");m_number->setPosition({262,186});m_number->setFilter("0123456789");m_number->setMaxCharCount(4);panel->addChild(m_number,20);
+        m_when=TextInput::create(300,"YYYY-MM-DD HH:MM");m_when->setPosition({180,140});m_when->setFilter("0123456789-: ");m_when->setMaxCharCount(16);panel->addChild(m_when,20);
+        m_zone=ui::menuLabel(fmt::format("{} ({})",i18n::text("admin-season-time","End time (enabled) / start time (disabled), local time"),zoneText()),.20f,{180,112},ui::TextMuted);
+        ui::fitFullMenuLabel(m_zone,330,24,.20f);panel->addChild(m_zone);
+        m_reload=button(menu,i18n::text("admin-audio-reload","Reload"),{98,74},0,ui::Blue);
+        m_save=button(menu,i18n::text("admin-season-save","Save"),{262,74},2,ui::Gold);
+        m_status=ui::menuLabel("",.22f,{180,28},ui::TextMuted);panel->addChild(m_status);
+        controls();schedule(schedule_selector(DebugSeasonPopup::refresh),.1f);request(false);return true;
+    }
+    void onAction(CCObject* object){
+        if(m_closed || m_busy || !authorized())return;
+        auto* item=typeinfo_cast<CCMenuItemSpriteExtra*>(object);if(!item)return;
+        if(item->getTag()==1){m_isPreseason=!m_isPreseason;controls();return;}
+        request(item->getTag()==2);
+    }
+    void request(bool save){
+        if(m_busy || m_closed || !authorized())return;
+        matjson::Value body;body["scope"]=m_scope;body["password"]=m_password;body["action"]=save?"SET_SEASON":"GET_SEASONS";
+        if(save){
+            body["preseason"]=m_isPreseason;
+            if(!m_isPreseason){auto const text=std::string(m_number->getString());int number=0;
+                auto const parsed=std::from_chars(text.data(),text.data()+text.size(),number);
+                if(text.empty()||parsed.ec!=std::errc{}){status(i18n::text("admin-season-number","Enter the season number."));return;}
+                body["seasonNumber"]=number;}
+            auto const when=std::string(m_when->getString());
+            if(when.empty())body["seasonTargetAt"]=nullptr;
+            else if(auto iso=localToIso(when))body["seasonTargetAt"]=*iso;
+            else{status(i18n::text("admin-season-time-invalid","Enter the time as YYYY-MM-DD HH:MM."));return;}
+        }
+        web::WebRequest http;http.header("Authorization","Bearer "+m_session);http.bodyJSON(body);http.followRedirects(false);http.timeout(std::chrono::seconds(20));
+        m_busy=true;controls();status(i18n::text("admin-working","Applying changes..."));
+        m_request.spawn(http.post("https://api.52-74-37-130.sslip.io/api/ranked/debug/admin"),[weak=WeakRef(this),save](web::WebResponse response){
+            auto keep=weak.lock();if(!keep || keep->m_closed || !keep->isRunning() || !keep->authorized())return;
+            keep->m_busy=false;auto const root=response.json().unwrapOr(matjson::Value());
+            if(response.code()<200 || response.code()>=300){keep->controls();keep->status(root["message"].asString().unwrapOr("Admin request failed."));return;}
+            auto const season=root["seasons"][keep->m_scope];
+            keep->m_isPreseason=season["preseason"].asBool().unwrapOr(true);
+            keep->m_number->setString(std::to_string(season["number"].asInt().unwrapOr(0)));
+            keep->m_when->setString(isoToLocal(season["targetAt"].asString().unwrapOr("")));
+            keep->controls();keep->status(root["message"].asString().unwrapOr(save?"Season saved.":"Seasons loaded."));
+            RankedRuntime::get().observeSeasons(root["seasons"]);
+        });
+    }
+    void refresh(float){if(!m_closed && !authorized())dismiss();}
+public:
+    static DebugSeasonPopup* create(std::string password,std::string scope){auto* popup=new DebugSeasonPopup;if(popup->init(std::move(password),std::move(scope))){popup->autorelease();return popup;}delete popup;return nullptr;}
+    void dismiss(){if(m_closed)return;m_closed=true;auto const keep=Ref<DebugSeasonPopup>(this);queueInMainThread([keep]{if(keep->isRunning())keep->Popup::onClose(nullptr);});}
+    void onClose(CCObject*) override {dismiss();}
+    void onExit() override {m_closed=true;m_request.cancel();m_password.clear();unschedule(schedule_selector(DebugSeasonPopup::refresh));if(!m_exited){m_exited=true;CCTouchDispatcher::get()->unregisterForcePrio(this);}Popup::onExit();}
+};
+
 class DebugAdminPopup final : public Popup {
     TextInput *m_username=nullptr,*m_password=nullptr,*m_lp=nullptr,*m_mmr=nullptr;
     CCLabelBMFont* m_status=nullptr;
@@ -250,6 +362,7 @@ class DebugAdminPopup final : public Popup {
     std::optional<WeakRef<ui::RankedConfirmPopup>> m_confirm;
     int m_scope=0;
     CCMenu* m_scopes=nullptr;
+    CCMenuItemSpriteExtra* m_seasonButton=nullptr;
     async::TaskHolder<web::WebResponse> m_request;
     std::string m_session;
     bool m_closed=false,m_exited=false,m_busy=false;
@@ -272,6 +385,13 @@ class DebugAdminPopup final : public Popup {
         auto* panel=ui::surface({384,340},{192,170},ui::Red,ui::Surface,255,true); m_mainLayer->addChild(panel);
         panel->addChild(ui::menuLabel("Admin / hwanhee1",.48f,{192,318},ui::Red,ui::FontWeight::Black));
         m_scopes=CCMenu::create();m_scopes->setPosition(CCPointZero);panel->addChild(m_scopes,30);
+        {
+            auto* face=ui::surface({64,22},{},ui::Gold,ui::SurfaceRaised,255,true);
+            auto* caption=ui::menuLabel(i18n::text("admin-season","Season"),.24f,{32,11},ui::Gold,ui::FontWeight::ExtraBold);
+            ui::fitMenuLabelWidth(caption,56,.24f,.16f);face->addChild(caption,5);
+            m_seasonButton=CCMenuItemSpriteExtra::create(face,this,menu_selector(DebugAdminPopup::onAction));
+            m_seasonButton->setTag(30);m_seasonButton->setPosition({342,318});m_scopes->addChild(m_seasonButton);
+        }
         for(int i=0;i<3;i++) {
             auto* item=CCMenuItemSpriteExtra::create(scopeFace(i),this,menu_selector(DebugAdminPopup::onAction));
             item->setTag(20+i);item->setPosition({64+i*128.0f,280});m_scopes->addChild(item);
@@ -309,6 +429,7 @@ class DebugAdminPopup final : public Popup {
     }
     void refreshScope() {
         for(auto* object:CCArrayExt<CCObject*>(m_scopes->getChildren()))if(auto* item=typeinfo_cast<CCMenuItemSpriteExtra*>(object)) {
+            if(item->getTag()==30){item->setEnabled(!m_busy);continue;}
             item->setNormalImage(scopeFace(item->getTag()-20));item->updateSprite();item->setEnabled(!m_busy);
         }
         for(auto* object:CCArrayExt<CCObject*>(m_actions->getChildren()))if(auto* item=typeinfo_cast<CCMenuItemSpriteExtra*>(object))item->setVisible(item->getTag()==8?m_scope==1:item->getTag()!=0 || m_scope!=1);
@@ -331,6 +452,18 @@ class DebugAdminPopup final : public Popup {
         auto* item=typeinfo_cast<CCMenuItemSpriteExtra*>(sender); if (!item) return;
         auto const choice=item->getTag();
         if(choice>=20&&choice<=22){m_scope=choice-20;refreshScope();status("");return;}
+        if(choice==30){
+            if(m_scope==2){status(i18n::text("admin-season-scope","Choose Solo Ranked or Survival for its season."));return;}
+            auto const password=std::string(m_password->getString());
+            if(password.empty()){status(i18n::text("admin-password-needed","Enter the debug password."));return;}
+            m_closed=true;auto const keep=Ref<DebugAdminPopup>(this);auto const seasonScope=scope();
+            queueInMainThread([keep,password,seasonScope]{
+                if(!keep->isRunning())return;
+                keep->Popup::onClose(nullptr);
+                if(auto* popup=DebugSeasonPopup::create(password,seasonScope))popup->show();
+            });
+            return;
+        }
         if(!scopeAction(choice))return;
         if (choice==7 || choice==8) {
             auto const password=std::string(m_password->getString());

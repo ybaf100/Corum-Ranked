@@ -686,6 +686,21 @@ void RankedRuntime::begin() {
     fetchConfig();
 }
 
+void RankedRuntime::observeSeasons(matjson::Value const& seasons) {
+    auto read = [&](char const* key) {
+        SeasonView season;auto const& value = seasons[key];
+        if (!value.isObject()) return season;
+        season.known = true;
+        season.preseason = value["preseason"].asBool().unwrapOr(true);
+        season.number = static_cast<int>(value["number"].asInt().unwrapOr(0));
+        auto const target = value["targetAt"].asString().unwrapOr("");
+        if (!target.empty()) season.targetAtMs = parseIso8601Millis(target);
+        return season;
+    };
+    m_view.soloSeason = read("SOLO_RANKED");
+    m_view.survivalSeason = read("SURVIVAL");
+}
+
 void RankedRuntime::fetchConfig() {
     if (m_controlBusy) return;
     m_controlBusy = true;
@@ -763,6 +778,7 @@ void RankedRuntime::fetchConfig() {
             m_view.survivalEnabled = root["modes"]["survival"]["enabled"].asBool().unwrapOr(false);
             m_view.survivalConfigReady = root["modes"]["survival"]["ready"].asBool().unwrapOr(false);
         m_view.survivalPlayerCount=root["modes"]["survival"]["matchPlayerCount"].asInt().unwrapOr(16)==64?64:16;
+        observeSeasons(root["seasons"]);
 
             EnvironmentPolicy policy;
             if (root.contains("modRestrictionEnabled") && !root["modRestrictionEnabled"].isBool()) {
@@ -4291,6 +4307,7 @@ void RankedRuntime::fetchModeAvailability() {
         m_view.survivalEnabled = root["modes"]["survival"]["enabled"].asBool().unwrapOr(false);
         m_view.survivalConfigReady = root["modes"]["survival"]["ready"].asBool().unwrapOr(false);
         m_view.survivalPlayerCount=root["modes"]["survival"]["matchPlayerCount"].asInt().unwrapOr(16)==64?64:16;
+        observeSeasons(root["seasons"]);
     });
 }
 

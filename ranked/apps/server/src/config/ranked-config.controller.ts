@@ -3,6 +3,7 @@ import { REQUIRED_RANKED_CLIENT_VERSION } from "../session/client-version.js";
 import { RankedConfigService } from "./ranked-config.service.js";
 import { DATABASE, type SqlExecutor } from "../database/database.port.js";
 import { readRankedAudioVolumes, withRankedAudioVolumes } from "./ranked-audio-volume.js";
+import { readRankedSeasons } from "./ranked-seasons.js";
 import { SERVER_ENVIRONMENT, type ServerEnvironment } from "./server-environment.js";
 import { RankedModUpdateService } from "./ranked-mod-update.service.js";
 import { SurvivalConfigService } from "./survival-config.service.js";
@@ -38,9 +39,10 @@ export class RankedConfigController {
   @Header("Cache-Control", "no-store")
   public async getClientConfig(): Promise<object> {
     const snapshot = this.rankedConfig.getSnapshot();
-    const [volumes, modUpdates] = await Promise.all([
+    const [volumes, modUpdates, seasons] = await Promise.all([
       readRankedAudioVolumes(snapshot.client, this.database),
       this.modUpdates?.getPublishedClientUpdates() ?? this.environment?.rankedModUpdates ?? {},
+      readRankedSeasons(this.database),
     ]);
     return {
       serverNow: new Date().toISOString(),
@@ -49,6 +51,9 @@ export class RankedConfigController {
       requiredClientVersion: this.modUpdates?.currentRequiredVersion() ?? REQUIRED_RANKED_CLIENT_VERSION,
       modUpdates,
       queueEnabled: snapshot.operational.enabled,
+      // Countdowns are absolute instants: each client subtracts server-synced
+      // time, so the remaining time is right in every time zone.
+      seasons,
       modes: { soloRanked: { ready: true, enabled: snapshot.operational.enabled },
         survival: this.survival?.getStatus() ?? { ready: false, enabled: false } },
       rules: snapshot.operational.rules,
