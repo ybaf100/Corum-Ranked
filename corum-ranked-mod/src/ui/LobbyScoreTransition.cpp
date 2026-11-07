@@ -103,10 +103,25 @@ bool LobbyTierTransition::init(CCLayerColor* group, CCNode* oldEmblem, CCNode* n
 void LobbyTierTransition::update(float dt) {
     m_time += dt;
     apply();
-    if (m_time > 2.6f) unscheduleUpdate();
+    if (m_time > 2.6f) finish();
+}
+
+// The faded-out nodes must leave the card: the lobby re-applies the card's
+// opacity to every child on its own fades, which would bring them back.
+void LobbyTierTransition::finish() {
+    unscheduleUpdate();
+    for (auto* node : {m_oldEmblem.data(), m_oldName.data(), m_bloom.data()})
+        if (node && node->getParent()) node->removeFromParentAndCleanup(true);
+    m_oldEmblem = nullptr;m_oldName = nullptr;m_bloom = nullptr;
+    auto const opacity = static_cast<GLubyte>(m_group ? m_group->getOpacity() : 255);
+    if (m_newEmblem.data()) { m_newEmblem->setScale(1.0f);m_newEmblem->setPosition(m_emblemAt);propagateModeOpacity(m_newEmblem.data(), opacity); }
+    if (m_newName.data()) { m_newName->setPosition(m_nameAt);propagateModeOpacity(m_newName.data(), opacity); }
+    auto const keep = Ref<LobbyTierTransition>(this);
+    queueInMainThread([keep] { if (keep->getParent()) keep->removeFromParentAndCleanup(true); });
 }
 
 void LobbyTierTransition::apply() {
+    if (!m_oldEmblem.data() || !m_newEmblem.data() || !m_oldName.data() || !m_newName.data()) return;
     auto const t = m_time;
     auto const k = m_group ? static_cast<float>(m_group->getOpacity()) / 255.0f : 1.0f;
     auto const out = inOut(seg(t, 1.15f, 1.6f)), in = seg(t, 1.4f, 2.05f);

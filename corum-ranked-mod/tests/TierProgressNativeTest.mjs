@@ -50,4 +50,6 @@ test('lobby animates any LP change since the last visit: digit roll, tier bar, e
  assert.match(popup,/bar->animateFrom\(std::move\(from\), up\)/);
  // Lobby nodes are driven per frame: no CCEase/CCFade actions on them.
  assert.doesNotMatch(motion,/CCEase|CCFadeTo|runAction/);
+ // Faded-out nodes leave the card, so a later lobby fade cannot bring them back.
+ assert.match(motion,/removeFromParentAndCleanup\(true\)/);
 });

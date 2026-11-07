@@ -32,6 +32,7 @@ class LobbyTierTransition final : public cocos2d::CCNode {
     bool init(cocos2d::CCLayerColor* group, cocos2d::CCNode* oldEmblem, cocos2d::CCNode* newEmblem, cocos2d::CCNode* oldName,
         cocos2d::CCNode* newName, cocos2d::CCNode* bloom, bool up);
     void apply();
+    void finish();
 public:
     static LobbyTierTransition* create(cocos2d::CCLayerColor* group, cocos2d::CCNode* oldEmblem, cocos2d::CCNode* newEmblem,
         cocos2d::CCNode* oldName, cocos2d::CCNode* newName, cocos2d::CCNode* bloom, bool up);
