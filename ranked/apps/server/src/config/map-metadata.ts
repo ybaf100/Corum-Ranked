@@ -206,7 +206,9 @@ export class RankedMapMetadataResolver {
         durationSeconds: native.verificationSeconds } : {}) };
       return { ...map, creator: map.creator || info?.creator || (official ? "RobTop" : ""),
         difficulty: map.difficulty || info?.difficulty || "", metadata: { ...(info?.metadata ?? fallback),
-          durationSeconds: explicitLengthSeconds(map.length) ?? info?.metadata.durationSeconds ?? fallback.durationSeconds } };
+          durationSeconds: explicitLengthSeconds(map.length) ?? info?.metadata.durationSeconds ?? fallback.durationSeconds,
+          // The sheet's difficulty is a Corum rating; keep the GD label for display.
+          gdDifficulty: info?.difficulty || null } };
     });
     // Persisted config snapshots deduplicate by generation. A display change
     // needs a new immutable snapshot; active games retain their old catalog.

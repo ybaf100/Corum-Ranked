@@ -14,7 +14,7 @@ class RankedHistoryFilterPopup final:public Popup {
     std::vector<RankedHistoryFilterChoice> m_choices;
     std::function<void(std::string)> m_choose;
     bool m_closed=false,m_exited=false;
-    bool init(std::vector<RankedHistoryFilterChoice> choices,std::string const& selected,std::function<void(std::string)> choose) {
+    bool init(std::vector<RankedHistoryFilterChoice> choices,std::string const& selected,std::function<void(std::string)> choose,std::string const& heading) {
         if(choices.empty()||choices.size()>7)return false;
         auto const height=86.f+choices.size()*34.f;
         auto const layout=rankedPopupLayout({280,height},CCDirector::sharedDirector()->getWinSize());
@@ -23,7 +23,7 @@ class RankedHistoryFilterPopup final:public Popup {
         m_bgSprite->setVisible(false);m_closeBtn->setVisible(false);setID("ranked-history-filter-popup"_spr);
         auto* content=rankedPopupContent(m_mainLayer,m_buttonMenu,layout);
         auto* panel=surface({280,height},{140,height/2},Cyan,Surface,255,true);content->addChild(panel);
-        auto* title=menuLabel(i18n::text("match-history","MATCH HISTORY"),.4f,{140,height-22},Text,FontWeight::Black);
+        auto* title=menuLabel(heading.empty()?i18n::text("match-history","MATCH HISTORY"):heading,.4f,{140,height-22},Text,FontWeight::Black);
         fitSingleLineMenuLabel(title,252,24,.4f);panel->addChild(title,5);
         for(std::size_t i=0;i<m_choices.size();++i){
             auto const active=m_choices[i].value==selected;
@@ -48,9 +48,10 @@ class RankedHistoryFilterPopup final:public Popup {
         dismiss();if(choose)choose(std::move(value));
     }
 public:
-    static RankedHistoryFilterPopup* create(std::vector<RankedHistoryFilterChoice> choices,std::string const& selected,std::function<void(std::string)> choose) {
+    // A picker list; the heading defaults to MATCH HISTORY.
+    static RankedHistoryFilterPopup* create(std::vector<RankedHistoryFilterChoice> choices,std::string const& selected,std::function<void(std::string)> choose,std::string const& heading={}) {
         auto* p=new RankedHistoryFilterPopup;
-        if(p->init(std::move(choices),selected,std::move(choose))){p->autorelease();return p;}delete p;return nullptr;
+        if(p->init(std::move(choices),selected,std::move(choose),heading)){p->autorelease();return p;}delete p;return nullptr;
     }
     void dismiss() {
         if(m_closed)return;

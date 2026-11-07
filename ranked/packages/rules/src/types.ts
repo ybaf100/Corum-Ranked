@@ -60,6 +60,8 @@ export interface RankedMapMetadata {
   readonly gddlColor: string | null;
   readonly durationSeconds: number | null;
   readonly officialLevelId: number | null;
+  /** GD difficulty label (e.g. "Extreme Demon"); the map sheet's difficulty is a Corum rating. */
+  readonly gdDifficulty?: string | null;
 }
 
 export interface RankedMap {

@@ -93,3 +93,13 @@ describe("my map record", () => {
     expect(myMapRecord("nobody", rounds, attempts)).toEqual({ rounds: 0, wins: 0, losses: 0, draws: 0, bestPercent: null });
   });
 });
+
+describe("map difficulty from GD metadata", () => {
+  it("uses the GD label, then demon kind, then stars; the sheet rating is not a label", async () => {
+    const { mapDifficultyRank, difficultyRank: rank } = await import("../src/map-pool/map-pool-stats.js");
+    expect(mapDifficultyRank("Extreme Demon", "DEMON", null)).toBe(rank("Extreme Demon"));
+    expect(mapDifficultyRank(null, "DEMON", null)).toBe(rank("Hard Demon"));
+    expect(mapDifficultyRank("13", "NORMAL", 6)).toBe(rank("Harder"));
+    expect(mapDifficultyRank(undefined, "UNKNOWN", null)).toBe(99);
+  });
+});

@@ -38,7 +38,7 @@
 #include "ui/ResultScoreLayer.hpp"
 #include "ui/StandingVisuals.hpp"
 #include "ui/RankedLeaderboardPopup.hpp"
-#include "ui/RankedMapPoolPopup.hpp"
+#include "ui/RankedMapPoolView.hpp"
 #include "ui/RankedTapScroll.hpp"
 #include "ui/RankedTierGuidePopup.hpp"
 #include "ui/HudEditorPopup.hpp"
@@ -441,6 +441,7 @@ class CorumRankedLayer final : public CCLayerColor {
         HistoryList,
         HistoryDetail,
         Achievements,
+        MapPool,
     };
 
     CCLayerColor* m_fadeRoot = nullptr;
@@ -450,7 +451,7 @@ class CorumRankedLayer final : public CCLayerColor {
     CCLabelBMFont* m_settingsLabel = nullptr;
     std::optional<WeakRef<corum::ranked::ui::RankedSettingsPopup>> m_settings;
     std::optional<WeakRef<corum::ranked::ui::RankedLeaderboardPopup>> m_leaderboard;
-    std::optional<WeakRef<corum::ranked::ui::RankedMapPoolPopup>> m_mapPool;
+    std::optional<WeakRef<corum::ranked::ui::RankedMapPoolView>> m_mapPoolView;
     std::optional<WeakRef<corum::ranked::ui::RankedJukeboxPopup>> m_jukebox;
     std::optional<WeakRef<FLAlertLayer>> m_jukeboxNotice;
     std::optional<WeakRef<corum::ranked::ui::RankedPlayerInfoPopup>> m_playerInfo;
@@ -749,6 +750,7 @@ class CorumRankedLayer final : public CCLayerColor {
         syncPhase();
         updateAutomation();
         resumeModeSelectionAfterQueue(runtime.view());
+        leaveMapPoolOnMatch(runtime.view());
 
         if (m_rankTransitionLayer || m_resultScoreLayer || m_resultScorePending) {
             updateDynamicUi(); syncAudioMode(); return;
@@ -881,6 +883,8 @@ class CorumRankedLayer final : public CCLayerColor {
                 static_cast<int>(m_historyScope), view.historyRevision
             );
         }
+        // The map pool page loads and redraws itself: render it once.
+        if (m_page == Page::MapPool) return "map-pool";
         if (m_page == Page::HistoryDetail) return fmt::format("history:detail:{}:{}:{}:{}:{}",m_historySelectedId,m_historyRound,m_historyTabPage,view.historyRevision,view.historyDetailError);
         if (m_page == Page::Achievements) {
             return fmt::format(
@@ -1289,7 +1293,7 @@ class CorumRankedLayer final : public CCLayerColor {
         if(m_lobbyHover) {
             auto const modal = [](auto const& reference){if(!reference)return false;auto owner=reference->lock();return owner && owner->getParent();};
             m_lobbyHover->setActive(m_page==Page::Live && !m_modeTransition.moving() && !m_uiFadingOut && !m_modeNoticeOpen &&
-                !m_rankTransitionLayer && !m_resultScoreLayer && !m_resultScorePending && !modal(m_settings) && !modal(m_leaderboard) && !modal(m_mapPool) && !modal(m_jukebox));
+                !m_rankTransitionLayer && !m_resultScoreLayer && !m_resultScorePending && !modal(m_settings) && !modal(m_leaderboard) && !modal(m_jukebox));
         }
         auto const& noticeView = RankedRuntime::get().view();
         if (m_modeNoticeOpen && (m_page != Page::Live || m_uiFadingOut ||
@@ -1497,6 +1501,10 @@ class CorumRankedLayer final : public CCLayerColor {
         }
         if (m_page == Page::HistoryDetail) {
             renderHistoryDetail(view);
+            return;
+        }
+        if (m_page == Page::MapPool) {
+            renderMapPool();
             return;
         }
         if (m_page == Page::Achievements) {
@@ -2715,11 +2723,28 @@ class CorumRankedLayer final : public CCLayerColor {
         m_menu->addChild(item);
     }
 
+    // The map pool page is reachable while queued: a found match takes the
+    // player straight back to the lobby (ban phase, round entry).
+    void leaveMapPoolOnMatch(RuntimeView const& view) {
+        if (m_page != Page::MapPool || view.stage != RuntimeStage::Matched) return;
+        if (m_mapPoolView) if (auto pool = m_mapPoolView->lock()) pool->closePopups();
+        m_page = Page::Live;
+    }
+
+    // Its own screen, like match history; map info opens as a popup over it.
     void onMapPool(CCObject*) {
-        if (m_modeTransition.moving() || m_uiFadingOut) return;
+        if (m_modeTransition.moving() || m_uiFadingOut || m_page != Page::Live) return;
         if (m_modeTransition.selected() != corum::ranked::RankedMode::SoloRanked) return;
-        if (m_mapPool) if (auto popup = m_mapPool->lock(); popup && popup->getParent()) return;
-        if (auto* popup = corum::ranked::ui::RankedMapPoolPopup::create()) { m_mapPool.emplace(popup); popup->show(); }
+        m_page = Page::MapPool;
+    }
+
+    void renderMapPool() {
+        auto const size = CCDirector::sharedDirector()->getWinSize();
+        addTopBack(false);
+        addScreenHeader(tr("map-pool","MAP POOL"),tr("solo-ranked","SOLO RANKED"),kGold,kCyan);
+        if (auto* view = corum::ranked::ui::RankedMapPoolView::create(size)) {
+            m_root->addChild(view,3); m_mapPoolView.emplace(view);
+        }
     }
 
     std::string lobbyMessage(RuntimeView const& view) const {
@@ -6159,8 +6184,7 @@ class CorumRankedLayer final : public CCLayerColor {
         m_settings.reset();
         if (m_leaderboard) if (auto popup = m_leaderboard->lock()) popup->dismiss();
         m_leaderboard.reset();
-        if (m_mapPool) if (auto popup = m_mapPool->lock()) popup->dismiss();
-        m_mapPool.reset();
+        if (m_mapPoolView) if (auto view = m_mapPoolView->lock()) view->closePopups();
         closeJukeboxNotice();
         if (!corum::ranked::RankedRoundPreparation::get().launch(CCDirector::sharedDirector()->getRunningScene())) return;
         if (spectateOnly) m_spectateRequestKey.clear();
@@ -6575,8 +6599,7 @@ class CorumRankedLayer final : public CCLayerColor {
         closeModeNotice();
         if (m_leaderboard) if (auto popup = m_leaderboard->lock()) popup->dismiss();
         m_leaderboard.reset();
-        if (m_mapPool) if (auto popup = m_mapPool->lock()) popup->dismiss();
-        m_mapPool.reset();
+        if (m_mapPoolView) if (auto view = m_mapPoolView->lock()) view->closePopups();
         if (m_sessionConflict) if (auto popup = m_sessionConflict->lock()) popup->dismiss();
         m_sessionConflict.reset();
         closeJukeboxNotice();

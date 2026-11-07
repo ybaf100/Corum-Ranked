@@ -564,6 +564,7 @@ inline constexpr std::array kTranslations {
     CatalogTranslation{"map-pool-most-played", "Most played", "최다 등장"},
     CatalogTranslation{"map-pool-none", "None yet", "아직 없음"},
     CatalogTranslation{"map-pool-order", "ORDER", "순서"},
+    CatalogTranslation{"map-pool-order-button", "ORDER: {}", "순서 : {}"},
     CatalogTranslation{"map-pool-short", "MAPS", "맵 풀"},
     CatalogTranslation{"map-pool-sort-ban", "BANS", "밴"},
     CatalogTranslation{"map-pool-sort-difficulty", "DIFFICULTY", "난이도"},

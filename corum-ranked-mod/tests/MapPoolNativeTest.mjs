@@ -44,24 +44,72 @@ int main(){
 }
 `));
 
-test('map pool button sits on the Solo start card and opens the popup; VIEW LEVEL reuses the history flow',()=>{
+test('map pool is its own lobby page; map info is a popup; VIEW LEVEL reuses the history flow',()=>{
  const popup=readFileSync(join(root,'src/RankedPopup.cpp'),'utf8');
- const pool=readFileSync(join(root,'src/ui/RankedMapPoolPopup.cpp'),'utf8');
+ const view=readFileSync(join(root,'src/ui/RankedMapPoolView.cpp'),'utf8');
+ const info=readFileSync(join(root,'src/ui/RankedMapInfoPopup.cpp'),'utf8');
+ const visuals=readFileSync(join(root,'src/ui/MapPoolVisuals.hpp'),'utf8');
  const runtime=readFileSync(join(root,'src/RankedRuntime.cpp'),'utf8');
  // Mirrors the UI editor (+71) on the left side of the start button.
  assert.match(popup,/addMapPoolButton\(\{rightCenter\.x - 71\.0f, rightCenter\.y \+ 18\.0f\}\)/);
- assert.match(popup,/RankedMapPoolPopup::create\(\)/);
- // Closed with the other lobby dialogs before entering a level or closing settings.
- assert.equal((popup.match(/if \(m_mapPool\) if \(auto popup = m_mapPool->lock\(\)\) popup->dismiss\(\);/g)||[]).length,2);
- assert.match(popup,/!modal\(m_mapPool\)/);
+ // A separate screen like match history, rendered once (it redraws itself).
+ assert.match(popup,/m_page = Page::MapPool;/);assert.match(popup,/if \(m_page == Page::MapPool\) return "map-pool";/);
+ assert.match(popup,/RankedMapPoolView::create\(size\)/);
+ // A found match leaves the page; its popups close with the lobby dialogs.
+ assert.match(popup,/leaveMapPoolOnMatch\(runtime\.view\(\)\);/);assert.match(popup,/if \(m_page != Page::MapPool \|\| view\.stage != RuntimeStage::Matched\) return;/);
+ assert.equal((popup.match(/if \(m_mapPoolView\) if \(auto view = m_mapPoolView->lock\(\)\) view->closePopups\(\);/g)||[]).length,2);
+ assert.match(view,/void RankedMapPoolView::cleanup\(\)[\s\S]*closePopups\(\);/);
  // The lobby button fades with the panel: no CCDrawNode inside it.
  const button=popup.slice(popup.indexOf('void addMapPoolButton'),popup.indexOf('void onMapPool'));
  assert.doesNotMatch(button,/CCDrawNode::create/);
- assert.match(pool,/showHistoryLevel\(levelNumber\(m_rows\[index\]\.levelId\)\)/);
- assert.match(pool,/mapPoolUrl\(id\)/);assert.match(pool,/Authorization", "Bearer " \+ token/);
+ // Page content uses color layers, which follow lobby fades.
+ assert.doesNotMatch(view.slice(view.indexOf('RankedMapPoolView* RankedMapPoolView::create')),/CCDrawNode::create/);
+ assert.match(view,/RankedMapInfoPopup::create\(m_rows\[index\]\)/);
+ assert.match(view,/showHistoryLevel\(levelNumber\(m_rows\[index\]\.levelId\)\)/);
+ // The info popup closes before a native level scene is pushed over it.
+ assert.match(info,/if \(canOpenHistoryLevel\(\) && level > 0\) dismiss\(\);\s*showHistoryLevel\(level\);/);
+ assert.match(info,/mapPoolUrl\(id\)/);assert.match(visuals,/Authorization", "Bearer " \+ token/);
  assert.match(runtime,/\/api\/ranked\/solo\/map-pool/);
- // The open info view follows its map by ID across a refresh.
- assert.match(pool,/row\.canonicalLevelId == self->m_detailId/);
+});
+
+test('pool tabs scroll sideways in a 5.5-tab strip; order is a picker list titled ORDER: <current>',()=>{
+ const view=readFileSync(join(root,'src/ui/RankedMapPoolView.cpp'),'utf8');
+ const filter=readFileSync(join(root,'src/ui/RankedHistoryFilterPopup.hpp'),'utf8');
+ assert.match(view,/mapPoolTabStripWidth\(kTabWidth, kTabGap\)/);assert.match(view,/CCClippingNode::create\(mask\)/);
+ assert.match(view,/mapPoolTabScroll\(m_startOffset \+ dx, m_contentWidth, m_width\)/);
+ assert.match(view,/RankedHistoryFilterPopup::create\(std::move\(choices\), sortKey\(m_sort\)/);
+ assert.match(view,/"map-pool-order-button", "ORDER: \{\}"/);
+ assert.match(filter,/heading\.empty\(\)\?i18n::text\("match-history","MATCH HISTORY"\):heading/);
+ const ui=JSON.parse(readFileSync(join(root,'../ranked/translations/ui.json'),'utf8'));
+ assert.equal(ui['map-pool-order-button'].ko,'순서 : {}');
+ run(`
+#include "domain/MapPoolPresentation.hpp"
+#include <cassert>
+using namespace corum::ranked;
+int main(){
+ assert(kMapPoolTabs==7);assert(mapPoolTabStripWidth(46,4)==5.5f*46+5*4);
+ auto const content=7*46.0f+6*4,view=mapPoolTabStripWidth(46,4);
+ assert(mapPoolTabScroll(10,content,view)==0);assert(mapPoolTabScroll(-1000,content,view)==view-content);assert(mapPoolTabScroll(-20,content,view)==-20);
+ assert(mapPoolTabScroll(-50,100,200)==0);
+}
+`);
+});
+
+test('GD difficulty label names the face; the sheet rating only breaks ties',()=>{
+ const visuals=readFileSync(join(root,'src/ui/MapPoolVisuals.hpp'),'utf8');
+ assert.match(visuals,/row\.gdDifficulty\.empty\(\) \? std::nullopt : recordedMapDifficulty\(row\.gdDifficulty\)/);
+ run(`
+#include "domain/MapDifficulty.hpp"
+#include "domain/MapPoolPresentation.hpp"
+#include <cassert>
+using namespace corum::ranked;
+int main(){
+ assert(recordedMapDifficulty("Extreme Demon")->label=="Extreme Demon");
+ assert(!recordedMapDifficulty("13"));
+ MapPoolRow a,b;a.canonicalLevelId="a";b.canonicalLevelId="b";a.difficultyRank=b.difficultyRank=8;a.rating=14;b.rating=11;
+ std::vector<MapPoolRow> rows{a,b};assert((mapPoolOrder(rows,0,MapPoolSort::Difficulty)==std::vector<std::size_t>{1,0}));
+}
+`);
 });
 
 test('map pool Korean copy only uses glyphs the bundled fonts already carry',()=>{

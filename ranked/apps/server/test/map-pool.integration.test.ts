@@ -15,8 +15,10 @@ const [ace, bee, bot] = [uuid(1), uuid(2), uuid(3)];
 const snapshot = uuid(10);
 const map = (id: string, title: string, difficulty: string, pool: number, active = true) => ({
   levelId: `9${id}`, canonicalLevelId: id, alternateLevelId: `9${id}`, playableLevelId: `9${id}`, title, creator: "maker",
-  difficulty, pool, qualifyingPercent: 40, active,
-  metadata: { kind: difficulty.includes("Demon") ? "DEMON" : "NORMAL", stars: 8, gddlTier: null, gddlColor: null, durationSeconds: 84, officialLevelId: null },
+  // The sheet's difficulty is a numeric Corum rating; the GD label lives in metadata.
+  difficulty: String(20 - pool), pool, qualifyingPercent: 40, active,
+  metadata: { kind: difficulty.includes("Demon") ? "DEMON" : "NORMAL", stars: 8, gddlTier: null, gddlColor: null, durationSeconds: 84,
+    officialLevelId: null, gdDifficulty: difficulty },
 });
 const maps = [map("101", "Zeta", "Insane", 3), map("102", "Alpha", "Hard", 1), map("103", "Demon One", "Easy Demon", 4), map("104", "Retired", "Hard", 1, false)];
 const config = { getSnapshot: () => ({ generation: "g1", maps }) } as unknown as RankedConfigService;
@@ -98,7 +100,7 @@ describe("Solo map pool", () => {
     expect(list.maps.map((entry) => entry.title)).toEqual(["Alpha", "Zeta", "Demon One"]);
     expect(list.totals).toEqual({ rounds: 3, draws: 1, drawRate: 33.3 });
     const zeta = list.maps.find((entry) => entry.canonicalLevelId === "101")!;
-    expect(zeta).toMatchObject({ levelId: "9101", rounds: 2, share: 66.7, draws: 0, drawRate: 0, banOffers: 2, bans: 1, banRate: 50, difficultyRank: 5 });
+    expect(zeta).toMatchObject({ levelId: "9101", rounds: 2, share: 66.7, draws: 0, drawRate: 0, banOffers: 2, bans: 1, banRate: 50, difficultyRank: 5, gdDifficulty: "Insane", rating: 17 });
     const demon = list.maps.find((entry) => entry.canonicalLevelId === "103")!;
     expect(demon).toMatchObject({ rounds: 0, share: 0, drawRate: null, banOffers: 2, bans: 1 });
     expect(list.maps.find((entry) => entry.canonicalLevelId === "102")).toMatchObject({ rounds: 1, draws: 1, drawRate: 100, banOffers: 2, bans: 0 });

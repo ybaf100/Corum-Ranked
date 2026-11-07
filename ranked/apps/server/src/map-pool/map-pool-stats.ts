@@ -21,6 +21,20 @@ export const difficultyRank = (difficulty: string): number => {
   return index < 0 ? 99 : index;
 };
 
+/**
+ * Display difficulty order from GD metadata. The Solo map sheet's own
+ * "difficulty" is a numeric Corum rating, never a GD label.
+ */
+export const mapDifficultyRank = (gdDifficulty: string | null | undefined, kind: string | undefined, stars: number | null | undefined): number => {
+  const label = gdDifficulty ? difficultyRank(gdDifficulty) : 99;
+  if (label !== 99) return label;
+  if (kind === "DEMON") return difficultyRank("Hard Demon");
+  if (typeof stars === "number" && stars > 0)
+    return stars >= 8 ? difficultyRank("Insane") : stars >= 6 ? difficultyRank("Harder") : stars >= 4 ? difficultyRank("Hard")
+      : stars === 3 ? difficultyRank("Normal") : stars === 2 ? difficultyRank("Easy") : difficultyRank("Auto");
+  return 99;
+};
+
 export interface RoundRow {
   readonly id: string;
   readonly result: "A" | "B" | "DRAW";

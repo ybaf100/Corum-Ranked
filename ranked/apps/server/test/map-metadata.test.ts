@@ -55,6 +55,9 @@ describe("map display metadata", () => {
     expect(result.maps[0]!.playableLevelId).toBe("56427638");
     expect(requests).toEqual(["https://www.boomlings.com/database/getGJLevels21.php","https://gdladder.com/api/levels/56427638"]);
     await resolver.enrich(source);expect(requests).toHaveLength(2);
+    // A numeric sheet rating keeps the GD label for display.
+    const rated=await new RankedMapMetadataResolver(fetcher).enrich(document({...map(56427638,"Light it up"),difficulty:"13"}));
+    expect(rated.maps[0]).toMatchObject({difficulty:"13",metadata:{gdDifficulty:"Easy Demon"}});
   });
 
   it("does not erase a cached demon tier during an incomplete GDDL refresh", async () => {

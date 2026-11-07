@@ -4,7 +4,7 @@ import { SERVER_CLOCK, type ServerClock } from "../common/runtime.module.js";
 import { RankedConfigService } from "../config/ranked-config.service.js";
 import { DATABASE, type DatabasePort } from "../database/database.port.js";
 import {
-  difficultyRank, mapDetailStats, myMapRecord, percentOf,
+  mapDifficultyRank, mapDetailStats, myMapRecord, percentOf,
   type AttemptRow, type DeathmatchAttemptRow, type DeathmatchRow, type MapDetailStats, type RoundRow,
 } from "./map-pool-stats.js";
 
@@ -17,6 +17,10 @@ export interface MapPoolEntry {
   readonly title: string;
   readonly creator: string;
   readonly difficulty: string;
+  /** GD difficulty label for the face and name ("Extreme Demon"), when known. */
+  readonly gdDifficulty: string | null;
+  /** The map sheet's numeric Corum difficulty rating, when it is numeric. */
+  readonly rating: number | null;
   readonly difficultyRank: number;
   readonly pool: number;
   readonly qualifyingPercent: number;
@@ -111,7 +115,9 @@ export class MapPoolService {
         title: map.title,
         creator: map.creator,
         difficulty: map.difficulty,
-        difficultyRank: difficultyRank(map.difficulty),
+        gdDifficulty: map.metadata?.gdDifficulty ?? null,
+        rating: map.difficulty.trim() !== "" && Number.isFinite(Number(map.difficulty)) ? Number(map.difficulty) : null,
+        difficultyRank: mapDifficultyRank(map.metadata?.gdDifficulty, map.metadata?.kind, map.metadata?.stars),
         pool: map.pool,
         qualifyingPercent: map.qualifyingPercent,
         kind: map.metadata?.kind ?? "UNKNOWN",
@@ -128,6 +134,7 @@ export class MapPoolService {
         banRate: percentOf(banned.bans, banned.offers),
       };
     }).sort((a, b) => a.difficultyRank - b.difficultyRank || (a.gddlTier ?? 0) - (b.gddlTier ?? 0) ||
+      (a.rating ?? 0) - (b.rating ?? 0) ||
       a.pool - b.pool || a.title.localeCompare(b.title) || a.canonicalLevelId.localeCompare(b.canonicalLevelId));
     const top = (value: (entry: MapPoolEntry) => number) => entries.reduce<MapPoolEntry | null>(
       (best, entry) => value(entry) > 0 && (!best || value(entry) > value(best)) ? entry : best, null)?.canonicalLevelId ?? null;

@@ -3314,5 +3314,9 @@
   "map-info-longest-detail": {
     "en": "{} won",
     "ko": "{} 승리"
+  },
+  "map-pool-order-button": {
+    "en": "ORDER: {}",
+    "ko": "순서 : {}"
   }
 }

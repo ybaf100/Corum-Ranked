@@ -14,7 +14,9 @@ namespace corum::ranked {
 // GET /api/ranked/solo/map-pool. Rates are percentages with one decimal;
 // a missing rate means the denominator is still zero.
 struct MapPoolRow {
-    std::string canonicalLevelId, levelId, title, creator, difficulty, kind = "UNKNOWN", gddlColor;
+    // difficulty is the sheet's Corum rating text; gdDifficulty the GD label.
+    std::string canonicalLevelId, levelId, title, creator, difficulty, gdDifficulty, kind = "UNKNOWN", gddlColor;
+    std::optional<double> rating;
     int difficultyRank = 99, pool = 1;
     double qualifyingPercent = 0;
     std::optional<int> stars, gddlTier;
@@ -31,6 +33,7 @@ inline constexpr std::array<MapPoolSort, 5> kMapPoolSorts{
 inline bool mapPoolEasierFirst(MapPoolRow const& a, MapPoolRow const& b) {
     if (a.difficultyRank != b.difficultyRank) return a.difficultyRank < b.difficultyRank;
     if (a.gddlTier.value_or(0) != b.gddlTier.value_or(0)) return a.gddlTier.value_or(0) < b.gddlTier.value_or(0);
+    if (a.rating.value_or(0) != b.rating.value_or(0)) return a.rating.value_or(0) < b.rating.value_or(0);
     if (a.pool != b.pool) return a.pool < b.pool;
     if (a.title != b.title) return a.title < b.title;
     return a.canonicalLevelId < b.canonicalLevelId;
@@ -49,6 +52,17 @@ inline double mapPoolSortValue(MapPoolRow const& row, MapPoolSort sort) {
 }
 
 // Indexes of the rows to show: `pool` 0 shows every pool.
+// Pool filter tabs: ALL then P1..P6. About five and a half fit the strip;
+// the rest scroll in from the right.
+inline constexpr int kMapPoolTabs = 7;
+inline constexpr float kMapPoolVisibleTabs = 5.5f;
+inline float mapPoolTabStripWidth(float tabWidth, float gap) {
+    return kMapPoolVisibleTabs * tabWidth + (kMapPoolVisibleTabs - 0.5f) * gap;
+}
+inline float mapPoolTabScroll(float offset, float contentWidth, float viewWidth) {
+    return std::clamp(offset, std::min(0.0f, viewWidth - contentWidth), 0.0f);
+}
+
 inline std::vector<std::size_t> mapPoolOrder(std::vector<MapPoolRow> const& rows, int pool, MapPoolSort sort) {
     std::vector<std::size_t> order;
     for (std::size_t index = 0; index < rows.size(); ++index)
