@@ -3160,8 +3160,8 @@
     "ko": "라운드"
   },
   "map-pool-col-map": {
-    "en": "MAP",
-    "ko": "맵"
+    "en": "MAP / DIFFICULTY",
+    "ko": "맵 / 난이도"
   },
   "map-pool-info": {
     "en": "INFO",
@@ -3318,5 +3318,13 @@
   "map-pool-order-button": {
     "en": "ORDER: {}",
     "ko": "순서 : {}"
+  },
+  "map-pool-ascending": {
+    "en": "ASCENDING",
+    "ko": "오름차순"
+  },
+  "map-pool-descending": {
+    "en": "DESCENDING",
+    "ko": "내림차순"
   }
 }

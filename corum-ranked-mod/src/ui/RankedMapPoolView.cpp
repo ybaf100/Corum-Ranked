@@ -1,6 +1,7 @@
 #include "RankedMapPoolView.hpp"
 
 #include "../HistoryLevelLookup.hpp"
+#include "../RankedMapDetails.hpp"
 #include "MapDifficultyBadge.hpp"
 #include "MapPoolVisuals.hpp"
 #include "RankedHistoryFilterPopup.hpp"
@@ -18,16 +19,30 @@ constexpr float kRowHeight = 30, kRowGap = 4;
 constexpr float kTabWidth = 46, kTabGap = 4, kTabHeight = 24;
 constexpr std::size_t kMaxMaps = 200;
 
-// Row columns from the right edge, so the title gets the remaining width.
+// Row columns from the right edge. The map column holds two lines: the
+// title over the difficulty badge and creator, so the title is never cut short.
 struct Columns {
-    float rank = 12, pool = 31, title = 46, titleWidth = 0, difficulty = 0, difficultyWidth = 70;
+    float rank = 12, pool = 31, title = 46, titleWidth = 0, difficultyWidth = 70;
     float barLeft = 0, barWidth = 30, share = 0, draw = 0, ban = 0, rounds = 0, info = 0, view = 0;
     explicit Columns(float width) {
         view = width - 28; info = view - 52; rounds = info - 44; ban = rounds - 36; draw = ban - 38; share = draw - 36;
-        barLeft = share - 16 - 3 - barWidth; difficulty = barLeft - 5 - difficultyWidth;
-        titleWidth = std::max(40.0f, difficulty - 4 - title);
+        barLeft = share - 16 - 3 - barWidth;
+        titleWidth = std::max(40.0f, barLeft - 8 - title);
     }
 };
+
+// Shrink to a floor, then cut with "..." so a long title never runs into the
+// next column.
+void fitTitle(CCLabelBMFont* label, std::string const& value, float width, float scale) {
+    fitMenuLabelWidth(label, width, scale, scale * 0.7f);
+    if (label->getScaledContentSize().width <= width) return;
+    std::size_t characters = 0;
+    for (std::size_t bytes = 0; bytes < value.size(); bytes = mapPoolUtf8Prefix(value, ++characters)) {}
+    while (characters > 1 && label->getScaledContentSize().width > width) {
+        --characters;
+        label->setString((value.substr(0, mapPoolUtf8Prefix(value, characters)) + "...").c_str());
+    }
+}
 
 bool visibleChain(CCNode* node) {
     for (; node; node = node->getParent()) if (!node->isVisible()) return false;
@@ -161,11 +176,17 @@ bool RankedMapPoolView::init(CCSize screen) {
     m_tabs->setPosition({m_left, controlsY - kTabHeight / 2});
     m_tabs->setSelected(m_pool);
     addChild(m_tabs, 10);
-    auto const sortWidth = std::min(170.0f, m_width - m_tabs->getContentSize().width - 12);
+    // ORDER: <current> opens the picker; the toggle beside it flips the direction.
+    auto const free = m_width - m_tabs->getContentSize().width - 12;
+    auto const directionWidth = std::min(84.0f, free * 0.38f), sortWidth = std::min(170.0f, free - directionWidth - 6);
     m_sortButton = CCMenuItemSpriteExtra::create(CCNode::create(), this, menu_selector(RankedMapPoolView::onSort));
     m_sortButton->setContentSize({sortWidth, kTabHeight});
-    m_sortButton->setPosition({m_left + m_width - sortWidth / 2, controlsY});
+    m_sortButton->setPosition({m_left + m_width - directionWidth - 6 - sortWidth / 2, controlsY});
     m_menu->addChild(m_sortButton);
+    m_directionButton = CCMenuItemSpriteExtra::create(CCNode::create(), this, menu_selector(RankedMapPoolView::onDirection));
+    m_directionButton->setContentSize({directionWidth, kTabHeight});
+    m_directionButton->setPosition({m_left + m_width - directionWidth / 2, controlsY});
+    m_menu->addChild(m_directionButton);
 
     auto const viewport = CCSize{m_width, std::max(60.0f, top - 178)};
     Columns const columns(viewport.width - 8);
@@ -174,8 +195,8 @@ bool RankedMapPoolView::init(CCSize screen) {
         m_headers.push_back(caption(this, label, {m_left + 4 + x, headerY}, 0.22f, width, TextMuted, FontWeight::ExtraBold, anchor));
     };
     header("#", columns.rank, 20, 0.5f);
-    header(i18n::text("map-pool-col-map", "MAP"), columns.title, columns.titleWidth, 0);
-    header(sortLabel(MapPoolSort::Difficulty), columns.difficulty, columns.difficultyWidth, 0);
+    // The map column doubles as the difficulty column (badge under the title).
+    header(i18n::text("map-pool-col-map", "MAP / DIFFICULTY"), columns.title, columns.titleWidth, 0);
     header(sortLabel(MapPoolSort::Share), columns.barLeft, 80, 0);
     header(sortLabel(MapPoolSort::Draw), columns.draw, 36, 0.5f);
     header(sortLabel(MapPoolSort::Ban), columns.ban, 32, 0.5f);
@@ -224,9 +245,11 @@ void RankedMapPoolView::updateControls() {
     if (m_closed) return;
     m_sortButton->setNormalImage(buttonFace(fmt::format(fmt::runtime(i18n::text("map-pool-order-button", "ORDER: {}")), sortLabel(m_sort)),
         m_sortButton->getContentSize(), Blue, false, 0.25f));
-    // Column captions: the active order is gold (index 2.. follow kMapPoolSorts).
-    for (std::size_t index = 0; index < kMapPoolSorts.size() && index + 2 < m_headers.size(); ++index)
-        m_headers[index + 2]->setColor(kMapPoolSorts[index] == m_sort ? Gold : TextMuted);
+    m_directionButton->setNormalImage(buttonFace(m_ascending ? i18n::text("map-pool-ascending", "ASCENDING") : i18n::text("map-pool-descending", "DESCENDING"),
+        m_directionButton->getContentSize(), Cyan, false, 0.23f, Cyan));
+    // Column captions: the active order is gold (index 1.. follow kMapPoolSorts).
+    for (std::size_t index = 0; index < kMapPoolSorts.size() && index + 1 < m_headers.size(); ++index)
+        m_headers[index + 1]->setColor(kMapPoolSorts[index] == m_sort ? Gold : TextMuted);
     m_refresh->setEnabled(!m_busy);
     m_refresh->setCascadeOpacityEnabled(true);
     m_refresh->setOpacity(m_busy ? 110 : 255);
@@ -268,6 +291,7 @@ void RankedMapPoolView::fetch() {
                     self->m_rows.size(), mapPoolNumber(self->m_totalRounds)).c_str());
                 fitMenuLabelWidth(self->m_caption, self->m_width * 0.36f, 0.24f, 0.13f);
                 self->m_caption->setColor(TextMuted);
+                self->applyNativeDifficulties();
                 self->updateSummary();
                 self->rebuildRows();
             }
@@ -304,14 +328,16 @@ void RankedMapPoolView::updateSummary() {
     tile(3, i18n::text("map-pool-most-banned", "Most banned"), titleOf(m_mostBanned), Red);
 }
 
-void RankedMapPoolView::rebuildRows() {
+void RankedMapPoolView::rebuildRows(bool keepOffset) {
     if (!m_scroll) return;
+    auto const offset = m_scroll->m_contentLayer->getPositionY();
+    auto const previousHeight = m_scroll->m_contentLayer->getContentSize().height;
     m_hits.clear();
     m_scroll->m_contentLayer->removeAllChildrenWithCleanup(true);
     auto const viewport = m_scroll->getContentSize();
     auto const width = viewport.width - 8;
     Columns const columns(width);
-    auto const order = mapPoolOrder(m_rows, m_pool, m_sort);
+    auto const order = mapPoolOrder(m_rows, m_pool, m_sort, m_ascending);
     auto const height = std::max(viewport.height, static_cast<float>(order.size()) * (kRowHeight + kRowGap) + 8);
     m_scroll->m_contentLayer->setContentSize({viewport.width, height});
     double maxShare = 0;
@@ -327,16 +353,20 @@ void RankedMapPoolView::rebuildRows() {
         row->setPosition({4, height - 4 - (position + 1) * (kRowHeight + kRowGap)});
         row->setID("ranked-map-pool-row"_spr);
         m_scroll->m_contentLayer->addChild(row, 1);
-        auto const ranked = m_sort != MapPoolSort::Difficulty && position < 3;
+        auto const ranked = m_sort != MapPoolSort::Difficulty && !m_ascending && position < 3;
         caption(row, std::to_string(position + 1), {columns.rank, kRowHeight / 2}, 0.26f, 20, ranked ? Gold : TextMuted, FontWeight::Black);
         auto* chip = surface({22, 15}, {columns.pool, kRowHeight / 2}, poolColor(map.pool), Ink, 250, false);
         row->addChild(chip, 4);
         caption(chip, fmt::format("P{}", map.pool), {11, 7.5f}, 0.2f, 18, poolColor(map.pool), FontWeight::Black);
-        caption(row, map.title, {columns.title, 20}, 0.29f, columns.titleWidth, Text, FontWeight::Black, 0);
-        caption(row, map.creator.empty() ? "-" : "by " + map.creator, {columns.title, 9}, 0.18f, columns.titleWidth, TextMuted, FontWeight::SemiBold, 0);
-        auto* badge = mapDifficultyBadge(levelNumber(map.levelId), metadataOf(map), columns.difficultyWidth, 17, true, displayedDifficulty(map));
-        badge->setPosition({columns.difficulty, (kRowHeight - 17) / 2});
+        auto* title = caption(row, map.title, {columns.title, 21}, 0.29f, columns.titleWidth, Text, FontWeight::Black, 0);
+        fitTitle(title, map.title, columns.titleWidth, 0.29f);
+        auto* badge = mapDifficultyBadge(levelNumber(map.levelId), metadataOf(map), columns.difficultyWidth, 12, true, displayedDifficulty(map));
+        badge->setPosition({columns.title, 2});
         row->addChild(badge, 5);
+        auto const creatorX = columns.title + columns.difficultyWidth + 6;
+        auto* creator = caption(row, map.creator.empty() ? "-" : "by " + map.creator, {creatorX, 8}, 0.18f,
+            std::max(20.0f, columns.title + columns.titleWidth - creatorX), TextMuted, FontWeight::SemiBold, 0);
+        fitTitle(creator, map.creator.empty() ? "-" : "by " + map.creator, std::max(20.0f, columns.title + columns.titleWidth - creatorX), 0.18f);
         bar(row, {columns.barLeft, 11, columns.barWidth, 8}, Ink);
         auto const fill = maxShare > 0 ? static_cast<float>(map.share.value_or(0) / maxShare) * columns.barWidth : 0.0f;
         if (fill > 0) bar(row, {columns.barLeft, 11, fill, 8}, Cyan, 255, 5);
@@ -353,6 +383,7 @@ void RankedMapPoolView::rebuildRows() {
         m_hits.push_back({row, info, view, index});
     }
     m_scroll->scrollToTop();
+    if (keepOffset && previousHeight == height) m_scroll->m_contentLayer->setPositionY(offset);
 }
 
 void RankedMapPoolView::selectPool(int pool) {
@@ -375,6 +406,7 @@ void RankedMapPoolView::onSort(CCObject*) {
         for (auto const sort : kMapPoolSorts) {
             if (selected != sortKey(sort) || sort == self->m_sort) continue;
             self->m_sort = sort;
+            self->m_ascending = mapPoolDefaultAscending(sort);
             self->updateControls();
             self->rebuildRows();
         }
@@ -383,6 +415,36 @@ void RankedMapPoolView::onSort(CCObject*) {
 }
 
 void RankedMapPoolView::onRefresh(CCObject*) { fetch(); }
+
+void RankedMapPoolView::onDirection(CCObject*) {
+    if (m_closed) return;
+    m_ascending = !m_ascending;
+    updateControls();
+    rebuildRows();
+}
+
+std::vector<int> RankedMapPoolView::unresolvedLevels() const {
+    std::vector<int> ids;
+    for (auto const& row : m_rows)
+        if (row.gdDifficulty.empty() && ids.size() < 16)
+            if (auto const id = levelNumber(row.levelId); id > 0) ids.push_back(id);
+    return ids;
+}
+
+// The server could not read some levels from GD (custom non-demon levels):
+// fill their face and difficulty order from the game's own GD lookup.
+bool RankedMapPoolView::applyNativeDifficulties() {
+    auto changed = false;
+    for (auto& row : m_rows) {
+        if (!row.gdDifficulty.empty()) continue;
+        auto const native = RankedMapDetails::get().difficulty(levelNumber(row.levelId));
+        if (native.label == "N/A") continue;
+        row.gdDifficulty = std::string(native.label);
+        row.difficultyRank = mapPoolRankFromNative(native.nativeCode);
+        changed = true;
+    }
+    return changed;
+}
 
 void RankedMapPoolView::openInfo(std::size_t index) {
     if (m_closed || index >= m_rows.size()) return;
@@ -399,6 +461,10 @@ void RankedMapPoolView::viewLevel(std::size_t index) {
 
 void RankedMapPoolView::update(float) {
     if (m_closed || !m_hasList || !m_updated) return;
+    if (auto const revision = RankedMapDetails::get().revision(); revision != m_detailsRevision) {
+        m_detailsRevision = revision;
+        if (applyNativeDifficulties()) rebuildRows(true);
+    }
     auto const elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - m_receivedAt).count();
     auto const minutes = mapPoolUpdatedMinutes(elapsed);
     if (minutes == m_shownMinutes) return;

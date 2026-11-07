@@ -20,6 +20,8 @@ public:
     static RankedMapPoolView* create(cocos2d::CCSize screen);
     // Info and order popups belong to the page: close them with it.
     void closePopups();
+    // Level IDs the server had no GD difficulty for; the lobby asks GD for them.
+    std::vector<int> unresolvedLevels() const;
     void cleanup() override;
     void update(float dt) override;
 
@@ -30,7 +32,9 @@ private:
     void showError();
     void updateSummary();
     void updateControls();
-    void rebuildRows();
+    void rebuildRows(bool keepOffset = false);
+    bool applyNativeDifficulties();
+    void onDirection(cocos2d::CCObject*);
     void selectPool(int pool);
     void openInfo(std::size_t index);
     void viewLevel(std::size_t index);
@@ -46,6 +50,7 @@ private:
     cocos2d::CCLabelBMFont* m_caption = nullptr;
     cocos2d::CCLabelBMFont* m_updated = nullptr;
     CCMenuItemSpriteExtra* m_sortButton = nullptr;
+    CCMenuItemSpriteExtra* m_directionButton = nullptr;
     CCMenuItemSpriteExtra* m_refresh = nullptr;
     std::vector<cocos2d::CCLabelBMFont*> m_headers;
     std::vector<MapPoolRow> m_rows;
@@ -55,6 +60,8 @@ private:
     std::string m_mostPlayed, m_mostBanned;
     int m_pool = 0;
     MapPoolSort m_sort = MapPoolSort::Difficulty;
+    bool m_ascending = true;
+    std::uint64_t m_detailsRevision = 0;
     std::chrono::steady_clock::time_point m_receivedAt{};
     bool m_hasList = false, m_busy = false, m_closed = false;
     int m_shownMinutes = -1;

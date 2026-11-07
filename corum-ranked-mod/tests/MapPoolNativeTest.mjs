@@ -122,3 +122,40 @@ test('map pool Korean copy only uses glyphs the bundled fonts already carry',()=
  const missing=[...new Set(keys.flatMap(k=>[...ui[k].ko]))].filter(c=>c!=='\n'&&!present.has(c.codePointAt(0)));
  assert.deepEqual(missing,[]);
 });
+
+test('difficulty order groups by Pool first; ascending/descending flips the order',()=>run(`
+#include "domain/MapPoolPresentation.hpp"
+#include <cassert>
+using namespace corum::ranked;
+MapPoolRow row(std::string id,int rank,int pool,std::optional<double> share){MapPoolRow r;r.canonicalLevelId=id;r.title=id;r.difficultyRank=rank;r.pool=pool;r.share=share;return r;}
+int main(){
+ // A Pool 1 demon still comes before a Pool 2 easy level.
+ std::vector<MapPoolRow> rows{row("p2-easy",1,2,5.0),row("p1-demon",8,1,5.0),row("p1-hard",3,1,9.0),row("p2-insane",5,2,std::nullopt)};
+ assert((mapPoolOrder(rows,0,MapPoolSort::Difficulty,true)==std::vector<std::size_t>{2,1,0,3}));
+ assert((mapPoolOrder(rows,0,MapPoolSort::Difficulty,false)==std::vector<std::size_t>{3,0,1,2}));
+ assert(mapPoolDefaultAscending(MapPoolSort::Difficulty)&&!mapPoolDefaultAscending(MapPoolSort::Share));
+ // Values flip; ties stay easiest first in both directions; no data stays below 0.
+ assert((mapPoolOrder(rows,0,MapPoolSort::Share,false)==std::vector<std::size_t>{2,0,1,3}));
+ assert((mapPoolOrder(rows,0,MapPoolSort::Share,true)==std::vector<std::size_t>{3,0,1,2}));
+ // Native GD faces map onto the server's difficulty order.
+ assert(mapPoolRankFromNative(-1)==0&&mapPoolRankFromNative(5)==5&&mapPoolRankFromNative(7)==6&&mapPoolRankFromNative(8)==7);
+ assert(mapPoolRankFromNative(6)==8&&mapPoolRankFromNative(9)==9&&mapPoolRankFromNative(10)==10&&mapPoolRankFromNative(0)==99);
+ // UTF-8 safe title cut.
+ assert(mapPoolUtf8Prefix("Bloodbath",5)==5);assert(mapPoolUtf8Prefix("맵풀",1)==3);assert(mapPoolUtf8Prefix("ab",9)==2);
+}
+`));
+
+test('map titles get a full-width line; unresolved levels are looked up from GD; direction toggle',()=>{
+ const view=readFileSync(join(root,'src/ui/RankedMapPoolView.cpp'),'utf8');
+ const popup=readFileSync(join(root,'src/RankedPopup.cpp'),'utf8');
+ assert.match(view,/titleWidth = std::max\(40\.0f, barLeft - 8 - title\)/);
+ assert.match(view,/fitTitle\(title, map\.title, columns\.titleWidth, 0\.29f\)/);
+ assert.match(view,/badge->setPosition\(\{columns\.title, 2\}\)/);
+ assert.match(view,/mapPoolOrder\(m_rows, m_pool, m_sort, m_ascending\)/);
+ assert.match(view,/self->m_ascending = mapPoolDefaultAscending\(sort\)/);
+ assert.match(view,/RankedMapDetails::get\(\)\.difficulty\(levelNumber\(row\.levelId\)\)/);
+ assert.match(view,/if \(applyNativeDifficulties\(\)\) rebuildRows\(true\)/);
+ assert.match(popup,/for \(auto id : pool->unresolvedLevels\(\)\) ids\.push_back\(id\)/);
+ const ui=JSON.parse(readFileSync(join(root,'../ranked/translations/ui.json'),'utf8'));
+ assert.equal(ui['map-pool-ascending'].ko,'오름차순');assert.equal(ui['map-pool-descending'].ko,'내림차순');
+});

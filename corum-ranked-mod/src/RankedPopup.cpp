@@ -827,6 +827,9 @@ class CorumRankedLayer final : public CCLayerColor {
         for (auto const& map : view.match.candidateMaps) ids.push_back(map.levelId);
         if (m_page == Page::PlacementPoolSelection)
             for (auto const& map : view.placement.referenceMaps) ids.push_back(map.levelId);
+        // Map pool rows the server could not read from GD (custom non-demons).
+        if (m_page == Page::MapPool && m_mapPoolView)
+            if (auto pool = m_mapPoolView->lock()) for (auto id : pool->unresolvedLevels()) ids.push_back(id);
         corum::ranked::RankedMapDetails::get().request(std::move(ids));
     }
 
