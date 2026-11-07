@@ -559,6 +559,10 @@ public:
     void fetchStanding();
     [[nodiscard]] std::string leaderboardUrl(int offset, int limit, RankedMode mode = RankedMode::SoloRanked) const;
     [[nodiscard]] std::string tierGuideUrl() const;
+    // Solo map pool list, or one map's statistics. Requests carry the Ranked
+    // session so the detail can include the viewer's own record.
+    [[nodiscard]] std::string mapPoolUrl(std::string const& canonicalLevelId = {}) const;
+    [[nodiscard]] std::string const& sessionToken() const { return m_sessionToken; }
     void fetchAchievements();
     void fetchPlayerInfo(std::string const& side);
     void fetchForumRecords(bool refresh = false);

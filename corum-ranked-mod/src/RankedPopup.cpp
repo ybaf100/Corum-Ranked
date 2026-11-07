@@ -38,6 +38,7 @@
 #include "ui/ResultScoreLayer.hpp"
 #include "ui/StandingVisuals.hpp"
 #include "ui/RankedLeaderboardPopup.hpp"
+#include "ui/RankedMapPoolPopup.hpp"
 #include "ui/RankedTapScroll.hpp"
 #include "ui/RankedTierGuidePopup.hpp"
 #include "ui/HudEditorPopup.hpp"
@@ -449,6 +450,7 @@ class CorumRankedLayer final : public CCLayerColor {
     CCLabelBMFont* m_settingsLabel = nullptr;
     std::optional<WeakRef<corum::ranked::ui::RankedSettingsPopup>> m_settings;
     std::optional<WeakRef<corum::ranked::ui::RankedLeaderboardPopup>> m_leaderboard;
+    std::optional<WeakRef<corum::ranked::ui::RankedMapPoolPopup>> m_mapPool;
     std::optional<WeakRef<corum::ranked::ui::RankedJukeboxPopup>> m_jukebox;
     std::optional<WeakRef<FLAlertLayer>> m_jukeboxNotice;
     std::optional<WeakRef<corum::ranked::ui::RankedPlayerInfoPopup>> m_playerInfo;
@@ -1287,7 +1289,7 @@ class CorumRankedLayer final : public CCLayerColor {
         if(m_lobbyHover) {
             auto const modal = [](auto const& reference){if(!reference)return false;auto owner=reference->lock();return owner && owner->getParent();};
             m_lobbyHover->setActive(m_page==Page::Live && !m_modeTransition.moving() && !m_uiFadingOut && !m_modeNoticeOpen &&
-                !m_rankTransitionLayer && !m_resultScoreLayer && !m_resultScorePending && !modal(m_settings) && !modal(m_leaderboard) && !modal(m_jukebox));
+                !m_rankTransitionLayer && !m_resultScoreLayer && !m_resultScorePending && !modal(m_settings) && !modal(m_leaderboard) && !modal(m_mapPool) && !modal(m_jukebox));
         }
         auto const& noticeView = RankedRuntime::get().view();
         if (m_modeNoticeOpen && (m_page != Page::Live || m_uiFadingOut ||
@@ -2598,6 +2600,8 @@ class CorumRankedLayer final : public CCLayerColor {
             m_menu->addChild(play);
             addHudEditorButton({rightCenter.x + 71.0f, rightCenter.y + 18.0f},
                 view.stage == RuntimeStage::Ready && !lobbyQueueActive(), "ranked-hud-editor-button"_spr);
+            // Map pool list, mirroring the UI editor on the other side of the start button.
+            addMapPoolButton({rightCenter.x - 71.0f, rightCenter.y + 18.0f});
             // With a tier bar below, the caption and hint move up a little.
             auto const tierBar = !view.placement.required &&
                 tierProgressFor(view, false).kind != corum::ranked::TierProgressKind::Hidden;
@@ -2692,6 +2696,30 @@ class CorumRankedLayer final : public CCLayerColor {
         item->setID(id); item->setPosition(position); item->setEnabled(enabled);
         item->setCascadeOpacityEnabled(true); item->setOpacity(enabled?255:100);
         m_menu->addChild(item);
+    }
+
+    // Solo map pool: browsing is read-only, so it stays available while queued.
+    void addMapPoolButton(CCPoint position) {
+        auto* face = corum::ranked::ui::surface({34,34},{},kCyan,kDeepPanel2,250,true);
+        // A list icon from color layers: lobby fades reach CCLayerColor
+        // through propagateModeOpacity, unlike a CCDrawNode.
+        for (int line = 0; line < 3; ++line) {
+            auto const y = 13.0f + line * 5.0f;
+            auto* bullet = CCLayerColor::create({64,224,255,255},3,3);bullet->setPosition({8,y});face->addChild(bullet,5);
+            auto* bar = CCLayerColor::create({242,247,255,255},14,3);bar->setPosition({13,y});face->addChild(bar,5);
+        }
+        auto* caption = makeLabel(tr("map-pool-short","MAPS"),0.17f,{17,6},kCyan,"semibold");
+        corum::ranked::ui::fitMenuLabelWidth(caption,30,0.17f,0.1f); face->addChild(caption,5);
+        auto* item = CCMenuItemSpriteExtra::create(face,this,menu_selector(CorumRankedLayer::onMapPool));
+        item->setID("ranked-map-pool-button"_spr); item->setPosition(position);
+        m_menu->addChild(item);
+    }
+
+    void onMapPool(CCObject*) {
+        if (m_modeTransition.moving() || m_uiFadingOut) return;
+        if (m_modeTransition.selected() != corum::ranked::RankedMode::SoloRanked) return;
+        if (m_mapPool) if (auto popup = m_mapPool->lock(); popup && popup->getParent()) return;
+        if (auto* popup = corum::ranked::ui::RankedMapPoolPopup::create()) { m_mapPool.emplace(popup); popup->show(); }
     }
 
     std::string lobbyMessage(RuntimeView const& view) const {
@@ -6131,6 +6159,8 @@ class CorumRankedLayer final : public CCLayerColor {
         m_settings.reset();
         if (m_leaderboard) if (auto popup = m_leaderboard->lock()) popup->dismiss();
         m_leaderboard.reset();
+        if (m_mapPool) if (auto popup = m_mapPool->lock()) popup->dismiss();
+        m_mapPool.reset();
         closeJukeboxNotice();
         if (!corum::ranked::RankedRoundPreparation::get().launch(CCDirector::sharedDirector()->getRunningScene())) return;
         if (spectateOnly) m_spectateRequestKey.clear();
@@ -6545,6 +6575,8 @@ class CorumRankedLayer final : public CCLayerColor {
         closeModeNotice();
         if (m_leaderboard) if (auto popup = m_leaderboard->lock()) popup->dismiss();
         m_leaderboard.reset();
+        if (m_mapPool) if (auto popup = m_mapPool->lock()) popup->dismiss();
+        m_mapPool.reset();
         if (m_sessionConflict) if (auto popup = m_sessionConflict->lock()) popup->dismiss();
         m_sessionConflict.reset();
         closeJukeboxNotice();

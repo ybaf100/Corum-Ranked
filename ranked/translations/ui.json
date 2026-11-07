@@ -3098,5 +3098,221 @@
   "tier-bar-top": {
     "en": "TOP TIER",
     "ko": "최고 티어"
+  },
+  "map-pool": {
+    "en": "MAP POOL",
+    "ko": "맵 풀"
+  },
+  "map-pool-short": {
+    "en": "MAPS",
+    "ko": "맵 풀"
+  },
+  "map-pool-summary": {
+    "en": "{} active maps · {} rounds",
+    "ko": "활성 맵 {}개 · 전체 {}라운드"
+  },
+  "map-pool-loading": {
+    "en": "Loading map pool...",
+    "ko": "맵 풀을 불러오는 중"
+  },
+  "map-pool-error": {
+    "en": "Could not load the map pool. Press Refresh.",
+    "ko": "맵 풀을 불러올 수 없습니다. 새로 고침을 눌러 주세요."
+  },
+  "map-pool-empty": {
+    "en": "No maps in the pool.",
+    "ko": "맵 풀에 맵이 없습니다."
+  },
+  "map-pool-updated-now": {
+    "en": "Updated just now",
+    "ko": "방금 갱신"
+  },
+  "map-pool-updated-minutes": {
+    "en": "Updated {} min ago",
+    "ko": "{}분 전 갱신"
+  },
+  "map-pool-all": {
+    "en": "ALL",
+    "ko": "전체"
+  },
+  "map-pool-order": {
+    "en": "ORDER",
+    "ko": "순서"
+  },
+  "map-pool-sort-difficulty": {
+    "en": "DIFFICULTY",
+    "ko": "난이도"
+  },
+  "map-pool-sort-share": {
+    "en": "PLAYED",
+    "ko": "등장"
+  },
+  "map-pool-sort-draw": {
+    "en": "DRAWS",
+    "ko": "무승부"
+  },
+  "map-pool-sort-ban": {
+    "en": "BANS",
+    "ko": "밴"
+  },
+  "map-pool-sort-rounds": {
+    "en": "ROUNDS",
+    "ko": "라운드"
+  },
+  "map-pool-col-map": {
+    "en": "MAP",
+    "ko": "맵"
+  },
+  "map-pool-info": {
+    "en": "INFO",
+    "ko": "정보 보기"
+  },
+  "map-pool-total-rounds": {
+    "en": "Rounds played",
+    "ko": "전체 라운드"
+  },
+  "map-pool-total-draws": {
+    "en": "Draw rate",
+    "ko": "전체 무승부"
+  },
+  "map-pool-most-played": {
+    "en": "Most played",
+    "ko": "최다 등장"
+  },
+  "map-pool-most-banned": {
+    "en": "Most banned",
+    "ko": "최다 밴"
+  },
+  "map-pool-none": {
+    "en": "None yet",
+    "ko": "아직 없음"
+  },
+  "map-info-loading": {
+    "en": "Loading map statistics...",
+    "ko": "맵 정보를 불러오는 중"
+  },
+  "map-info-error": {
+    "en": "Could not load this map. Press Refresh.",
+    "ko": "맵 정보를 불러올 수 없습니다. 새로 고침을 눌러 주세요."
+  },
+  "map-info-rank": {
+    "en": "#{} of {} by plays",
+    "ko": "등장 {}위 / {}"
+  },
+  "map-info-unplayed": {
+    "en": "No rounds on this map yet.",
+    "ko": "아직 경기 기록이 없는 맵입니다."
+  },
+  "map-info-length": {
+    "en": "Length {}",
+    "ko": "시간 {}"
+  },
+  "map-info-qualifying": {
+    "en": "Qualifying progress",
+    "ko": "기준 진행도"
+  },
+  "map-info-mine": {
+    "en": "MY RECORD",
+    "ko": "내 기록"
+  },
+  "map-info-mine-rounds": {
+    "en": "Rounds",
+    "ko": "라운드"
+  },
+  "map-info-mine-result": {
+    "en": "{}W {}D {}L",
+    "ko": "{}승 {}무 {}패"
+  },
+  "map-info-mine-result-label": {
+    "en": "Result",
+    "ko": "결과"
+  },
+  "map-info-best": {
+    "en": "Best progress",
+    "ko": "최고 진행도"
+  },
+  "map-info-share": {
+    "en": "Played",
+    "ko": "등장"
+  },
+  "map-info-share-detail": {
+    "en": "{} / {} rounds",
+    "ko": "{} / {}라운드"
+  },
+  "map-info-ban": {
+    "en": "Banned",
+    "ko": "밴"
+  },
+  "map-info-ban-detail": {
+    "en": "{} bans · {} offers",
+    "ko": "{}회 밴 · 후보 {}회"
+  },
+  "map-info-draw": {
+    "en": "Draws",
+    "ko": "무승부"
+  },
+  "map-info-draw-detail": {
+    "en": "{} Death Matches",
+    "ko": "데스매치 {}회"
+  },
+  "map-info-clear": {
+    "en": "Clears",
+    "ko": "클리어"
+  },
+  "map-info-clear-detail": {
+    "en": "Players who reached 100%",
+    "ko": "100% 달성 플레이어"
+  },
+  "map-info-deaths": {
+    "en": "WHERE PLAYERS DIE",
+    "ko": "죽은 구간"
+  },
+  "map-info-deaths-peak": {
+    "en": "Deadliest {} · {}",
+    "ko": "마의 구간 {} · {}"
+  },
+  "map-info-deaths-none": {
+    "en": "No deaths recorded yet.",
+    "ko": "아직 기록이 없습니다."
+  },
+  "map-info-tiers": {
+    "en": "PLAYED BY TIER",
+    "ko": "티어별 등장"
+  },
+  "map-info-average-best": {
+    "en": "Best progress per round",
+    "ko": "라운드당 최고 진행도"
+  },
+  "map-info-average-attempts": {
+    "en": "Attempts per round",
+    "ko": "라운드당 시도"
+  },
+  "map-info-first-clear": {
+    "en": "First-attempt clears",
+    "ko": "첫 시도 클리어"
+  },
+  "map-info-comeback": {
+    "en": "Comebacks (round / DM)",
+    "ko": "역전승 (일반 / 데스매치)"
+  },
+  "map-info-comeback-detail": {
+    "en": "50 pts / 10% behind",
+    "ko": "50점 · 10% 이상 열세"
+  },
+  "map-info-fastest": {
+    "en": "Fastest clear",
+    "ko": "최단 클리어"
+  },
+  "map-info-fastest-detail": {
+    "en": "attempt {}",
+    "ko": "{}번째 시도"
+  },
+  "map-info-longest": {
+    "en": "Longest Death Match",
+    "ko": "최장 데스매치"
+  },
+  "map-info-longest-detail": {
+    "en": "{} won",
+    "ko": "{} 승리"
   }
 }

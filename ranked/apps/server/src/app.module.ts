@@ -17,6 +17,7 @@ import { PlacementModule } from "./placement/placement.module.js";
 import { AchievementModule } from "./achievement/achievement.module.js";
 import { AdminModule } from "./admin/admin.module.js";
 import { HistoryModule } from "./history/history.module.js";
+import { MapPoolModule } from "./map-pool/map-pool.module.js";
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { HistoryModule } from "./history/history.module.js";
     AchievementModule,
     AdminModule,
     HistoryModule,
+    MapPoolModule,
   ],
   controllers: [HealthController],
 })
