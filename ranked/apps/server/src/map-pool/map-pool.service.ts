@@ -50,9 +50,10 @@ type Time = Date | string | null;
 const epoch = (value: Time): number | null => value === null ? null : new Date(value).getTime();
 const num = (value: unknown): number => Number(value ?? 0);
 
-// Only completed PVP play counts: Debug bot matches and unsettled rounds never do.
+// Every settled match counts: bot matches are treated as ordinary matches.
+// Unsettled rounds never do.
 const SETTLED_ROUNDS = `ranked_rounds r JOIN ranked_matches m ON m.id = r.match_id
-  WHERE m.match_type = 'RANKED_PVP' AND r.result IS NOT NULL`;
+  WHERE m.match_type IN ('RANKED_PVP', 'DEBUG_BOT') AND r.result IS NOT NULL`;
 
 @Injectable()
 export class MapPoolService {
@@ -98,7 +99,7 @@ export class MapPoolService {
          FROM ranked_matches m
          CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(m.candidate_maps_snapshot) = 'array'
            THEN m.candidate_maps_snapshot ELSE '[]'::jsonb END) c
-         WHERE m.match_type = 'RANKED_PVP' AND m.selected_round_maps_snapshot IS NOT NULL
+         WHERE m.match_type IN ('RANKED_PVP', 'DEBUG_BOT') AND m.selected_round_maps_snapshot IS NOT NULL
            AND COALESCE(m.series_state->>'mapBan', 'true') <> 'false'
          GROUP BY 1`),
     ]);
@@ -184,18 +185,18 @@ export class MapPoolService {
         progress_percent: string | number | null; cleared: boolean; awarded_score: string | number }>(
         `SELECT a.round_id, a.player_id, a.attempt_sequence, a.ended_at, a.progress_percent, a.cleared, a.awarded_score
          FROM ranked_attempts a JOIN ranked_rounds r ON r.id = a.round_id JOIN ranked_matches m ON m.id = r.match_id
-         WHERE m.match_type = 'RANKED_PVP' AND r.result IS NOT NULL
+         WHERE m.match_type IN ('RANKED_PVP', 'DEBUG_BOT') AND r.result IS NOT NULL
            AND r.canonical_level_id = $1 AND a.valid = TRUE AND a.ended_at IS NOT NULL`, [canonicalLevelId]),
       this.database.query<{ id: string; player_a_id: string; player_b_id: string; winner_id: string; started_at: Time; finished_at: Time }>(
         `SELECT d.id, m.player_a_id, m.player_b_id, d.winner_id, d.started_at, d.finished_at
          FROM ranked_deathmatches d JOIN ranked_matches m ON m.id = d.match_id
-         WHERE m.match_type = 'RANKED_PVP' AND d.winner_id IS NOT NULL
+         WHERE m.match_type IN ('RANKED_PVP', 'DEBUG_BOT') AND d.winner_id IS NOT NULL
            AND d.map_snapshot->>'canonicalLevelId' = $1`, [canonicalLevelId]),
       this.database.query<{ deathmatch_id: string; player_id: string; ended_at: Time; progress_percent: string | number | null; cleared: boolean }>(
         `SELECT a.deathmatch_id, a.player_id, a.ended_at, a.progress_percent, a.cleared
          FROM ranked_deathmatch_attempts a JOIN ranked_deathmatches d ON d.id = a.deathmatch_id
          JOIN ranked_matches m ON m.id = d.match_id
-         WHERE m.match_type = 'RANKED_PVP' AND d.winner_id IS NOT NULL
+         WHERE m.match_type IN ('RANKED_PVP', 'DEBUG_BOT') AND d.winner_id IS NOT NULL
            AND d.map_snapshot->>'canonicalLevelId' = $1 AND a.valid = TRUE AND a.ended_at IS NOT NULL`, [canonicalLevelId]),
     ]);
     const rounds: RoundRow[] = roundRows.rows.map((row) => ({

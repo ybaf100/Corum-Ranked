@@ -88,6 +88,7 @@ beforeAll(async () => {
   await round(m2, 1, "101", "B", [[ace, 60, 60, false], [bee, 250, 100, true]]);
   await round(m2, 2, "103", null, [[ace, 250, 100, true]]); // unsettled: never counted
   await match({ ban: ["102", null], mapBan: false }); // ban phase off: no offers
+  // Bot matches count like any other match (round, offers, clear, record).
   const debug = await match({ type: "DEBUG_BOT" });
   await round(debug, 1, "101", "A", [[ace, 250, 100, true]]);
 });
@@ -98,24 +99,24 @@ describe("Solo map pool", () => {
     const service = new MapPoolService(config, database, clock);
     const list = await service.pool();
     expect(list.maps.map((entry) => entry.title)).toEqual(["Alpha", "Zeta", "Demon One"]);
-    expect(list.totals).toEqual({ rounds: 3, draws: 1, drawRate: 33.3 });
+    expect(list.totals).toEqual({ rounds: 4, draws: 1, drawRate: 25 });
     const zeta = list.maps.find((entry) => entry.canonicalLevelId === "101")!;
-    expect(zeta).toMatchObject({ levelId: "9101", rounds: 2, share: 66.7, draws: 0, drawRate: 0, banOffers: 2, bans: 1, banRate: 50, difficultyRank: 5, gdDifficulty: "Insane", rating: 17 });
+    expect(zeta).toMatchObject({ levelId: "9101", rounds: 3, share: 75, draws: 0, drawRate: 0, banOffers: 3, bans: 1, banRate: 33.3, difficultyRank: 5, gdDifficulty: "Insane", rating: 17 });
     const demon = list.maps.find((entry) => entry.canonicalLevelId === "103")!;
-    expect(demon).toMatchObject({ rounds: 0, share: 0, drawRate: null, banOffers: 2, bans: 1 });
-    expect(list.maps.find((entry) => entry.canonicalLevelId === "102")).toMatchObject({ rounds: 1, draws: 1, drawRate: 100, banOffers: 2, bans: 0 });
+    expect(demon).toMatchObject({ rounds: 0, share: 0, drawRate: null, banOffers: 3, bans: 1 });
+    expect(list.maps.find((entry) => entry.canonicalLevelId === "102")).toMatchObject({ rounds: 1, draws: 1, drawRate: 100, banOffers: 3, bans: 0 });
     expect(list.mostPlayed).toBe("101");
   });
 
   it("reports per-map statistics, comebacks and the viewer's own record", async () => {
     const service = new MapPoolService(config, database, clock);
     const detail = await service.detail("101", ace);
-    expect(detail).toMatchObject({ shareRank: 1, mapCount: 3, mine: { rounds: 2, wins: 1, losses: 1, draws: 0, bestPercent: 100 } });
+    expect(detail).toMatchObject({ shareRank: 1, mapCount: 3, mine: { rounds: 3, wins: 2, losses: 1, draws: 0, bestPercent: 100 } });
     expect(detail.stats).toMatchObject({
-      rounds: 2, playerRounds: 4, clearRate: 50, firstAttemptClears: 1,
-      comeback: { normal: { eligible: 2, count: 2, rate: 100 }, deathmatch: { eligible: 1, count: 1, rate: 100 } },
-      deathmatches: 1, fastestClear: { attempt: 1, player: "Bee" }, longestDeathmatch: { seconds: 125, winner: "Bee" },
-      tiers: [{ tier: "SILVER", rounds: 1, share: 50 }, { tier: "GOLD", rounds: 1, share: 50 }],
+      rounds: 3, playerRounds: 6, clearRate: 50, firstAttemptClears: 2,
+      comeback: { normal: { eligible: 3, count: 2, rate: 66.7 }, deathmatch: { eligible: 1, count: 1, rate: 100 } },
+      deathmatches: 1, fastestClear: { attempt: 1, player: "Ace" }, longestDeathmatch: { seconds: 125, winner: "Bee" },
+      tiers: [{ tier: "SILVER", rounds: 2, share: 66.7 }, { tier: "GOLD", rounds: 1, share: 33.3 }],
     });
     await expect(service.detail("104", ace)).rejects.toThrow(/not in the Solo map pool/);
   });
@@ -128,7 +129,7 @@ describe("Solo map pool", () => {
     expect((await service.pool()).generatedAt).toBe(first.generatedAt);
     now = new Date(now.getTime() + 30_000);
     const next = await service.pool();
-    expect(next.totals.rounds).toBe(4);
+    expect(next.totals.rounds).toBe(5);
     expect(next.generatedAt).not.toBe(first.generatedAt);
   });
 });

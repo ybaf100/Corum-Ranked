@@ -16,11 +16,15 @@ class TierProgressBar final : public cocos2d::CCNode {
     cocos2d::CCDrawNode* m_draw = nullptr;
     cocos2d::CCLabelBMFont* m_caption = nullptr;
     cocos2d::CCNode* m_labels = nullptr;
+    // During a tier change: the previous tier's labels until the hand-over.
+    cocos2d::CCNode* m_oldLabels = nullptr;
+    cocos2d::ccColor3B m_fromTone{255, 207, 74};
     cocos2d::CCNodeRGBA* m_probe = nullptr;
     TierProgressView m_from;
     float m_anim = 0.0f;
     bool m_animating = false, m_up = true, m_tierChange = false;
     bool init(TierProgressView view, float width, std::string const& promotionTarget);
+    cocos2d::CCNode* buildLabels(TierProgressView const& view, std::string const& promotionTarget);
     void redraw();
 public:
     static TierProgressBar* create(TierProgressView view, float width, std::string const& promotionTarget = {});

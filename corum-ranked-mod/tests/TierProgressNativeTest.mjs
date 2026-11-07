@@ -53,3 +53,12 @@ test('lobby animates any LP change since the last visit: digit roll, tier bar, e
  // Faded-out nodes leave the card, so a later lobby fade cannot bring them back.
  assert.match(motion,/removeFromParentAndCleanup\(true\)/);
 });
+test('tier change hands over once: old tier labels and colours until the edge, then the new ones fade in',()=>{
+ const bar=readFileSync(join(root,'src/ui/TierProgressBar.cpp'),'utf8');
+ assert.match(bar,/m_oldLabels = buildLabels\(m_from, \{\}\);addChild\(m_oldLabels, 3\);/);
+ assert.match(bar,/auto const before = m_animating && m_tierChange && m_anim < 2\.15f;/);
+ assert.match(bar,/labelsAlpha = 0\.0f;oldAlpha = 1\.0f - seg\(1\.95f, 2\.15f\);/);
+ assert.match(bar,/auto const tone = before \? m_fromTone : m_tone;/);
+ // The old labels leave the node when the motion ends (lobby fades re-apply opacity).
+ assert.match(bar,/if \(m_oldLabels\) \{ m_oldLabels->removeFromParentAndCleanup\(true\);m_oldLabels = nullptr; \}/);
+});
