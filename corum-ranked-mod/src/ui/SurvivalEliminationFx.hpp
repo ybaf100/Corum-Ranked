@@ -30,10 +30,14 @@ void playSliceFx(EliminationFxTarget const& target, float fall, cocos2d::CCPoint
 // The default fall (move, spin, shrink, hide) of a card icon `slot`.
 void playDefaultFall(cocos2d::CCNode* slot, int order, float fall);
 // Slice executor: the 1st place icon `ghost` (in its parent's space) swoops
-// over `victim`, calls `slice` while cutting through, then returns `home`.
-// A new call restarts from the ghost's current position.
+// over `victim` and returns `home`; a new call restarts the motion from the
+// ghost's current position. The cut itself is scheduled per victim with
+// scheduleSliceCut, so a following victim never cancels a pending cut.
 inline const cocos2d::CCPoint kSliceEnter{-18.0f, 28.0f};
 inline const cocos2d::CCPoint kSliceLeave{18.0f, -28.0f};
-void runSliceGhost(cocos2d::CCNode* ghost, cocos2d::CCPoint victim, cocos2d::CCPoint home, std::function<void()> slice);
+inline constexpr float kSliceCutDelay = 0.1f; // the ghost reaches the victim
+void runSliceGhost(cocos2d::CCNode* ghost, cocos2d::CCPoint victim, cocos2d::CCPoint home);
+// Runs `cut` on `host` after kSliceCutDelay (the host owns the pending cut).
+void scheduleSliceCut(cocos2d::CCNode* host, std::function<void()> cut);
 
 } // namespace corum::ranked::ui

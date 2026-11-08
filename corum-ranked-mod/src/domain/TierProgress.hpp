@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace corum::ranked {
@@ -36,8 +37,20 @@ struct TierProgressInput {
     bool ladderTier = false;
 };
 
+// Frame of the lobby tier bar on the GOLD ladder. Elite (Survival Top 3 or
+// Solo CHAMPION) gets the Mythic diamond border with a travelling gloss;
+// other GOLD bars are gold with the achievement bar's shine.
+enum class TierBarStyle { Plain, Gold, Elite };
+
+inline TierBarStyle tierBarStyle(bool survival, std::string_view tier, bool ladderTier, std::optional<int> rank) {
+    if (!ladderTier) return TierBarStyle::Plain;
+    if (survival ? (rank && *rank >= 1 && *rank <= 3) : tier == "CHAMPION") return TierBarStyle::Elite;
+    return TierBarStyle::Gold;
+}
+
 struct TierProgressView {
     TierProgressKind kind = TierProgressKind::Hidden;
+    TierBarStyle style = TierBarStyle::Plain;
     std::string tier, nextTier;
     int minimum = 0, maximum = 0, score = 0, remaining = 0;
     float fill = 0.0f;

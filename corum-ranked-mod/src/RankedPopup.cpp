@@ -2544,7 +2544,9 @@ class CorumRankedLayer final : public CCLayerColor {
             input.tier = as->tier;input.score = as->lp;input.promotionActive = false;input.demotionWarning = false;
             input.ladderTier = survival ? upper(input.bands.back().tier) == input.tier : corum::ranked::goldRankTier(input.tier);
         }
-        return corum::ranked::tierProgress(input);
+        auto progress = corum::ranked::tierProgress(input);
+        progress.style = corum::ranked::tierBarStyle(survival, input.tier, input.ladderTier, input.rank);
+        return progress;
     }
     void addTierProgress(RuntimeView const& view, bool survival, CCPoint at) {
         auto progress = tierProgressFor(view, survival);

@@ -5,6 +5,7 @@
 #include "ModeLobbyMotion.hpp"
 #include "../domain/RankTierPresentation.hpp"
 #include "../domain/AchievementStyle.hpp"
+#include "../domain/LeaderboardPresentation.hpp"
 #include <chrono>
 #include <algorithm>
 #include <cmath>
@@ -55,7 +56,7 @@ bool TierProgressBar::init(TierProgressView view, float width, std::string const
     m_draw->setBlendFunc({GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA});
     addChild(m_draw, 1);
     redraw();
-    if (m_view.kind == TierProgressKind::Leader || m_view.kind == TierProgressKind::Promotion) scheduleUpdate();
+    if (m_view.kind == TierProgressKind::Leader || m_view.kind == TierProgressKind::Promotion || m_view.style != TierBarStyle::Plain) scheduleUpdate();
     else schedule(schedule_selector(TierProgressBar::update), 0.1f);
     return true;
 }
@@ -195,12 +196,42 @@ void TierProgressBar::redraw() {
     auto const edgeColor = m_up ? Gold : Red;
     auto const border = edge ? edgeColor : shown.kind == TierProgressKind::Warning ? Red
         : shown.kind == TierProgressKind::Promotion || shown.kind == TierProgressKind::RankChase ? Gold : tone;
-    // Frame, track.
-    quad(m_draw, left - 1.5f, y0 - 1.5f, right + 1.5f, y1 + 1.5f, rgba(border, (leader ? 0.9f : 0.55f) * k));
+    // Frame, track. GOLD ladder bars get a thin frame instead: gold, or the
+    // Mythic diamond pastels for the elite (Survival Top 3, Solo CHAMPION).
+    auto const seconds = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    auto const style = edge || shown.kind == TierProgressKind::Warning ? TierBarStyle::Plain : shown.style;
+    if (style == TierBarStyle::Plain) {
+        quad(m_draw, left - 1.5f, y0 - 1.5f, right + 1.5f, y1 + 1.5f, rgba(border, (leader ? 0.9f : 0.55f) * k));
+    } else {
+        constexpr float frameWidth = 1.0f;
+        auto const fx0 = left - frameWidth, fy0 = y0 - frameWidth, fx1 = right + frameWidth, fy1 = y1 + frameWidth;
+        if (style == TierBarStyle::Elite) {
+            // The frame in the flowing Mythic pastels, segment by segment.
+            constexpr int pieces = 36;
+            for (int i = 0; i < pieces; ++i) {
+                auto const a = fx0 + (fx1 - fx0) * static_cast<float>(i) / pieces, b = fx0 + (fx1 - fx0) * static_cast<float>(i + 1) / pieces;
+                auto const color = mythicPastel(static_cast<float>(i) / pieces, seconds, 0.95f * k);
+                quad(m_draw, a, fy1 - frameWidth, b + 0.2f, fy1, color);
+                quad(m_draw, a, fy0, b + 0.2f, fy0 + frameWidth, mythicPastel(1.0f - static_cast<float>(i) / pieces, seconds, 0.95f * k));
+            }
+            quad(m_draw, fx0, fy0, fx0 + frameWidth, fy1, mythicPastel(0.0f, seconds, 0.95f * k));
+            quad(m_draw, fx1 - frameWidth, fy0, fx1, fy1, mythicPastel(1.0f, seconds, 0.95f * k));
+        } else {
+            quad(m_draw, fx0, fy0, fx1, fy1, rgba(Gold, 0.9f * k));
+        }
+        // A short gloss runs clockwise around the frame every 3 s (the
+        // achievement card shine).
+        auto const stroke = clockwiseBorderStroke(fx1 - fx0, fy1 - fy0, m_time / 3.0, (fx1 - fx0) * 0.18f);
+        for (std::size_t index = 0; index < stroke.count; ++index) {
+            auto const& segment = stroke.segments[index];
+            auto const ax = fx0 + std::min(segment.from.x, segment.to.x), bx = fx0 + std::max(segment.from.x, segment.to.x);
+            auto const ay = fy0 + std::min(segment.from.y, segment.to.y), by = fy0 + std::max(segment.from.y, segment.to.y);
+            quad(m_draw, ax - 0.9f, ay - 0.9f, bx + 0.9f, by + 0.9f, {1, 1, 1, 0.85f * k});
+        }
+    }
     quad(m_draw, left, y0, right, y1, {10 / 255.0f, 19 / 255.0f, 36 / 255.0f, k});
     if (leader) {
         // #1: the whole bar in the Mythic achievement's moving pastel rainbow.
-        auto const seconds = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
         constexpr int segments = 42;
         for (int i = 0; i < segments; ++i) {
             auto const a = left + m_width * static_cast<float>(i) / segments, b = left + m_width * static_cast<float>(i + 1) / segments;
@@ -209,11 +240,23 @@ void TierProgressBar::redraw() {
     } else if (fill > 0.0f) {
         auto const pulse = 0.5f + 0.5f * std::sin(m_anim * 18.0f);
         auto const color = edge ? (m_up ? Gold : (pulse > 0.5f ? Red : ccColor3B{122, 34, 48})) : shown.kind == TierProgressKind::Warning ? Red
-            : shown.kind == TierProgressKind::Promotion ? Gold : shown.kind == TierProgressKind::Near ? Green : tone;
+            : shown.kind == TierProgressKind::Promotion || style != TierBarStyle::Plain ? Gold : shown.kind == TierProgressKind::Near ? Green : tone;
         auto const glow = shown.kind == TierProgressKind::Promotion ? 0.75f + 0.25f * std::sin(m_time * 4.0f) : 1.0f;
         auto const x = left + m_width * std::max(fill, 0.02f);
         quad(m_draw, left, y0, x, y1, rgba(color, glow * k));
         quad(m_draw, left, y0, x, y0 + 1.6f, {0, 0, 0, 0.28f * k});
+        if (style != TierBarStyle::Plain) {
+            // Gold fill shine: a soft light band sweeps across the filled part
+            // every 2.4 s, like the achievement progress bars.
+            auto const sweep = static_cast<float>(std::fmod(m_time / 2.4, 1.0));
+            auto const band = 14.0f, cx = left + (x - left + band * 2.0f) * sweep - band;
+            for (int i = 0; i < 6; ++i) {
+                auto const a = cx + band * (static_cast<float>(i) / 6.0f - 0.5f), b = a + band / 6.0f;
+                auto const alpha = 0.45f * (1.0f - std::abs(static_cast<float>(i) - 2.5f) / 3.0f);
+                auto const ca = std::max(a, left), cb = std::min(b, x);
+                if (cb > ca) quad(m_draw, ca, y0, cb, y1, {1, 1, 0.92f, alpha * k});
+            }
+        }
         if (fill < 1.0f) quad(m_draw, x - 1.0f, y0 - 2.0f, x + 1.0f, y1 + 2.0f, {0.95f, 0.97f, 1.0f, k});
     }
     // Quarter ticks.

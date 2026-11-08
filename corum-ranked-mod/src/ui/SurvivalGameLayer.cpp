@@ -405,7 +405,11 @@ class SurvivalGameLayer final : public CCLayerColor {
             if(auto face=weakFace.lock();face&&face->getParent())target.center=root->convertToNodeSpace(face->getParent()->convertToWorldSpace(face->getPosition()));
             ui::playSliceFx(target,fall,{ui::kSliceLeave.x-ui::kSliceEnter.x,ui::kSliceLeave.y-ui::kSliceEnter.y});
         };
-        ui::runSliceGhost(ghost,convertToNodeSpace(face),convertToNodeSpace(executor),slice);
+        // The cut is owned by this card, so the next victim moving the ghost
+        // on never cancels it (fast or same-frame reveals used to keep only
+        // the last cut).
+        ui::scheduleSliceCut(tile.root,slice);
+        ui::runSliceGhost(ghost,convertToNodeSpace(face),convertToNodeSpace(executor));
     }
     void stepEliminations(std::chrono::steady_clock::time_point now) {
         auto const elapsed=std::chrono::duration_cast<std::chrono::milliseconds>(now-m_eliminationStart).count()-SurvivalBeforeEliminationMilliseconds;

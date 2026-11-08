@@ -35,7 +35,7 @@ std::string requirementText(EliminationEffect effect) {
     auto const requirement = eliminationRequirement(effect);
     auto const key = std::string(requirement.key);
     auto const fallback = key == "elim-req-survival" ? std::string("Reach Survival {}") : key == "elim-req-both" ?
-        std::string("Reach {} in Survival and Solo Ranked") : key == "elim-req-grade" ? std::string("Reach achievement grade {}") :
+        std::string("Reach {} in both Survival and Solo Ranked") : key == "elim-req-grade" ? std::string("Reach achievement grade {}") :
         std::string("Always available");
     auto const format = i18n::text(key, fallback);
     if (requirement.tier.empty()) return format;
@@ -201,6 +201,11 @@ void RankedEliminationFxPopup::render() {
         menu->addChild(item);
     }
 
+    // Tier unlocks last for the season (grade unlocks are permanent); see
+    // ranked/docs/elimination-effects-season-settlement.md.
+    caption(m_content, i18n::text("elim-fx-season-note", "Once unlocked, usable for the season (achievement grade unlocks excepted)."),
+        {12 + listWidth / 2, 30}, 0.17f, listWidth, ccColor3B{255, 214, 120}, FontWeight::SemiBold);
+
     // Preview stage on the right, the selected effect's buttons below it.
     auto const stageLeft = 24 + listWidth;
     auto const stageSize = CCSize{size.width - stageLeft - 12, size.height - 50 - 56};
@@ -292,9 +297,10 @@ void RankedEliminationFxPopup::executeVictim(std::size_t index) {
         ghost->setPosition(m_executorAt);
         m_world->addChild(ghost, 30);
         auto const victim = m_world->convertToNodeSpace(card->convertToWorldSpace(slot->getPosition()));
-        runSliceGhost(ghost, victim, m_executorAt, [target, fall]() {
+        scheduleSliceCut(card, [target, fall]() {
             playSliceFx(target, fall, {kSliceLeave.x - kSliceEnter.x, kSliceLeave.y - kSliceEnter.y});
         });
+        runSliceGhost(ghost, victim, m_executorAt);
         break;
     }
     default:

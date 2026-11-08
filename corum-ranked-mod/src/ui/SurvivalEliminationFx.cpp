@@ -85,14 +85,15 @@ void sparks(CCNode* host, CCPoint center, int count, ccColor4B color, float dist
     }
 }
 
-// A jagged bolt from above the card down to the icon, polygons only.
-void bolt(CCNode* host, CCPoint center, int order) {
+// A short jagged bolt just above the icon, polygons only; sized from the
+// icon scale so it stays small on compact cards.
+void bolt(CCNode* host, CCPoint center, int order, float iconScale) {
     auto* node = CCDrawNode::create();
     std::vector<CCPoint> path;
-    auto const top = 150.0f;
-    for (int i = 0; i <= 6; ++i) {
-        auto const t = static_cast<float>(i) / 6.0f;
-        auto const jitter = i == 0 || i == 6 ? 0.0f : ((i + order) % 2 ? 9.0f : -9.0f);
+    auto const top = 46.0f;
+    for (int i = 0; i <= 4; ++i) {
+        auto const t = static_cast<float>(i) / 4.0f;
+        auto const jitter = i == 0 || i == 4 ? 0.0f : ((i + order) % 2 ? 5.0f : -5.0f);
         path.push_back({jitter, top * (1.0f - t)});
     }
     auto quad = [&](CCPoint a, CCPoint b, float width, ccColor4F color) {
@@ -101,11 +102,12 @@ void bolt(CCNode* host, CCPoint center, int order) {
             {b.x - n.x * width, b.y - n.y * width}, {a.x - n.x * width, a.y - n.y * width}};
         node->drawPolygon(q, 4, color, 0, color);
     };
-    for (std::size_t i = 0; i + 1 < path.size(); ++i) quad(path[i], path[i + 1], 3.6f, {1.0f, 0.84f, 0.3f, 0.9f});
-    for (std::size_t i = 0; i + 1 < path.size(); ++i) quad(path[i], path[i + 1], 1.3f, {1, 1, 1, 1});
+    for (std::size_t i = 0; i + 1 < path.size(); ++i) quad(path[i], path[i + 1], 2.0f, {1.0f, 0.84f, 0.3f, 0.85f});
+    for (std::size_t i = 0; i + 1 < path.size(); ++i) quad(path[i], path[i + 1], 0.8f, {1, 1, 1, 1});
     node->setPosition(center);
+    node->setScale(std::clamp(iconScale / 0.65f, 0.6f, 1.0f));
     host->addChild(node, 22);
-    node->runAction(CCSequence::create(CCBlink::create(0.2f, 3), CCRemoveSelf::create(), nullptr));
+    node->runAction(CCSequence::create(CCBlink::create(0.16f, 2), CCRemoveSelf::create(), nullptr));
 }
 
 } // namespace
@@ -118,17 +120,19 @@ void playSliceFx(EliminationFxTarget const& target, float fall, CCPoint swipe) {
     auto const d = unit(swipe), n = CCPoint{-d.y, d.x};
     auto const r = 60.0f;
     CCPoint const p1{d.x * r, d.y * r}, p2{-d.x * r, -d.y * r};
-    auto const duration = eliminationFxSeconds() - 0.1f;
+    auto const duration = eliminationFxSeconds();
     for (int side : {1, -1}) {
         auto const off = CCPoint{n.x * r * static_cast<float>(side), n.y * r * static_cast<float>(side)};
         auto* half = iconPiece(target, {p1, p2, {p2.x + off.x, p2.y + off.y}, {p1.x + off.x, p1.y + off.y}});
-        auto const push = CCPoint{n.x * 14.0f * static_cast<float>(side), n.y * 14.0f * static_cast<float>(side)};
+        auto const push = CCPoint{n.x * 16.0f * static_cast<float>(side), n.y * 16.0f * static_cast<float>(side)};
+        // Push apart, hold a beat so the cut reads, then fall.
         half->runAction(CCSequence::create(
-            CCEaseSineOut::create(CCMoveBy::create(0.1f, push)),
+            CCEaseSineOut::create(CCMoveBy::create(0.12f, push)),
+            CCDelayTime::create(0.1f),
             CCSpawn::create(
-                CCEaseSineIn::create(CCMoveBy::create(duration, {push.x * 1.4f, -fall})),
-                CCRotateBy::create(duration, side > 0 ? 70.0f : -70.0f),
-                CCScaleTo::create(duration, 0.45f), nullptr),
+                CCEaseSineIn::create(CCMoveBy::create(duration - 0.22f, {push.x * 1.4f, -fall})),
+                CCRotateBy::create(duration - 0.22f, side > 0 ? 70.0f : -70.0f),
+                CCScaleTo::create(duration - 0.22f, 0.45f), nullptr),
             CCRemoveSelf::create(), nullptr));
     }
     slashLine(target.host, target.center, d, 74.0f);
@@ -144,17 +148,21 @@ void playDefaultFall(CCNode* slot, int order, float fall) {
         CCHide::create(), nullptr));
 }
 
-void runSliceGhost(CCNode* ghost, CCPoint victim, CCPoint home, std::function<void()> slice) {
+void runSliceGhost(CCNode* ghost, CCPoint victim, CCPoint home) {
     if (!ghost) return;
     ghost->stopAllActions();
     ghost->setVisible(true);
     ghost->runAction(CCSequence::create(
-        CCEaseSineOut::create(CCMoveTo::create(0.1f, {victim.x + kSliceEnter.x, victim.y + kSliceEnter.y})),
-        CallFuncExt::create(std::move(slice)),
+        CCEaseSineOut::create(CCMoveTo::create(kSliceCutDelay, {victim.x + kSliceEnter.x, victim.y + kSliceEnter.y})),
         CCMoveTo::create(0.06f, {victim.x + kSliceLeave.x, victim.y + kSliceLeave.y}),
         CCDelayTime::create(0.2f),
         CCEaseSineInOut::create(CCMoveTo::create(0.24f, home)),
         CCRemoveSelf::create(), nullptr));
+}
+
+void scheduleSliceCut(CCNode* host, std::function<void()> cut) {
+    if (!host) return;
+    host->runAction(CCSequence::create(CCDelayTime::create(kSliceCutDelay), CallFuncExt::create(std::move(cut)), nullptr));
 }
 
 void playEliminationFx(EliminationEffect effect, EliminationFxTarget const& target, float fall, CCPoint executor) {
@@ -163,13 +171,13 @@ void playEliminationFx(EliminationEffect effect, EliminationFxTarget const& targ
     auto* slot = target.slot;
     switch (effect) {
     case EliminationEffect::Bolt: {
-        bolt(target.host, target.center, target.order);
-        flash(target.host, target.center, 20.0f, {1, 1, 0.85f, 0.85f});
-        sparks(target.host, target.center, 7, {255, 214, 90, 255}, 34.0f);
+        // Simplified: a short bolt, a small flash, four sparks, then the icon
+        // shrinks away upward.
+        bolt(target.host, target.center, target.order, target.iconScale);
+        flash(target.host, target.center, 11.0f, {1, 1, 0.85f, 0.8f});
+        sparks(target.host, target.center, 4, {255, 214, 90, 255}, 16.0f);
         slot->runAction(CCSequence::create(CCDelayTime::create(0.06f),
-            CCSpawn::create(CCScaleTo::create(0.1f, 1.25f), CCMoveBy::create(0.1f, {0, 5}), nullptr),
-            CCSpawn::create(CCEaseSineIn::create(CCScaleTo::create(total - 0.18f, 0.0f)), CCMoveBy::create(total - 0.18f, {0, 24}),
-                CCRotateBy::create(total - 0.18f, target.order % 2 ? 50.0f : -50.0f), nullptr),
+            CCSpawn::create(CCEaseSineIn::create(CCScaleTo::create(total - 0.06f, 0.0f)), CCMoveBy::create(total - 0.06f, {0, 14}), nullptr),
             CCHide::create(), nullptr));
         break;
     }

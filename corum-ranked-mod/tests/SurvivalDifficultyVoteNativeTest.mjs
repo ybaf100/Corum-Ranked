@@ -44,7 +44,7 @@ test('client sends one ballot, shows only the voted count, and holds MATCH FOUND
  assert.match(layer,/survivalVoteStage\(view\.vote\.present,view\.vote\.resolved,intro/);
  assert.match(layer,/m_grid->setScale\(1-\.60f\*ease\)/);
  const vote=read('src/ui/SurvivalDifficultyVote.cpp');
- assert.match(vote,/survival-vote-title/);assert.match(vote,/GJDifficultySprite::create\(spec\.nativeDifficulty/);
+ assert.match(vote,/survival-vote-title/);assert.match(vote,/createWithSpriteFrameName\(fmt::format\("diffIcon_\{:02\}_btn_001\.png", spec\.nativeDifficulty\)/);assert.doesNotMatch(vote,/GJDifficultySprite::create/);
  const lobby=read('src/RankedPopup.cpp');
  assert.match(lobby,/survival\.matchFoundHold\(\)/);assert.match(lobby,/bool soloMatchFoundHold\(\)/);
  // The opponent stays anonymous in the queue window until the versus intro.

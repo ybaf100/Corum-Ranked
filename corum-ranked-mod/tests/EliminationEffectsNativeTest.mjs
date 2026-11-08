@@ -85,7 +85,14 @@ test('achievement grade emblem opens the ladder; effect picker previews the sele
  assert.match(picker,/menu_selector\(RankedEliminationFxPopup::onSelect\)/);
  assert.match(picker,/schedule\(schedule_selector\(RankedEliminationFxPopup::previewTick\), kPreviewLoop\)/);
  assert.match(picker,/survivalEliminationStarts\(m_victims\.size\(\)\)/);
- assert.match(picker,/runSliceGhost\(ghost, victim, m_executorAt,/);
- assert.match(layer,/ui::runSliceGhost\(ghost,convertToNodeSpace\(face\),convertToNodeSpace\(executor\),slice\);/);
+ // Every victim owns its cut: moving the ghost on to the next victim never cancels it.
+ assert.match(picker,/scheduleSliceCut\(card, \[target, fall\]\(\)/);assert.match(picker,/runSliceGhost\(ghost, victim, m_executorAt\);/);
+ assert.match(layer,/ui::scheduleSliceCut\(tile\.root,slice\);\s*ui::runSliceGhost\(ghost,convertToNodeSpace\(face\),convertToNodeSpace\(executor\)\);/);
+ const fx=readFileSync(join(root,'src/ui/SurvivalEliminationFx.cpp'),'utf8');
+ assert.match(fx,/void runSliceGhost\(CCNode\* ghost, CCPoint victim, CCPoint home\) \{/);assert.doesNotMatch(fx.slice(fx.indexOf('void runSliceGhost'),fx.indexOf('void scheduleSliceCut')),/CallFuncExt/);
+ // Simplified bolt: short (46 before icon scale), thin, four sparks, no scale-up bump.
+ assert.match(fx,/auto const top = 46\.0f;/);assert.match(fx,/sparks\(target\.host, target\.center, 4,/);assert.doesNotMatch(fx,/CCScaleTo::create\(0\.1f, 1\.25f\)/);
+ // Season note under the list; the both-modes requirement wording.
+ assert.match(picker,/elim-fx-season-note/);
  assert.match(layer,/ui::playDefaultFall\(tile\.icon,static_cast<int>\(order\),getContentSize\(\)\.height\);/);
 });

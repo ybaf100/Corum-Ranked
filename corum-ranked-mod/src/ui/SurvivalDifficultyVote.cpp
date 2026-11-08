@@ -41,7 +41,9 @@ bool SurvivalDifficultyVote::init(CCSize size, std::function<void(std::string co
         auto* body = CCNodeRGBA::create();body->setCascadeOpacityEnabled(true);body->setContentSize({cardW, cardH});
         body->setAnchorPoint({.5f, .5f});
         auto* chrome = surface({cardW, cardH}, {cardW / 2, cardH / 2}, Blue, SurfaceRaised, 248, true);body->addChild(chrome, 1);
-        if (auto* face = GJDifficultySprite::create(spec.nativeDifficulty, GJDifficultyName::Short)) {
+        // The bare difficulty face (diffIcon frames carry no EASY/HARD/DEMON
+        // caption, unlike GJDifficultySprite).
+        if (auto* face = CCSprite::createWithSpriteFrameName(fmt::format("diffIcon_{:02}_btn_001.png", spec.nativeDifficulty).c_str())) {
             face->setScale(std::min(1.0f, cardH * .30f / std::max(1.0f, face->getContentSize().height)));
             face->setPosition({cardW / 2, cardH - cardH * .22f});body->addChild(face, 5);
         }

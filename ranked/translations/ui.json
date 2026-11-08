@@ -3376,8 +3376,8 @@
     "ko": "서바이벌 {} 달성"
   },
   "elim-req-both": {
-    "en": "Reach {} in Survival and Solo Ranked",
-    "ko": "서바이벌 · 솔로 랭크 {} 달성"
+    "en": "Reach {} in both Survival and Solo Ranked",
+    "ko": "서바이벌 및 솔로 랭크 {} 달성"
   },
   "elim-req-grade": {
     "en": "Reach achievement grade {}",
@@ -3434,5 +3434,9 @@
   "elim-replay": {
     "en": "REPLAY",
     "ko": "다시 보기"
+  },
+  "elim-fx-season-note": {
+    "en": "Once unlocked, usable for the season (achievement grade unlocks excepted).",
+    "ko": "한번 해금시, 시즌동안 사용 가능합니다. (도전과제 등급 해금은 예외)"
   }
 }

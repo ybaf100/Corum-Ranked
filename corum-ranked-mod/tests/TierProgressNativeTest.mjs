@@ -62,3 +62,30 @@ test('tier change hands over once: old tier labels and colours until the edge, t
  // The old labels leave the node when the motion ends (lobby fades re-apply opacity).
  assert.match(bar,/if \(m_oldLabels\) \{ m_oldLabels->removeFromParentAndCleanup\(true\);m_oldLabels = nullptr; \}/);
 });
+
+test('tier bar style: Survival Top 3 / Solo CHAMPION are elite, other GOLD ladder bars gold',()=>run(`
+#include "domain/TierProgress.hpp"
+#include <cassert>
+using namespace corum::ranked;
+int main(){
+ assert(tierBarStyle(true,"GOLD",true,1)==TierBarStyle::Elite);
+ assert(tierBarStyle(true,"GOLD",true,3)==TierBarStyle::Elite);
+ assert(tierBarStyle(true,"GOLD",true,4)==TierBarStyle::Gold);
+ assert(tierBarStyle(true,"GOLD",true,std::nullopt)==TierBarStyle::Gold);
+ assert(tierBarStyle(true,"SILVER",false,1)==TierBarStyle::Plain);
+ assert(tierBarStyle(false,"CHAMPION",true,7)==TierBarStyle::Elite);
+ assert(tierBarStyle(false,"MASTER",true,2)==TierBarStyle::Gold);
+ assert(tierBarStyle(false,"GOLD",true,std::nullopt)==TierBarStyle::Gold);
+ assert(tierBarStyle(false,"SILVER1",false,std::nullopt)==TierBarStyle::Plain);
+}
+`));
+
+test('tier bar draws the thin gold / Mythic frame with a travelling gloss and a fill shine',()=>{
+ const bar=readFileSync(join(root,'src/ui/TierProgressBar.cpp'),'utf8');
+ const popup=readFileSync(join(root,'src/RankedPopup.cpp'),'utf8');
+ assert.match(popup,/progress\.style = corum::ranked::tierBarStyle\(survival, input\.tier, input\.ladderTier, input\.rank\);/);
+ assert.match(bar,/m_view\.style != TierBarStyle::Plain\) scheduleUpdate\(\);/);
+ assert.match(bar,/if \(style == TierBarStyle::Elite\) \{[\s\S]{0,500}mythicPastel/);
+ assert.match(bar,/clockwiseBorderStroke\(fx1 - fx0, fy1 - fy0, m_time \/ 3\.0,/);
+ assert.match(bar,/std::fmod\(m_time \/ 2\.4, 1\.0\)/);
+});
