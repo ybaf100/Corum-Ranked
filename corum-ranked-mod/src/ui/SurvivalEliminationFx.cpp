@@ -179,8 +179,8 @@ void playEliminationFx(EliminationEffect effect, EliminationFxTarget const& targ
         auto const side = unit({-delta.y, delta.x});
         auto const swing = std::clamp(std::sqrt(delta.x * delta.x + delta.y * delta.y) * 0.45f, 40.0f, 140.0f);
         ccBezierConfig path;
-        path.controlPoint_1 = {from.x + side.x * swing, from.y + side.y * swing};
-        path.controlPoint_2 = {to.x - side.x * swing * 0.6f, to.y - side.y * swing * 0.6f};
+        path.controlPoint_1 = CCPoint{from.x + side.x * swing, from.y + side.y * swing};
+        path.controlPoint_2 = CCPoint{to.x - side.x * swing * 0.6f, to.y - side.y * swing * 0.6f};
         path.endPosition = to;
         sparks(target.host, target.center, 6, {176, 132, 255, 255}, 22.0f);
         slot->runAction(CCSequence::create(CCSpawn::create(
