@@ -38,6 +38,7 @@
 #include "ui/ResultScoreLayer.hpp"
 #include "ui/StandingVisuals.hpp"
 #include "ui/RankedLeaderboardPopup.hpp"
+#include "ui/AchievementCardFrame.hpp"
 #include "ui/RankedMapPoolView.hpp"
 #include "ui/RankedTapScroll.hpp"
 #include "ui/RankedTierGuidePopup.hpp"
@@ -5433,25 +5434,17 @@ class CorumRankedLayer final : public CCLayerColor {
             if(auto* title=typeinfo_cast<CCLabelBMFont*>(m_root->getChildByID("ranked-screen-title"_spr)))
                 corum::ranked::ui::fitMenuLabelWidth(title,std::max(50.f,size.width-2*(width+28)),.70f,.40f);
         }
-        auto* ap = makeTextPlate(
-            fmt::format("{} AP", view.achievements.totalAp),
-            {size.width*.19f, 27.0f},
-            {size.width*.16f, size.height - 75.0f},
-            kGold,
-            0.38f,
-            kGold,
-            "black"
-        );
+        // Status row: double-framed AP and claimable plates, then CLAIM ALL.
+        auto* ap = corum::ranked::ui::achievementPlate(fmt::format("{} AP", view.achievements.totalAp),
+            {size.width*.19f, 27.0f}, kGold, ccc3(26, 18, 6), kGold, 0.38f);
+        ap->setPosition({size.width*.16f, size.height - 75.0f});
         m_root->addChild(ap, 5);
-        auto* pending = makeTextPlate(
+        auto const claimable = view.achievements.unclaimedRewardCount > 0;
+        auto* pending = corum::ranked::ui::achievementPlate(
             fmt::format("{} {}", view.achievements.unclaimedRewardCount, tr("claimable", "CLAIMABLE")),
-            {size.width*.23f, 27.0f},
-            {size.width*.40f, size.height - 75.0f},
-            view.achievements.unclaimedRewardCount > 0 ? kRed : kCyan,
-            0.34f,
-            view.achievements.unclaimedRewardCount > 0 ? ccc3(255, 225, 230) : corum::ranked::ui::Text,
-            "black"
-        );
+            {size.width*.23f, 27.0f}, claimable ? ccc3(255, 111, 138) : kCyan, claimable ? ccc3(32, 10, 18) : kDeepPanel2,
+            claimable ? ccc3(255, 214, 222) : corum::ranked::ui::Text, 0.34f);
+        pending->setPosition({size.width*.40f, size.height - 75.0f});
         m_root->addChild(pending, 5);
         if(!titleSelectorOpen){
             auto const pendingRewards=corum::ranked::achievementPending(view.achievements.cards,"ALL");
@@ -5460,6 +5453,7 @@ class CorumRankedLayer final : public CCLayerColor {
             auto* visual=makeNeonPanel({width,27},{},corum::ranked::ui::achievementColor(tier),kDeepPanel,255);
             auto* fill=CCLayerColor::create({255,255,255,255},width-3,24);fill->setPosition({1.5f,1.5f});visual->addChild(fill,2);
             corum::ranked::ui::styleAchievementFill(fill,tier);
+            corum::ranked::ui::addAchievementInnerFrame(visual,{width,27},tier?ccc3(122,74,16):kCyan,3.0f,150);
             auto* caption=makeLabel(fmt::format("{} (+{} AP)",tr("claim-all","CLAIM ALL"),pendingRewards.amount),.29f,{width/2,13.5f},tier?ccc3(17,25,40):corum::ranked::ui::Text,"black");
             corum::ranked::ui::fitFullMenuLabel(caption,width-12,19,.29f);visual->addChild(caption,5);
             auto* button=CCMenuItemSpriteExtra::create(visual,this,menu_selector(CorumRankedLayer::onAchievementClaimAll));
@@ -5486,12 +5480,15 @@ class CorumRankedLayer final : public CCLayerColor {
         }
 
         if (!titleSelectorOpen) {
+            // Scope tabs with pointed ends; the selected one is filled.
             for (int tab = 0; tab < 3; ++tab) {
                 auto const scope = tab == 0 ? "SOLO_RANKED" : tab == 1 ? "SURVIVAL" : "SHARED";
-                auto name = corum::ranked::achievementScopeName(scope,corum::ranked::i18n::isKorean());
-                if (m_achievementScope == scope) name = "[ " + name + " ]";
-                auto* button = addButton(name,{size.width/2 + (tab-1)*114.0f,size.height-100},menu_selector(CorumRankedLayer::onAchievementScope),false,0.45f);
+                auto const name = corum::ranked::achievementScopeName(scope,corum::ranked::i18n::isKorean());
+                auto* face = corum::ranked::ui::achievementTabFace(name, {105.0f, 20.0f}, m_achievementScope == scope);
+                auto* button = CCMenuItemSpriteExtra::create(face, this, menu_selector(CorumRankedLayer::onAchievementScope));
+                button->setPosition({size.width/2 + (tab-1)*114.0f,size.height-100});
                 button->setTag(tab);
+                m_menu->addChild(button);
             }
         }
         constexpr std::size_t perPage = 4;
@@ -5517,35 +5514,51 @@ class CorumRankedLayer final : public CCLayerColor {
                 column == 0 ? size.width / 4.0f : size.width * 3.0f / 4.0f,
                 layout.firstY - static_cast<float>(row) * layout.rowStep,
             };
-            auto const accent = achievementCardAccent(card);
-            auto* panel = makeNeonPanel({cardWidth, cardHeight}, center, accent, kDeepPanel, 246);
-            m_root->addChild(panel, 1);
+            auto const cardTier = corum::ranked::achievementCardTier(card,view.achievements.equippedTitle);
+            auto const achieved = card.type == "PROGRESSIVE" ? card.currentLevel > 0 : card.unlocked;
+            // Rarity card frame; achieved tier 4/5 cards get the travelling border shine.
+            auto* frame = corum::ranked::ui::AchievementCardFrame::create({cardWidth, cardHeight}, cardTier, achieved);
+            frame->setPosition(center);
+            m_root->addChild(frame, 1);
+            auto const accent = frame->tone();
+            auto const left = center.x - cardWidth / 2.0f + 10.0f;
+            auto const contentWidth = cardWidth - 92.0f;
+            // Top row, right: rarity word, the five rarity gems to its left.
+            auto const rarityText = card.type == "PROGRESSIVE"
+                ? fmt::format("LV {}", std::clamp(card.currentLevel, 0, 5))
+                : upper(card.rarity);
+            auto* rarityLabel = makeLabel(rarityText, 0.22f*cardScale, {left + contentWidth, center.y + 27.0f*cardScale}, accent, "black", {1.0f, 0.5f});
+            corum::ranked::ui::fitMenuLabelWidth(rarityLabel, 48.0f*cardScale, 0.22f*cardScale, 0.13f*cardScale);
+            m_root->addChild(rarityLabel, 4);
+            auto const rarityWidth = rarityLabel->getScaledContentSize().width;
+            auto const gemSize = 2.6f*cardScale;
+            frame->setGems({contentWidth + 10.0f - rarityWidth - 4.0f, cardHeight / 2.0f + 27.0f*cardScale}, cardTier, gemSize);
+            auto const gemsWidth = 5.0f * (gemSize * 2.0f + 1.6f);
             auto const baseName = corum::ranked::achievementCardName(card,corum::ranked::i18n::isKorean());
             auto const title = card.type == "PROGRESSIVE" && card.currentLevel > 0
                 ? fmt::format("{} - {}", baseName, card.displayLabel)
                 : baseName;
-            auto const titleColor = accent;
             auto* titleLabel = makeLabel(
                 title,
                 0.40f*cardScale,
-                {center.x - cardWidth / 2.0f + 10.0f, center.y + 27.0f*cardScale},
-                titleColor,
+                {left, center.y + 27.0f*cardScale},
+                accent,
                 "semibold",
                 {0.0f, 0.5f}
             );
-            corum::ranked::ui::fitFullMenuLabel(titleLabel,cardWidth-82,20*cardScale,.40f*cardScale);
-            corum::ranked::ui::styleAchievementText(titleLabel,corum::ranked::achievementCardTier(card,view.achievements.equippedTitle),card.unlocked || card.currentLevel>0);
+            corum::ranked::ui::fitFullMenuLabel(titleLabel,std::max(40.0f, contentWidth - rarityWidth - gemsWidth - 10.0f),20*cardScale,.40f*cardScale);
+            corum::ranked::ui::styleAchievementText(titleLabel,cardTier,achieved);
             m_root->addChild(titleLabel, 4);
             auto const description = corum::ranked::achievementCardDescription(card,corum::ranked::i18n::isKorean());
             auto* descriptionLabel = makeLabel(
                 description,
                 0.25f*cardScale,
-                {center.x - cardWidth / 2.0f + 10.0f, center.y + 5.0f*cardScale},
-                accent,
+                {left, center.y + 5.0f*cardScale},
+                ccc3(200, 188, 230),
                 "medium",
                 {0.0f, 0.5f}
             );
-            corum::ranked::ui::fitFullMenuLabel(descriptionLabel, cardWidth - 90.0f, 26.0f*cardScale, 0.25f*cardScale);
+            corum::ranked::ui::fitFullMenuLabel(descriptionLabel, contentWidth + 2.0f, 26.0f*cardScale, 0.25f*cardScale);
             descriptionLabel->setAlignment(kCCTextAlignmentLeft);
             m_root->addChild(descriptionLabel, 4);
 
@@ -5567,12 +5580,12 @@ class CorumRankedLayer final : public CCLayerColor {
             auto* progressLabel = makeLabel(
                 progressText,
                 0.30f*cardScale,
-                {center.x - cardWidth / 2.0f + 10.0f, center.y - 18.0f*cardScale},
+                {left, center.y - 18.0f*cardScale},
                 accent,
                 "black",
                 {0.0f, 0.5f}
             );
-            corum::ranked::ui::fitMenuLabelWidth(progressLabel, (cardWidth - 92.0f) * 0.62f, 0.30f*cardScale, 0.18f*cardScale);
+            corum::ranked::ui::fitMenuLabelWidth(progressLabel, contentWidth * 0.62f, 0.30f*cardScale, 0.18f*cardScale);
             m_root->addChild(progressLabel, 4);
             // Faint holder count, right of the progress text: a growth
             // achievement names the players at the own stage and its top share.
@@ -5581,23 +5594,27 @@ class CorumRankedLayer final : public CCLayerColor {
                     ? fmt::format(fmt::runtime(tr("achievement-stage-holders", "{} players at this stage (top {}%)")), *card.stageHolders, fmt::format("{:.1f}", card.stageTopPercent))
                     : fmt::format(fmt::runtime(tr("achievement-holders", "{} players ({}%)")), card.holders, fmt::format("{:.1f}", card.holderPercent)),
                 0.21f*cardScale,
-                {center.x - cardWidth / 2.0f + 10.0f + (cardWidth - 92.0f), center.y - 18.0f*cardScale},
-                corum::ranked::ui::TextMuted,
+                {left + contentWidth, center.y - 18.0f*cardScale},
+                ccc3(142, 128, 179),
                 "medium",
                 {1.0f, 0.5f}
             );
-            corum::ranked::ui::fitMenuLabelWidth(holdersLabel, (cardWidth - 92.0f) * 0.36f, 0.21f*cardScale, card.stageHolders ? 0.12f*cardScale : 0.14f*cardScale);
-            holdersLabel->setOpacity(170);
+            corum::ranked::ui::fitMenuLabelWidth(holdersLabel, contentWidth * 0.36f, 0.21f*cardScale, card.stageHolders ? 0.12f*cardScale : 0.14f*cardScale);
             m_root->addChild(holdersLabel, 4);
-            auto* barBack = CCLayerColor::create({40, 50, 68, 220});
-            barBack->setContentSize({cardWidth - 92.0f, 7.0f*cardScale});
-            barBack->setPosition({center.x - cardWidth / 2.0f + 10.0f, center.y - 34.0f*cardScale});
+            // Progress bar: a tier-coloured hairline frame around a dark track.
+            auto* barFrame = CCLayerColor::create({accent.r, accent.g, accent.b, 110});
+            barFrame->setContentSize({contentWidth + 1.2f, 7.0f*cardScale + 1.2f});
+            barFrame->setPosition({left - 0.6f, center.y - 34.0f*cardScale - 0.6f});
+            m_root->addChild(barFrame, 2);
+            auto* barBack = CCLayerColor::create({18, 12, 36, 255});
+            barBack->setContentSize({contentWidth, 7.0f*cardScale});
+            barBack->setPosition({left, center.y - 34.0f*cardScale});
             m_root->addChild(barBack, 3);
             auto* barFill = CCLayerColor::create({accent.r, accent.g, accent.b, 245});
-            barFill->setContentSize({static_cast<float>((cardWidth - 92.0f) * progress), 7.0f*cardScale});
+            barFill->setContentSize({static_cast<float>(contentWidth * progress), 7.0f*cardScale});
             barFill->setPosition(barBack->getPosition());
             m_root->addChild(barFill, 4);
-            corum::ranked::ui::styleAchievementFill(barFill,corum::ranked::achievementCardTier(card,view.achievements.equippedTitle),true,card.type=="PROGRESSIVE"?card.currentLevel>=4:card.unlocked);
+            corum::ranked::ui::styleAchievementFill(barFill,cardTier,true,card.type=="PROGRESSIVE"?card.currentLevel>=4:card.unlocked);
 
             if (!titleSelectorOpen) {
                 auto const claimState = corum::ranked::achievementClaimState(
@@ -5605,63 +5622,56 @@ class CorumRankedLayer final : public CCLayerColor {
                     card.currentLevel,
                     card.claimableRewards
                 );
-                auto* claim = addButton(
-                    claimState == corum::ranked::AchievementClaimState::Unclaimed
+                auto const canClaim = claimState == corum::ranked::AchievementClaimState::Unclaimed;
+                auto* claimFace = corum::ranked::ui::achievementButtonFace(
+                    canClaim
                         ? fmt::format("CLAIM +{}", card.claimableAp)
                         : claimState == corum::ranked::AchievementClaimState::Claimed
                             ? tr("claimed", "CLAIMED")
                             : tr("locked", "LOCKED"),
-                    {center.x + cardWidth / 2.0f - 39.0f, center.y + 14.0f*cardScale},
-                    menu_selector(CorumRankedLayer::onAchievementClaim),
-                    claimState == corum::ranked::AchievementClaimState::Unclaimed,
-                    0.50f*cardScale
-                );
+                    {66.0f*cardScale, 22.0f*cardScale},
+                    canClaim ? corum::ranked::ui::AchievementButtonStyle::Claim : corum::ranked::ui::AchievementButtonStyle::Muted,
+                    0.30f*cardScale);
+                auto* claim = CCMenuItemSpriteExtra::create(claimFace, this, menu_selector(CorumRankedLayer::onAchievementClaim));
+                claim->setPosition({center.x + cardWidth / 2.0f - 39.0f, center.y + 14.0f*cardScale});
+                m_menu->addChild(claim);
                 claim->setTag(static_cast<int>(index));
-                claim->setEnabled(
-                    claimState == corum::ranked::AchievementClaimState::Unclaimed &&
-                    !view.achievements.loading
-                );
+                claim->setEnabled(canClaim && !view.achievements.loading);
 
-                auto const titleUnlocked = card.type == "PROGRESSIVE"
-                    ? card.currentLevel > 0
-                    : card.unlocked;
+                auto const titleUnlocked = achieved;
                 auto const equipped = view.achievements.equippedTitle.active &&
                     view.achievements.equippedTitle.achievementId == card.id;
-                auto* titleButton = addButton(
+                auto* titleFace = corum::ranked::ui::achievementButtonFace(
                     equipped ? (card.type=="PROGRESSIVE"?tr("current", "CURRENT"):tr("unequip-title", "UNEQUIP")) : tr("set-title", "TITLE"),
-                    {center.x + cardWidth / 2.0f - 39.0f, center.y - 18.0f*cardScale},
-                    menu_selector(CorumRankedLayer::onAchievementTitle),
-                    false,
-                    0.50f*cardScale
-                );
+                    {66.0f*cardScale, 22.0f*cardScale},
+                    !titleUnlocked ? corum::ranked::ui::AchievementButtonStyle::Disabled
+                        : equipped ? corum::ranked::ui::AchievementButtonStyle::Current : corum::ranked::ui::AchievementButtonStyle::Title,
+                    0.30f*cardScale);
+                auto* titleButton = CCMenuItemSpriteExtra::create(titleFace, this, menu_selector(CorumRankedLayer::onAchievementTitle));
+                titleButton->setPosition({center.x + cardWidth / 2.0f - 39.0f, center.y - 18.0f*cardScale});
+                m_menu->addChild(titleButton);
                 titleButton->setTag(static_cast<int>(index));
                 titleButton->setEnabled(titleUnlocked && !view.achievements.loading);
-                if (!titleUnlocked) corum::ranked::ui::grayButtonVisual(titleButton);
             }
         }
 
         if (pageCount > 1 && !titleSelectorOpen) {
-            auto* previous = addButton(
-                "<",
-                {size.width / 2.0f - 66.0f, 20.0f},
-                menu_selector(CorumRankedLayer::onAchievementPrevious),
-                false,
-                0.52f
-            );
-            previous->setEnabled(m_achievementPage > 0);
-            auto* next = addButton(
-                ">",
-                {size.width / 2.0f + 66.0f, 20.0f},
-                menu_selector(CorumRankedLayer::onAchievementNext),
-                false,
-                0.52f
-            );
-            next->setEnabled(m_achievementPage + 1 < pageCount);
+            auto const pageButton = [&](char const* text, float x, SEL_MenuHandler handler, bool enabled) {
+                auto* face = corum::ranked::ui::achievementButtonFace(text, {26.0f, 20.0f},
+                    enabled ? corum::ranked::ui::AchievementButtonStyle::Nav : corum::ranked::ui::AchievementButtonStyle::Disabled, 0.42f);
+                auto* item = CCMenuItemSpriteExtra::create(face, this, handler);
+                item->setPosition({x, 20.0f});
+                item->setEnabled(enabled);
+                m_menu->addChild(item);
+                return item;
+            };
+            pageButton("<", size.width / 2.0f - 66.0f, menu_selector(CorumRankedLayer::onAchievementPrevious), m_achievementPage > 0);
+            pageButton(">", size.width / 2.0f + 66.0f, menu_selector(CorumRankedLayer::onAchievementNext), m_achievementPage + 1 < pageCount);
             auto* page = makeLabel(
                 fmt::format("{} / {}", m_achievementPage + 1, pageCount),
                 0.32f,
                 {size.width / 2.0f, 20.0f},
-                corum::ranked::ui::Text,
+                ccc3(232, 217, 255),
                 "black"
             );
             m_root->addChild(page, 5);

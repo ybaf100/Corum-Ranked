@@ -39,7 +39,8 @@ test('Trophy badge and Claim state remain independent and bounded', () => {
     assert.match(achievements, /claimableRewards/);
     assert.match(presentation, /if \(count > 99\) return "99\+"/);
     assert.match(achievements, /titleButton->setEnabled\(titleUnlocked && !view\.achievements\.loading\)/);
-    assert.match(achievements, /if \(!titleUnlocked\) corum::ranked::ui::grayButtonVisual\(titleButton\)/);
+    // A title not yet unlocked is drawn in the disabled style (rarity card frame UI).
+    assert.match(achievements, /!titleUnlocked \? corum::ranked::ui::AchievementButtonStyle::Disabled/);
     const selector = body(popup, 'void renderAchievementTitleSelector(', 'void renderAchievements(');
     assert.match(selector, /achievementTitleLevelSelectable\(\s*level,\s*card\.currentLevel\s*\)/);
     assert.match(selector, /if \(!available\) corum::ranked::ui::grayButtonVisual\(button\)/);
@@ -70,12 +71,16 @@ test('Lobby and Achievement text keep native-readable sizing', () => {
     assert.match(achievements, /title,\s*0\.40f/);
     assert.match(achievements, /description,\s*0\.25f/);
     assert.doesNotMatch(achievements, /shorten\(description/);
-    assert.match(achievements, /fitFullMenuLabel\(descriptionLabel, cardWidth - 90\.0f, 26\.0f\*cardScale, 0\.25f\*cardScale\)/);
+    // contentWidth = cardWidth - 92: the description keeps the same cardWidth - 90 width.
+    assert.match(achievements, /auto const contentWidth = cardWidth - 92\.0f;/);
+    assert.match(achievements, /fitFullMenuLabel\(descriptionLabel, contentWidth \+ 2\.0f, 26\.0f\*cardScale, 0\.25f\*cardScale\)/);
     assert.match(achievements, /progressText,\s*0\.30f/);
-    assert.match(achievements, /onAchievementClaim[\s\S]{0,120}0\.50f/);
-    assert.match(achievements, /onAchievementTitle\)[\s\S]{0,120}0\.50f/);
-    assert.match(achievements, /onAchievementPrevious[\s\S]{0,120}0\.52f/);
-    assert.match(achievements, /onAchievementNext[\s\S]{0,120}0\.52f/);
+    // Card buttons (rarity card frame): captions at 0.30*cardScale, the same
+    // floor as the former 0.62 caption inside a 0.50-scaled button (0.31).
+    assert.equal((achievements.match(/AchievementButtonStyle::(?:Muted|Title),\s*0\.30f\*cardScale\)/g) ?? []).length, 2);
+    // Page buttons: 0.42 in a 26x20 face (the former 0.62 x 0.52 = 0.32).
+    assert.match(achievements, /AchievementButtonStyle::Disabled, 0\.42f\)/);
+    assert.match(achievements, /onAchievementPrevious/);assert.match(achievements, /onAchievementNext/);
 });
 
 test('Achievement selector is a true modal and the lobby badge uses stable Corum chrome', () => {
@@ -119,4 +124,18 @@ test('both Death Match icons use committed-best plus valid live progress', () =>
     assert.match(icons, /opponentCommitted/);
     assert.match(icons, /ownServerDisplay/);
     assert.match(icons, /opponentServerDisplay/);
+});
+
+test('rarity card frame: double frame, gems, and a travelling border shine on achieved tier 4/5 cards', () => {
+    const frame = read('../src/ui/AchievementCardFrame.cpp');
+    const achievements = body(popup, 'void renderAchievements(', 'void renderHistoryList(');
+    assert.match(achievements, /AchievementCardFrame::create\(\{cardWidth, cardHeight\}, cardTier, achieved\)/);
+    assert.match(achievements, /frame->setGems\(/);
+    // Growth IV/V and Legendary/Mythic (tier 4/5), only once achieved.
+    assert.match(frame, /if \(m_achieved && m_tier >= 4\) \{/);
+    assert.match(frame, /clockwiseBorderStroke\(/);
+    assert.match(frame, /if \(m_tier >= 5\) \{\s*auto const pastel = achievementPastelAt/);
+    // Polygons only (drawDot/drawSegment leave squares), straight alpha.
+    assert.doesNotMatch(frame, /drawDot|drawSegment/);
+    assert.match(frame, /setBlendFunc\(\{GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA\}\)/);
 });

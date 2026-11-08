@@ -359,5 +359,6 @@ int main(){auto& runtime=RankedRuntime::get();
 `);
     const cards = method(source, '    void renderAchievements(');
     assert.match(cards, /auto const index = order\[start \+ slot\]/);
-    assert.match(cards, /menu_selector\(CorumRankedLayer::onAchievementClaim\),\s*claimState == corum::ranked::AchievementClaimState::Unclaimed/);
+    assert.match(cards, /auto const canClaim = claimState == corum::ranked::AchievementClaimState::Unclaimed;/);
+    assert.match(cards, /menu_selector\(CorumRankedLayer::onAchievementClaim\)\);[\s\S]*?claim->setTag\(static_cast<int>\(index\)\);/);
 });
