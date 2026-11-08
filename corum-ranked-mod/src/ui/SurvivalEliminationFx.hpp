@@ -27,5 +27,13 @@ float eliminationFxSeconds();
 void playEliminationFx(EliminationEffect effect, EliminationFxTarget const& target, float fall, cocos2d::CCPoint executor);
 // Slice: the halves split along the swipe direction `swipe` (host space).
 void playSliceFx(EliminationFxTarget const& target, float fall, cocos2d::CCPoint swipe);
+// The default fall (move, spin, shrink, hide) of a card icon `slot`.
+void playDefaultFall(cocos2d::CCNode* slot, int order, float fall);
+// Slice executor: the 1st place icon `ghost` (in its parent's space) swoops
+// over `victim`, calls `slice` while cutting through, then returns `home`.
+// A new call restarts from the ghost's current position.
+inline const cocos2d::CCPoint kSliceEnter{-18.0f, 28.0f};
+inline const cocos2d::CCPoint kSliceLeave{18.0f, -28.0f};
+void runSliceGhost(cocos2d::CCNode* ghost, cocos2d::CCPoint victim, cocos2d::CCPoint home, std::function<void()> slice);
 
 } // namespace corum::ranked::ui

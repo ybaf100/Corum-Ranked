@@ -135,6 +135,28 @@ void playSliceFx(EliminationFxTarget const& target, float fall, CCPoint swipe) {
     sparks(target.host, target.center, 5, {255, 240, 190, 255}, 26.0f);
 }
 
+void playDefaultFall(CCNode* slot, int order, float fall) {
+    if (!slot) return;
+    auto const seconds = eliminationFxSeconds();
+    slot->runAction(CCSequence::create(CCSpawn::create(
+        CCEaseSineIn::create(CCMoveBy::create(seconds, {order % 4 < 2 ? -90.0f : 90.0f, -fall})),
+        CCRotateBy::create(seconds, order % 2 ? 270.0f : -270.0f), CCScaleTo::create(seconds, 0.18f), nullptr),
+        CCHide::create(), nullptr));
+}
+
+void runSliceGhost(CCNode* ghost, CCPoint victim, CCPoint home, std::function<void()> slice) {
+    if (!ghost) return;
+    ghost->stopAllActions();
+    ghost->setVisible(true);
+    ghost->runAction(CCSequence::create(
+        CCEaseSineOut::create(CCMoveTo::create(0.1f, {victim.x + kSliceEnter.x, victim.y + kSliceEnter.y})),
+        CallFuncExt::create(std::move(slice)),
+        CCMoveTo::create(0.06f, {victim.x + kSliceLeave.x, victim.y + kSliceLeave.y}),
+        CCDelayTime::create(0.2f),
+        CCEaseSineInOut::create(CCMoveTo::create(0.24f, home)),
+        CCRemoveSelf::create(), nullptr));
+}
+
 void playEliminationFx(EliminationEffect effect, EliminationFxTarget const& target, float fall, CCPoint executor) {
     if (!target.slot || !target.host) return;
     auto const total = eliminationFxSeconds();

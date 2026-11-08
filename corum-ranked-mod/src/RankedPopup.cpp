@@ -42,6 +42,7 @@
 #include "ui/AchievementCardFrame.hpp"
 #include "ui/RankedMapPoolView.hpp"
 #include "ui/RankedEliminationFxPopup.hpp"
+#include "ui/RankedAchievementGradePopup.hpp"
 #include "ui/RankedTapScroll.hpp"
 #include "ui/RankedTierGuidePopup.hpp"
 #include "ui/HudEditorPopup.hpp"
@@ -456,6 +457,7 @@ class CorumRankedLayer final : public CCLayerColor {
     std::optional<WeakRef<corum::ranked::ui::RankedLeaderboardPopup>> m_leaderboard;
     std::optional<WeakRef<corum::ranked::ui::RankedMapPoolView>> m_mapPoolView;
     std::optional<WeakRef<corum::ranked::ui::RankedEliminationFxPopup>> m_eliminationFx;
+    std::optional<WeakRef<corum::ranked::ui::RankedAchievementGradePopup>> m_achievementGrade;
     std::optional<WeakRef<corum::ranked::ui::RankedJukeboxPopup>> m_jukebox;
     std::optional<WeakRef<FLAlertLayer>> m_jukeboxNotice;
     std::optional<WeakRef<corum::ranked::ui::RankedPlayerInfoPopup>> m_playerInfo;
@@ -5462,22 +5464,45 @@ class CorumRankedLayer final : public CCLayerColor {
                 corum::ranked::ui::fitMenuLabelWidth(title,std::max(50.f,size.width-2*(width+28)),.70f,.40f);
         }
         // Status row: double-framed AP and claimable plates, then CLAIM ALL.
-        // AP plate with the private achievement grade (only this screen shows it).
-        auto const grade = corum::ranked::achievementApGrade(view.achievements.totalAp);
-        auto const gradeTone = grade.tier.empty() ? kGold : corum::ranked::ui::tierColor(std::string(grade.tier));
-        auto* ap = corum::ranked::ui::achievementPlate("", {size.width*.19f, 27.0f}, gradeTone, ccc3(26, 18, 6), kGold, 0.38f);
-        auto const plateWidth = size.width*.19f;
-        auto* apText = makeLabel(fmt::format("{} AP", view.achievements.totalAp), 0.30f, {plateWidth/2, 18.0f}, kGold, "black");
-        corum::ranked::ui::fitMenuLabelWidth(apText, plateWidth-14, 0.30f, 0.18f); ap->addChild(apText, 6);
-        auto const gradeName = grade.tier.empty() ? tr("achievement-grade-none", "NO GRADE") : std::string(grade.tier);
-        auto const gradeLine = grade.nextAp > 0
-            ? fmt::format(fmt::runtime(tr("achievement-grade-next", "{} · {} AP TO NEXT")), gradeName, grade.nextAp - view.achievements.totalAp)
-            : fmt::format(fmt::runtime(tr("achievement-grade-max", "{} · MAX")), gradeName);
-        auto* gradeText = makeLabel(gradeLine, 0.16f, {plateWidth/2, 7.5f}, gradeTone, "semibold");
-        corum::ranked::ui::fitMenuLabelWidth(gradeText, plateWidth-12, 0.16f, 0.1f); ap->addChild(gradeText, 6);
-        ap->setID("ranked-achievement-grade"_spr);
-        ap->setPosition({size.width*.16f, size.height - 75.0f});
-        m_root->addChild(ap, 5);
+        // Achievement grade emblem plate (private, only this screen shows it):
+        // grade colour and name, the AP total and five RED..GOLD steps, the
+        // next one filled by progress. Tapping it opens the grade ladder.
+        auto const totalAp = view.achievements.totalAp;
+        auto const grade = corum::ranked::achievementApGrade(totalAp);
+        auto const gradeTone = corum::ranked::ui::achievementGradeTone(grade.tier);
+        auto const gradePanel = corum::ranked::ui::achievementGradePanel(grade.tier);
+        auto const plateSize = CCSize{size.width*.19f, 27.0f};
+        auto* ap = corum::ranked::ui::achievementPlate("", plateSize, gradeTone, gradePanel, kGold, 0.38f);
+        auto* emblem = corum::ranked::ui::achievementGradeEmblem(21.0f, gradeTone, gradePanel);
+        emblem->setPosition({13.5f, 13.5f}); ap->addChild(emblem, 6);
+        auto const textLeft = 26.0f, textRight = plateSize.width - 6.0f;
+        auto* gradeName = makeLabel(grade.tier.empty() ? tr("achievement-grade-none", "NO GRADE") : std::string(grade.tier),
+            0.24f, {textLeft, 18.0f}, gradeTone, "black", {0.0f, 0.5f});
+        corum::ranked::ui::fitMenuLabelWidth(gradeName, (textRight - textLeft) * 0.52f, 0.24f, 0.13f); ap->addChild(gradeName, 6);
+        auto* apText = makeLabel(fmt::format("{} AP", totalAp), 0.22f, {textRight, 18.0f}, kGold, "black", {1.0f, 0.5f});
+        corum::ranked::ui::fitMenuLabelWidth(apText, (textRight - textLeft) * 0.46f, 0.22f, 0.12f); ap->addChild(apText, 6);
+        auto const stepGap = 1.2f, stepWidth = (textRight - textLeft - 4 * stepGap) / 5.0f;
+        for (std::size_t step = 0; step < corum::ranked::kAchievementApGrades.size(); ++step) {
+            auto const [stepName, stepAp] = corum::ranked::kAchievementApGrades[step];
+            auto const x = textLeft + static_cast<float>(step) * (stepWidth + stepGap);
+            auto* back = CCLayerColor::create({42, 36, 64, 255}, stepWidth, 3.0f); back->setPosition({x, 6.0f}); ap->addChild(back, 6);
+            auto const fill = totalAp >= stepAp ? 1.0f : grade.nextTier == stepName
+                ? corum::ranked::achievementGradeProgress(totalAp, grade.floorAp, grade.nextAp) : 0.0f;
+            if (fill <= 0) continue;
+            auto const stepTone = corum::ranked::ui::tierColor(std::string(stepName));
+            auto* bar = CCLayerColor::create({stepTone.r, stepTone.g, stepTone.b, 255}, stepWidth * fill, 3.0f);
+            bar->setPosition({x, 6.0f}); ap->addChild(bar, 7);
+        }
+        if (!titleSelectorOpen) {
+            auto* gradeButton = CCMenuItemSpriteExtra::create(ap, this, menu_selector(CorumRankedLayer::onAchievementGrade));
+            gradeButton->setID("ranked-achievement-grade"_spr);
+            gradeButton->setPosition({size.width*.16f, size.height - 75.0f});
+            m_menu->addChild(gradeButton);
+        } else {
+            ap->setID("ranked-achievement-grade"_spr);
+            ap->setPosition({size.width*.16f, size.height - 75.0f});
+            m_root->addChild(ap, 5);
+        }
         auto const claimable = view.achievements.unclaimedRewardCount > 0;
         auto* pending = corum::ranked::ui::achievementPlate(
             fmt::format("{} {}", view.achievements.unclaimedRewardCount, tr("claimable", "CLAIMABLE")),
@@ -5589,15 +5614,19 @@ class CorumRankedLayer final : public CCLayerColor {
             corum::ranked::ui::styleAchievementText(titleLabel,cardTier,achieved);
             m_root->addChild(titleLabel, 4);
             auto const description = corum::ranked::achievementCardDescription(card,corum::ranked::i18n::isKorean());
+            // The text column ends before the claim/title buttons; a long
+            // description wraps to two lines there and only then shrinks.
+            auto const buttonLeft = center.x + cardWidth / 2.0f - 39.0f - 33.0f*cardScale;
+            auto const textWidth = std::max(40.0f, std::min(contentWidth, buttonLeft - 6.0f - left));
             auto* descriptionLabel = makeLabel(
                 description,
                 0.25f*cardScale,
-                {left, center.y + 5.0f*cardScale},
+                {left, center.y + 4.0f*cardScale},
                 ccc3(200, 188, 230),
                 "medium",
                 {0.0f, 0.5f}
             );
-            corum::ranked::ui::fitFullMenuLabel(descriptionLabel, contentWidth + 2.0f, 26.0f*cardScale, 0.25f*cardScale);
+            corum::ranked::ui::fitWrappedMenuLabel(descriptionLabel, description, textWidth, 27.0f*cardScale, 0.25f*cardScale);
             descriptionLabel->setAlignment(kCCTextAlignmentLeft);
             m_root->addChild(descriptionLabel, 4);
 
@@ -5624,33 +5653,35 @@ class CorumRankedLayer final : public CCLayerColor {
                 "black",
                 {0.0f, 0.5f}
             );
-            corum::ranked::ui::fitMenuLabelWidth(progressLabel, contentWidth * 0.62f, 0.30f*cardScale, 0.18f*cardScale);
+            corum::ranked::ui::fitMenuLabelWidth(progressLabel, textWidth * 0.62f, 0.30f*cardScale, 0.18f*cardScale);
             m_root->addChild(progressLabel, 4);
-            // Faint holder count, right of the progress text: a growth
-            // achievement names the players at the own stage and its top share.
+            // Holder count, right of the progress text: a growth achievement
+            // names the players at the own stage and its top share. It takes
+            // the rest of the text column, readable size first.
+            auto const holderWidth = std::max(40.0f, textWidth - progressLabel->getScaledContentSize().width - 8.0f);
             auto* holdersLabel = makeLabel(
                 card.stageHolders
                     ? fmt::format(fmt::runtime(tr("achievement-stage-holders", "{} players at this stage (top {}%)")), *card.stageHolders, fmt::format("{:.1f}", card.stageTopPercent))
                     : fmt::format(fmt::runtime(tr("achievement-holders", "{} players ({}%)")), card.holders, fmt::format("{:.1f}", card.holderPercent)),
-                0.21f*cardScale,
-                {left + contentWidth, center.y - 18.0f*cardScale},
-                ccc3(142, 128, 179),
-                "medium",
+                0.24f*cardScale,
+                {left + textWidth, center.y - 18.0f*cardScale},
+                ccc3(201, 191, 230),
+                "semibold",
                 {1.0f, 0.5f}
             );
-            corum::ranked::ui::fitMenuLabelWidth(holdersLabel, contentWidth * 0.36f, 0.21f*cardScale, card.stageHolders ? 0.12f*cardScale : 0.14f*cardScale);
+            corum::ranked::ui::fitMenuLabelWidth(holdersLabel, holderWidth, 0.24f*cardScale, 0.18f*cardScale);
             m_root->addChild(holdersLabel, 4);
             // Progress bar: a tier-coloured hairline frame around a dark track.
             auto* barFrame = CCLayerColor::create({accent.r, accent.g, accent.b, 110});
-            barFrame->setContentSize({contentWidth + 1.2f, 7.0f*cardScale + 1.2f});
+            barFrame->setContentSize({textWidth + 1.2f, 7.0f*cardScale + 1.2f});
             barFrame->setPosition({left - 0.6f, center.y - 34.0f*cardScale - 0.6f});
             m_root->addChild(barFrame, 2);
             auto* barBack = CCLayerColor::create({18, 12, 36, 255});
-            barBack->setContentSize({contentWidth, 7.0f*cardScale});
+            barBack->setContentSize({textWidth, 7.0f*cardScale});
             barBack->setPosition({left, center.y - 34.0f*cardScale});
             m_root->addChild(barBack, 3);
             auto* barFill = CCLayerColor::create({accent.r, accent.g, accent.b, 245});
-            barFill->setContentSize({static_cast<float>(contentWidth * progress), 7.0f*cardScale});
+            barFill->setContentSize({static_cast<float>(textWidth * progress), 7.0f*cardScale});
             barFill->setPosition(barBack->getPosition());
             m_root->addChild(barFill, 4);
             corum::ranked::ui::styleAchievementFill(barFill,cardTier,true,card.type=="PROGRESSIVE"?card.currentLevel>=4:card.unlocked);
@@ -6238,6 +6269,7 @@ class CorumRankedLayer final : public CCLayerColor {
         m_leaderboard.reset();
         if (m_mapPoolView) if (auto view = m_mapPoolView->lock()) view->closePopups();
         if (m_eliminationFx) if (auto popup = m_eliminationFx->lock()) popup->dismiss();
+        if (m_achievementGrade) if (auto popup = m_achievementGrade->lock()) popup->dismiss();
         closeJukeboxNotice();
         if (!corum::ranked::RankedRoundPreparation::get().launch(CCDirector::sharedDirector()->getRunningScene())) return;
         if (spectateOnly) m_spectateRequestKey.clear();
@@ -6486,6 +6518,15 @@ class CorumRankedLayer final : public CCLayerColor {
         RankedRuntime::get().fetchAchievements();
     }
 
+    // Private achievement grade ladder (thresholds, unlocks, current grade).
+    void onAchievementGrade(CCObject*) {
+        if (m_page != Page::Achievements || m_uiFadingOut) return;
+        if (m_achievementGrade) if (auto open = m_achievementGrade->lock()) return;
+        if (auto* popup = corum::ranked::ui::RankedAchievementGradePopup::create(RankedRuntime::get().view().achievements.totalAp)) {
+            m_achievementGrade.emplace(popup); popup->show();
+        }
+    }
+
     void onAchievementClaimAll(CCObject*) {
         auto& runtime=RankedRuntime::get();
         auto const pending=corum::ranked::achievementPending(runtime.view().achievements.cards,"ALL");
@@ -6654,6 +6695,7 @@ class CorumRankedLayer final : public CCLayerColor {
         m_leaderboard.reset();
         if (m_mapPoolView) if (auto view = m_mapPoolView->lock()) view->closePopups();
         if (m_eliminationFx) if (auto popup = m_eliminationFx->lock()) popup->dismiss();
+        if (m_achievementGrade) if (auto popup = m_achievementGrade->lock()) popup->dismiss();
         if (m_sessionConflict) if (auto popup = m_sessionConflict->lock()) popup->dismiss();
         m_sessionConflict.reset();
         closeJukeboxNotice();

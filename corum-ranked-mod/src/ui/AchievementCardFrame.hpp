@@ -6,6 +6,9 @@
 
 namespace corum::ranked::ui {
 
+// Outer card border width (between the first F frame, 1.5, and the thin draft, 0.8).
+inline constexpr float kAchievementFrameWidth = 1.15f;
+
 // Achievement screen visuals ("rarity card frame"): a tier-tinted card with a
 // double frame, corner gems, a faint diagonal shine and a 1..5 gem row.
 // Achieved tier 4 and 5 cards (growth IV/V, Legendary, Mythic) also get two

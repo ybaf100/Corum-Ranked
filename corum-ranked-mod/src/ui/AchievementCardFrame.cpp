@@ -103,12 +103,13 @@ void AchievementCardFrame::drawStatic() {
         CCPoint shine[4] = {CCPoint{x0, h - 2}, CCPoint{x0 + band, h - 2}, CCPoint{x0 + band - slant, 2}, CCPoint{x0 - slant, 2}};
         m_static->drawPolygon(shine, 4, {1, 1, 1, 0.055f}, 0, {1, 1, 1, 0});
     }
-    // Double frame: a strong outer border and a thin inner line.
-    frame(m_static, m_size, 0, 1.5f, rgba(m_tone, m_achieved ? 0.95f : 0.55f));
-    frame(m_static, m_size, 4.0f, 0.6f, rgba(m_tone, m_achieved ? 0.45f : 0.25f));
+    // Double frame: an outer border and a fainter inner line (kept thin so
+    // the card content has room).
+    frame(m_static, m_size, 0, kAchievementFrameWidth, rgba(m_tone, m_achieved ? 0.95f : 0.55f));
+    frame(m_static, m_size, 3.6f, 0.5f, rgba(m_tone, m_achieved ? 0.38f : 0.22f));
     // Corner gems.
-    diamond(m_static, {5.0f, h - 5.0f}, 2.8f, rgba(m_tone, 1), rgba(m_tone, 1));
-    diamond(m_static, {w - 5.0f, 5.0f}, 2.8f, rgba(m_tone, 1), rgba(m_tone, 1));
+    diamond(m_static, {4.6f, h - 4.6f}, 2.4f, rgba(m_tone, 1), rgba(m_tone, 1));
+    diamond(m_static, {w - 4.6f, 4.6f}, 2.4f, rgba(m_tone, 1), rgba(m_tone, 1));
     // Rarity gems: five diamonds, the first `filled` solid.
     if (m_gemSize > 0) {
         for (int i = 0; i < 5; ++i) {
@@ -139,13 +140,15 @@ void AchievementCardFrame::drawShine() {
             auto const pastel = achievementPastelAt(at - std::floor(at), m_time);
             color = {static_cast<GLubyte>(pastel.r), static_cast<GLubyte>(pastel.g), static_cast<GLubyte>(pastel.b)};
         }
-        auto const stroke = clockwiseBorderStroke(m_size.width - 1.5f, m_size.height - 1.5f, at, length);
+        auto const half = kAchievementFrameWidth / 2.0f;
+        auto const stroke = clockwiseBorderStroke(m_size.width - kAchievementFrameWidth, m_size.height - kAchievementFrameWidth, at, length);
         for (std::size_t index = 0; index < stroke.count; ++index) {
             auto segment = stroke.segments[index];
-            segment.from.x += 0.75f; segment.from.y += 0.75f; segment.to.x += 0.75f; segment.to.y += 0.75f;
-            bar(segment, 3.6f, rgba(color, 0.22f));
-            bar(segment, 1.6f, rgba(color, 0.85f));
-            bar(segment, 0.6f, {1, 1, 1, 0.95f});
+            segment.from.x += half; segment.from.y += half; segment.to.x += half; segment.to.y += half;
+            // Streak layers scale with the border width.
+            bar(segment, 2.6f, rgba(color, 0.22f));
+            bar(segment, 1.2f, rgba(color, 0.85f));
+            bar(segment, 0.5f, {1, 1, 1, 0.95f});
         }
     }
 }

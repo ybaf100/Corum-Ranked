@@ -73,7 +73,13 @@ test('Lobby and Achievement text keep native-readable sizing', () => {
     assert.doesNotMatch(achievements, /shorten\(description/);
     // contentWidth = cardWidth - 92: the description keeps the same cardWidth - 90 width.
     assert.match(achievements, /auto const contentWidth = cardWidth - 92\.0f;/);
-    assert.match(achievements, /fitFullMenuLabel\(descriptionLabel, contentWidth \+ 2\.0f, 26\.0f\*cardScale, 0\.25f\*cardScale\)/);
+    // The description wraps (two lines) inside the text column, which ends
+    // before the claim/title buttons, and only then shrinks.
+    assert.match(achievements, /auto const buttonLeft = center\.x \+ cardWidth \/ 2\.0f - 39\.0f - 33\.0f\*cardScale;/);
+    assert.match(achievements, /auto const textWidth = std::max\(40\.0f, std::min\(contentWidth, buttonLeft - 6\.0f - left\)\);/);
+    assert.match(achievements, /fitWrappedMenuLabel\(descriptionLabel, description, textWidth, 27\.0f\*cardScale, 0\.25f\*cardScale\)/);
+    // Holder line: readable first (0.24, floor 0.18), the rest of the text column.
+    assert.match(achievements, /fitMenuLabelWidth\(holdersLabel, holderWidth, 0\.24f\*cardScale, 0\.18f\*cardScale\)/);
     assert.match(achievements, /progressText,\s*0\.30f/);
     // Card buttons (rarity card frame): captions at 0.30*cardScale, the same
     // floor as the former 0.62 caption inside a 0.50-scaled button (0.31).

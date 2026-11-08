@@ -363,10 +363,7 @@ class SurvivalGameLayer final : public CCLayerColor {
         wrap->runAction(ui::ModeLobbyFade::create(.18f,255,ui::ModeLobbyEase::SineOut));
         auto const execution=order<m_eliminationExecutions.size()?m_eliminationExecutions[order]:SurvivalExecution{};
         if(tile.icon && execution.effect!=EliminationEffect::Default && !execution.executorId.empty()){playExecution(tile,id,execution,order);return;}
-        if(tile.icon){auto const fall=SurvivalEliminationFallMilliseconds/1000.0f;
-            tile.icon->runAction(CCSequence::create(CCSpawn::create(
-                CCEaseSineIn::create(CCMoveBy::create(fall,{order%4<2?-90.0f:90.0f,-getContentSize().height})),
-                CCRotateBy::create(fall,order%2?270.0f:-270.0f),CCScaleTo::create(fall,.18f),nullptr),CCHide::create(),nullptr));}
+        if(tile.icon)ui::playDefaultFall(tile.icon,static_cast<int>(order),getContentSize().height);
     }
     CCNode* iconFor(std::string const& id) {
         for(auto const& p:m_eliminationPreview.standings)if(p.id==id){
@@ -403,21 +400,12 @@ class SurvivalGameLayer final : public CCLayerColor {
             ghost->setScale(target.iconScale*1.15f);ghost->setPosition(convertToNodeSpace(executor));addChild(ghost,60);
             m_executorGhosts.insert_or_assign(execution.executorId,WeakRef<CCNode>(ghost));
         }
-        ghost->stopAllActions();
-        auto const victim=convertToNodeSpace(face);
-        CCPoint const enter{-18,28},leave{18,-28};
-        auto slice=[weakSlot=WeakRef<CCNode>(tile.icon),weakRoot=WeakRef<CCNode>(tile.root),weakFace=WeakRef<CCNode>(tile.face?tile.face:tile.icon),target,fall,enter,leave]() mutable{
+        auto slice=[weakSlot=WeakRef<CCNode>(tile.icon),weakRoot=WeakRef<CCNode>(tile.root),weakFace=WeakRef<CCNode>(tile.face?tile.face:tile.icon),target,fall]() mutable{
             auto slot=weakSlot.lock();auto root=weakRoot.lock();if(!slot||!root)return;
             if(auto face=weakFace.lock();face&&face->getParent())target.center=root->convertToNodeSpace(face->getParent()->convertToWorldSpace(face->getPosition()));
-            ui::playSliceFx(target,fall,{leave.x-enter.x,leave.y-enter.y});
+            ui::playSliceFx(target,fall,{ui::kSliceLeave.x-ui::kSliceEnter.x,ui::kSliceLeave.y-ui::kSliceEnter.y});
         };
-        ghost->runAction(CCSequence::create(
-            CCEaseSineOut::create(CCMoveTo::create(.1f,{victim.x+enter.x,victim.y+enter.y})),
-            CallFuncExt::create(slice),
-            CCMoveTo::create(.06f,{victim.x+leave.x,victim.y+leave.y}),
-            CCDelayTime::create(.2f),
-            CCEaseSineInOut::create(CCMoveTo::create(.24f,convertToNodeSpace(executor))),
-            CCRemoveSelf::create(),nullptr));
+        ui::runSliceGhost(ghost,convertToNodeSpace(face),convertToNodeSpace(executor),slice);
     }
     void stepEliminations(std::chrono::steady_clock::time_point now) {
         auto const elapsed=std::chrono::duration_cast<std::chrono::milliseconds>(now-m_eliminationStart).count()-SurvivalBeforeEliminationMilliseconds;

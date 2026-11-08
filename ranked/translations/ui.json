@@ -3400,11 +3400,39 @@
     "ko": "등급 없음"
   },
   "achievement-grade-next": {
-    "en": "{} · {} AP TO NEXT",
-    "ko": "{} · 다음 등급까지 {} AP"
+    "en": "{1} AP TO {0}",
+    "ko": "다음 등급 {0}까지 {1} AP"
   },
-  "achievement-grade-max": {
-    "en": "{} · MAX",
-    "ko": "{} · 최고 등급"
+  "achievement-grade-title": {
+    "en": "ACHIEVEMENT GRADE",
+    "ko": "도전과제 등급"
+  },
+  "achievement-grade-private": {
+    "en": "Only you can see this",
+    "ko": "나에게만 표시"
+  },
+  "achievement-grade-basis": {
+    "en": "Set by the AP you claimed (4,965 AP in all)",
+    "ko": "수령한 AP 합계로 정해집니다 (전체 4,965 AP)"
+  },
+  "achievement-grade-unlock": {
+    "en": "Unlocks {}",
+    "ko": "해금: {}"
+  },
+  "achievement-grade-current": {
+    "en": "CURRENT",
+    "ko": "현재"
+  },
+  "achievement-grade-reached": {
+    "en": "REACHED",
+    "ko": "달성"
+  },
+  "achievement-grade-top": {
+    "en": "Highest grade reached",
+    "ko": "최고 등급 달성"
+  },
+  "elim-replay": {
+    "en": "REPLAY",
+    "ko": "다시 보기"
   }
 }

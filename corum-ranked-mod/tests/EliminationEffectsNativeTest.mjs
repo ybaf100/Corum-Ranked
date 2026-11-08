@@ -64,5 +64,28 @@ test('elimination reveal: gold 1st card, executions from the completed round, cu
  assert.doesNotMatch(fx,/drawDot|drawSegment/);
  assert.match(popup,/addEliminationFxButton\(\{23,18\}\);/);
  assert.match(popup,/if \(m_eliminationFx\) if \(auto popup = m_eliminationFx->lock\(\)\) popup->dismiss\(\);/);
- assert.match(popup,/corum::ranked::achievementApGrade\(view\.achievements\.totalAp\)/);
+ assert.match(popup,/auto const grade = corum::ranked::achievementApGrade\(totalAp\);/);
+});
+
+test('achievement grade emblem opens the ladder; effect picker previews the selected effect',()=>{
+ const popup=readFileSync(join(root,'src/RankedPopup.cpp'),'utf8');
+ const picker=readFileSync(join(root,'src/ui/RankedEliminationFxPopup.cpp'),'utf8');
+ const ladder=readFileSync(join(root,'src/ui/RankedAchievementGradePopup.hpp'),'utf8');
+ const frame=readFileSync(join(root,'src/ui/AchievementCardFrame.cpp'),'utf8');
+ const frameHeader=readFileSync(join(root,'src/ui/AchievementCardFrame.hpp'),'utf8');
+ const layer=readFileSync(join(root,'src/ui/SurvivalGameLayer.cpp'),'utf8');
+ assert.match(popup,/CCMenuItemSpriteExtra::create\(ap, this, menu_selector\(CorumRankedLayer::onAchievementGrade\)\)/);
+ assert.match(popup,/achievementGradeEmblem\(21\.0f, gradeTone, gradePanel\)/);
+ assert.match(popup,/RankedAchievementGradePopup::create\(RankedRuntime::get\(\)\.view\(\)\.achievements\.totalAp\)/);
+ assert.match(ladder,/for \(std::size_t i = 0; i < kAchievementApGrades\.size\(\); \+\+i\)/);
+ // Border between the first F frame (1.5) and the thin draft (0.8).
+ assert.match(frameHeader,/inline constexpr float kAchievementFrameWidth = 1\.15f;/);
+ assert.match(frame,/frame\(m_static, m_size, 0, kAchievementFrameWidth,/);
+ // Preview: rows select (locked ones too), the stage replays every 2.6 s, the game and the preview share the motion.
+ assert.match(picker,/menu_selector\(RankedEliminationFxPopup::onSelect\)/);
+ assert.match(picker,/schedule\(schedule_selector\(RankedEliminationFxPopup::previewTick\), kPreviewLoop\)/);
+ assert.match(picker,/survivalEliminationStarts\(m_victims\.size\(\)\)/);
+ assert.match(picker,/runSliceGhost\(ghost, victim, m_executorAt,/);
+ assert.match(layer,/ui::runSliceGhost\(ghost,convertToNodeSpace\(face\),convertToNodeSpace\(executor\),slice\);/);
+ assert.match(layer,/ui::playDefaultFall\(tile\.icon,static_cast<int>\(order\),getContentSize\(\)\.height\);/);
 });
