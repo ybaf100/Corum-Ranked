@@ -18,6 +18,7 @@ import { AchievementModule } from "./achievement/achievement.module.js";
 import { AdminModule } from "./admin/admin.module.js";
 import { HistoryModule } from "./history/history.module.js";
 import { MapPoolModule } from "./map-pool/map-pool.module.js";
+import { CosmeticsModule } from "./cosmetics/cosmetics.module.js";
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { MapPoolModule } from "./map-pool/map-pool.module.js";
     AdminModule,
     HistoryModule,
     MapPoolModule,
+    CosmeticsModule,
   ],
   controllers: [HealthController],
 })

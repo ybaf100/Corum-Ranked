@@ -1,4 +1,5 @@
 import {persistSurvivalBadges} from "./survival-badges.service.js";
+import { EliminationEffectService } from "../cosmetics/elimination-effect.service.js";
 import {survivalRoundBadges} from "@corum-ranked/rules";
 import {reportSurvivalAudioFailure,type SurvivalAudioFailure} from "./survival-audio-recovery.js";
 import { DemandWorker, signalAfterCommit } from "../database/database-work.js";
@@ -86,11 +87,13 @@ export class SurvivalEngineService implements OnApplicationBootstrap, OnApplicat
       const profiles=await tx.query<{player_id:string;lp:number;displayed_tier:string;gd_username:string;gd_account_id:string}>(
         `SELECT sp.player_id,sp.lp,sp.displayed_tier,p.gd_username,p.gd_account_id::text FROM sur_profiles sp JOIN ranked_players p ON p.id=sp.player_id
          WHERE sp.player_id=ANY($1::uuid[]) ORDER BY sp.player_id FOR UPDATE OF sp`,[humans.map(p=>p.playerId)]);
+      const effects=await EliminationEffectService.equippedWithin(tx,humans.map(p=>p.playerId));
       const entrants:SurvivalEntrant[]=players.map(p=>{
         if(p.kind==="BOT")return{...p,playerId:null};
         const profile=profiles.rows.find(row=>row.player_id===p.playerId);
         if(!profile)throw new BadRequestException("Enter Survival before match admission");
-        return {...p,name:profile.gd_username,lp:humanLpSnapshot??Number(profile.lp),displayedTier:profile.displayed_tier,gdAccountId:profile.gd_account_id};
+        return {...p,name:profile.gd_username,lp:humanLpSnapshot??Number(profile.lp),displayedTier:profile.displayed_tier,gdAccountId:profile.gd_account_id,
+          eliminationEffect:effects.get(p.playerId)??"DEFAULT"};
       });
       const match=createSurvivalMatch(this.ids.next(),entrants,captured.config,captured.generation,this.clock.now().getTime(),online,variableSize,forceDeathMatch);
       if(presentationControlled){match.presentationControlled=true;match.presentationGate="INTRO";

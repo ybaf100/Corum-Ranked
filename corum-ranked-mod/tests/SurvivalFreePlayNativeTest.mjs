@@ -178,7 +178,7 @@ constexpr int SurvivalEliminationWrapTag=7466;
 struct SurvivalMatchView{std::uint64_t revision=1;std::string id="m",roundKey="r1",ownId="a",phase="ROUND_1";std::string state="PLAYING";int mapGeneration=1,matchPlayerCount=16;std::vector<SurvivalStanding>standings,roundPlayers;matjson::Value result;};
 struct Coordinator:CCNode{
  CCLabelBMFont*m_status=new CCLabelBMFont;
- struct Tile{CCNode* root=nullptr;CCLabelBMFont* name=nullptr;CCLabelBMFont* record=nullptr;CCPoint destination;CCNode* icon=nullptr;CCNode* tierBadge=nullptr;std::string tier="";CCNode* eliminatedBackground=nullptr;std::string titleText={},recordText={};std::array<CCNode*,3>medals{};int infoTag=0;SurvivalProgressTween progress{};SurvivalHudColor accent{};bool hasAccent=false;bool eliminationShown=false;};
+ struct Tile{CCNode* root=nullptr;CCLabelBMFont* name=nullptr;CCLabelBMFont* record=nullptr;CCPoint destination;CCNode* icon=nullptr;CCNode* tierBadge=nullptr;std::string tier="";CCNode* eliminatedBackground=nullptr;std::string titleText={},recordText={};std::array<CCNode*,3>medals{};int infoTag=0;SurvivalProgressTween progress{};SurvivalHudColor accent{};bool hasAccent=false;bool eliminationShown=false;CCNode* face=nullptr;CCNode* goldBackground=nullptr;};
  std::set<std::string> m_eliminationRevealed;
  double m_frameDelta=1./60.;std::string m_gridContext;CCNode grid;CCNode* m_grid=&grid;CCNode pager;CCNode* m_pager=&pager;CCLabelBMFont pageLabel;CCLabelBMFont* m_pageLabel=&pageLabel;std::size_t m_cardPage=0,m_cardPages=1;std::unordered_map<std::string,Tile>m_tiles;std::unordered_map<int,SurvivalStanding>m_infoByTag;int m_nextInfoTag=1000;void onPlayerInfo(CCObject*){}CCSize getContentSize()const{return {568,320};}
  ${method(source,'void showParticipants(')}
@@ -217,12 +217,14 @@ int main(){using namespace corum::ranked;SurvivalMatchView view;SurvivalStanding
  ui.m_cardPage=0;++view.revision;auto updates=ui::accentUpdates;ui.showParticipants(view,false);assert(ui::accentUpdates==updates&&ui.m_tiles.at("large-0").root==first&&first->visible&&ui.m_tiles.size()==64);
  assert(ui.m_tiles.at("large-0").accent==survivalRankColor(1,true)&&ui.m_tiles.at("large-1").accent==SurvivalSilver&&ui.m_tiles.at("large-2").accent==survivalRankColor(3,true));
  view.phase="ROUND_2";view.roundKey="r2:elimination";ui.showParticipants(view,false);assert(!ui.m_tiles.at("large-0").record);
- // Result preview: before each reveal every card is the same blue, eliminated ones included.
- for(auto const&[id,tile]:ui.m_tiles){assert((tile.accent==SurvivalHudColor{77,135,255}));assert(!tile.eliminatedBackground->visible);}
+ // Result preview: before each reveal every card is the same blue, eliminated ones included,
+ // except the round's 1st place, which is gold from the start.
+ for(auto const&[id,tile]:ui.m_tiles){assert((tile.accent==(id=="large-0"?SurvivalHudColor{255,211,78}:SurvivalHudColor{77,135,255})));assert(!tile.eliminatedBackground->visible);
+  assert(tile.goldBackground->visible==(id=="large-0"));}
  ui.m_eliminationRevealed.insert("large-63");ui.showParticipants(view,false);
  assert(ui.m_tiles.at("large-63").accent==survivalRankColor(64,false)&&ui.m_tiles.at("large-63").eliminatedBackground->visible&&ui.m_tiles.at("large-63").eliminationShown);
  assert((ui.m_tiles.at("large-62").accent==SurvivalHudColor{77,135,255})&&!ui.m_tiles.at("large-62").eliminatedBackground->visible);
- assert((ui.m_tiles.at("large-0").accent==SurvivalHudColor{77,135,255}));
+ assert((ui.m_tiles.at("large-0").accent==SurvivalHudColor{255,211,78}));
  ui.m_eliminationRevealed.clear();
  view.phase="ROUND_3";view.standings.resize(30);ui.showParticipants(view,false);assert(ui.m_cardPages==1&&ui.m_tiles.size()==30);
  for(auto const&[id,tile]:ui.m_tiles){assert(tile.record&&!tile.tierBadge);assert(tile.record->text.find("BEST ")!=std::string::npos&&tile.record->text.find("NOW ")!=std::string::npos);}

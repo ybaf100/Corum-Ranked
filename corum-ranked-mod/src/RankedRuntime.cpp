@@ -628,6 +628,10 @@ std::string RankedRuntime::leaderboardUrl(int offset, int limit, RankedMode mode
 
 std::string RankedRuntime::tierGuideUrl() const { return endpoint("/api/ranked/leaderboard/tiers"); }
 
+std::string RankedRuntime::eliminationEffectsUrl(bool equip) const {
+    return endpoint(equip ? "/api/ranked/cosmetics/elimination/equip" : "/api/ranked/cosmetics/elimination");
+}
+
 std::string RankedRuntime::mapPoolUrl(std::string const& canonicalLevelId) const {
     // Only a positive numeric Level ID can address one map.
     auto const numeric = !canonicalLevelId.empty() && canonicalLevelId.size() <= 12 && canonicalLevelId[0] != '0' &&

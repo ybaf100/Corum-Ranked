@@ -7,6 +7,7 @@
 #include "RankedPopup.hpp"
 #include "domain/HistoryPresentation.hpp"
 #include "domain/SurvivalVotePresentation.hpp"
+#include "domain/SurvivalEliminationEffects.hpp"
 #include "HistoryLevelLookup.hpp"
 #include "SurvivalThumbnailProvider.hpp"
 #include "ui/ModeLobbyMotion.hpp"
@@ -40,6 +41,7 @@
 #include "ui/RankedLeaderboardPopup.hpp"
 #include "ui/AchievementCardFrame.hpp"
 #include "ui/RankedMapPoolView.hpp"
+#include "ui/RankedEliminationFxPopup.hpp"
 #include "ui/RankedTapScroll.hpp"
 #include "ui/RankedTierGuidePopup.hpp"
 #include "ui/HudEditorPopup.hpp"
@@ -453,6 +455,7 @@ class CorumRankedLayer final : public CCLayerColor {
     std::optional<WeakRef<corum::ranked::ui::RankedSettingsPopup>> m_settings;
     std::optional<WeakRef<corum::ranked::ui::RankedLeaderboardPopup>> m_leaderboard;
     std::optional<WeakRef<corum::ranked::ui::RankedMapPoolView>> m_mapPoolView;
+    std::optional<WeakRef<corum::ranked::ui::RankedEliminationFxPopup>> m_eliminationFx;
     std::optional<WeakRef<corum::ranked::ui::RankedJukeboxPopup>> m_jukebox;
     std::optional<WeakRef<FLAlertLayer>> m_jukeboxNotice;
     std::optional<WeakRef<corum::ranked::ui::RankedPlayerInfoPopup>> m_playerInfo;
@@ -2681,6 +2684,8 @@ class CorumRankedLayer final : public CCLayerColor {
             queue->setPosition({94,18}); m_menu->addChild(queue);
             queue->setEnabled(online); queue->setCascadeOpacityEnabled(true); queue->setOpacity(online?255:100);
             addHudEditorButton({165,18},view.stage==RuntimeStage::Ready && !lobbyQueueActive(),"survival-hud-editor-button"_spr);
+            // Elimination effect picker, mirroring the UI editor on the other side of the start button.
+            addEliminationFxButton({23,18});
             auto const retry = !view.survival.loaded || !view.survival.error.empty();
             auto const tierBar = !retry && tierProgressFor(view, true).kind != corum::ranked::TierProgressKind::Hidden;
             auto* hint = makeLabel(tr("start-queue", "START QUEUE"),tierBar?0.40f:0.44f,{94,tierBar?-30.0f:-40.0f},online?kCyan:corum::ranked::ui::TextMuted,"black");
@@ -2725,6 +2730,28 @@ class CorumRankedLayer final : public CCLayerColor {
         auto* item = CCMenuItemSpriteExtra::create(face,this,menu_selector(CorumRankedLayer::onMapPool));
         item->setID("ranked-map-pool-button"_spr); item->setPosition(position);
         m_menu->addChild(item);
+    }
+
+    // Survival elimination effect: equipping is a profile setting, so it stays
+    // available while queued (the match snapshot takes it at admission).
+    void addEliminationFxButton(CCPoint position) {
+        auto* face = corum::ranked::ui::surface({34,34},{},kGold,kDeepPanel2,250,true);
+        // A slashed square from color layers (lobby fades reach CCLayerColor).
+        auto* left = CCLayerColor::create({255,207,74,255},8,8);left->setPosition({7,14});face->addChild(left,5);
+        auto* right = CCLayerColor::create({255,207,74,255},8,8);right->setPosition({19,22});face->addChild(right,5);
+        auto* slash = CCLayerColor::create({242,247,255,255},26,2);slash->ignoreAnchorPointForPosition(false);
+        slash->setAnchorPoint({0.5f,0.5f});slash->setPosition({17,22});slash->setRotation(-45);face->addChild(slash,6);
+        auto* caption = makeLabel(tr("elim-fx-short","FX"),0.17f,{17,6},kGold,"semibold");
+        corum::ranked::ui::fitMenuLabelWidth(caption,30,0.17f,0.1f); face->addChild(caption,5);
+        auto* item = CCMenuItemSpriteExtra::create(face,this,menu_selector(CorumRankedLayer::onEliminationFx));
+        item->setID("survival-elimination-fx-button"_spr); item->setPosition(position);
+        m_menu->addChild(item);
+    }
+
+    void onEliminationFx(CCObject*) {
+        if (m_modeTransition.moving() || m_uiFadingOut || m_page != Page::Live) return;
+        if (m_eliminationFx) if (auto open = m_eliminationFx->lock()) return;
+        if (auto* popup = corum::ranked::ui::RankedEliminationFxPopup::create()) { m_eliminationFx.emplace(popup); popup->show(); }
     }
 
     // The map pool page is reachable while queued: a found match takes the
@@ -5435,8 +5462,20 @@ class CorumRankedLayer final : public CCLayerColor {
                 corum::ranked::ui::fitMenuLabelWidth(title,std::max(50.f,size.width-2*(width+28)),.70f,.40f);
         }
         // Status row: double-framed AP and claimable plates, then CLAIM ALL.
-        auto* ap = corum::ranked::ui::achievementPlate(fmt::format("{} AP", view.achievements.totalAp),
-            {size.width*.19f, 27.0f}, kGold, ccc3(26, 18, 6), kGold, 0.38f);
+        // AP plate with the private achievement grade (only this screen shows it).
+        auto const grade = corum::ranked::achievementApGrade(view.achievements.totalAp);
+        auto const gradeTone = grade.tier.empty() ? kGold : corum::ranked::ui::tierColor(std::string(grade.tier));
+        auto* ap = corum::ranked::ui::achievementPlate("", {size.width*.19f, 27.0f}, gradeTone, ccc3(26, 18, 6), kGold, 0.38f);
+        auto const plateWidth = size.width*.19f;
+        auto* apText = makeLabel(fmt::format("{} AP", view.achievements.totalAp), 0.30f, {plateWidth/2, 18.0f}, kGold, "black");
+        corum::ranked::ui::fitMenuLabelWidth(apText, plateWidth-14, 0.30f, 0.18f); ap->addChild(apText, 6);
+        auto const gradeName = grade.tier.empty() ? tr("achievement-grade-none", "NO GRADE") : std::string(grade.tier);
+        auto const gradeLine = grade.nextAp > 0
+            ? fmt::format(fmt::runtime(tr("achievement-grade-next", "{} · {} AP TO NEXT")), gradeName, grade.nextAp - view.achievements.totalAp)
+            : fmt::format(fmt::runtime(tr("achievement-grade-max", "{} · MAX")), gradeName);
+        auto* gradeText = makeLabel(gradeLine, 0.16f, {plateWidth/2, 7.5f}, gradeTone, "semibold");
+        corum::ranked::ui::fitMenuLabelWidth(gradeText, plateWidth-12, 0.16f, 0.1f); ap->addChild(gradeText, 6);
+        ap->setID("ranked-achievement-grade"_spr);
         ap->setPosition({size.width*.16f, size.height - 75.0f});
         m_root->addChild(ap, 5);
         auto const claimable = view.achievements.unclaimedRewardCount > 0;
@@ -6198,6 +6237,7 @@ class CorumRankedLayer final : public CCLayerColor {
         if (m_leaderboard) if (auto popup = m_leaderboard->lock()) popup->dismiss();
         m_leaderboard.reset();
         if (m_mapPoolView) if (auto view = m_mapPoolView->lock()) view->closePopups();
+        if (m_eliminationFx) if (auto popup = m_eliminationFx->lock()) popup->dismiss();
         closeJukeboxNotice();
         if (!corum::ranked::RankedRoundPreparation::get().launch(CCDirector::sharedDirector()->getRunningScene())) return;
         if (spectateOnly) m_spectateRequestKey.clear();
@@ -6613,6 +6653,7 @@ class CorumRankedLayer final : public CCLayerColor {
         if (m_leaderboard) if (auto popup = m_leaderboard->lock()) popup->dismiss();
         m_leaderboard.reset();
         if (m_mapPoolView) if (auto view = m_mapPoolView->lock()) view->closePopups();
+        if (m_eliminationFx) if (auto popup = m_eliminationFx->lock()) popup->dismiss();
         if (m_sessionConflict) if (auto popup = m_sessionConflict->lock()) popup->dismiss();
         m_sessionConflict.reset();
         closeJukeboxNotice();

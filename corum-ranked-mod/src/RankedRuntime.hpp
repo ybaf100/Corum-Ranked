@@ -562,6 +562,8 @@ public:
     // Solo map pool list, or one map's statistics. Requests carry the Ranked
     // session so the detail can include the viewer's own record.
     [[nodiscard]] std::string mapPoolUrl(std::string const& canonicalLevelId = {}) const;
+    // Survival elimination effects: state (GET) or equip (POST).
+    [[nodiscard]] std::string eliminationEffectsUrl(bool equip = false) const;
     [[nodiscard]] std::string const& sessionToken() const { return m_sessionToken; }
     void fetchAchievements();
     void fetchPlayerInfo(std::string const& side);

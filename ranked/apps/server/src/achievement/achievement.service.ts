@@ -1,4 +1,5 @@
 import {publicAchievementTitle} from "./public-title.js";
+import { achievementApGrade } from "@corum-ranked/rules";
 import { BadRequestException, ConflictException, Inject, Injectable } from "@nestjs/common";
 import {
   ACHIEVEMENT_DEFINITIONS,
@@ -576,6 +577,8 @@ export class AchievementService {
     const unclaimedRewardCount = unlocks.rows.filter((unlock) => unlock.claimed_at === null).length;
     return {
       totalAp,
+      // Private grade: only this player's own achievement state carries it.
+      grade: achievementApGrade(totalAp),
       unclaimedRewardCount,
       equippedTitle: this.titleProjection(
         row.equipped_achievement_id,

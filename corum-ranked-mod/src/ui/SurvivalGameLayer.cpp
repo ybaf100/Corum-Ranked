@@ -16,6 +16,8 @@
 #include "ModeLobbyMotion.hpp"
 #include "ModeLobbySurfaceFade.hpp"
 #include "RankBadgeAssets.hpp"
+#include "SurvivalEliminationFx.hpp"
+#include "../domain/SurvivalEliminationEffects.hpp"
 #include "../domain/CompetitiveHudLayout.hpp"
 #include "../domain/ScoreDisplay.hpp"
 #include "../domain/SurvivalRoundMenuPolicy.hpp"
@@ -38,7 +40,7 @@ namespace {
 // Tag of the per-reveal red fade layer on a result card.
 constexpr int SurvivalEliminationWrapTag=7466;
 class SurvivalGameLayer final : public CCLayerColor {
-    struct Tile {CCNode* root=nullptr;CCLabelBMFont* name=nullptr;CCLabelBMFont* record=nullptr;CCPoint destination;CCNode* icon=nullptr;CCNode* tierBadge=nullptr;std::string tier="";CCNode* eliminatedBackground=nullptr;std::string titleText,recordText;std::array<CCNode*,3> medals{};int infoTag=0;SurvivalProgressTween progress{};SurvivalHudColor accent{};bool hasAccent=false;bool eliminationShown=false;};
+    struct Tile {CCNode* root=nullptr;CCLabelBMFont* name=nullptr;CCLabelBMFont* record=nullptr;CCPoint destination;CCNode* icon=nullptr;CCNode* tierBadge=nullptr;std::string tier="";CCNode* eliminatedBackground=nullptr;std::string titleText,recordText;std::array<CCNode*,3> medals{};int infoTag=0;SurvivalProgressTween progress{};SurvivalHudColor accent{};bool hasAccent=false;bool eliminationShown=false;CCNode* face=nullptr;CCNode* goldBackground=nullptr;};
     std::unordered_map<std::string,Tile> m_tiles;
     std::unordered_map<int,SurvivalStanding> m_infoByTag;
     int m_nextInfoTag=1000;
@@ -71,6 +73,9 @@ class SurvivalGameLayer final : public CCLayerColor {
     SurvivalMatchView m_eliminationPreview;
     std::vector<std::string> m_eliminationOrder;
     std::vector<int> m_eliminationStarts;
+    // Executor (1st place) and effect per entry of m_eliminationOrder.
+    std::vector<SurvivalExecution> m_eliminationExecutions;
+    std::unordered_map<std::string,WeakRef<CCNode>> m_executorGhosts;
     std::set<std::string> m_eliminationRevealed;
     std::chrono::steady_clock::time_point m_eliminationStart{};
     std::string m_jukeboxContext;
@@ -263,7 +268,10 @@ class SurvivalGameLayer final : public CCLayerColor {
                 iconButton->setTag(m_nextInfoTag++);iconButton->setPosition(CCPointZero);iconMenu->addChild(iconButton);
                 auto* record=compact?nullptr:ui::menuLabel("",.23f,{card.width/2,card.recordY},ui::TextMuted,ui::FontWeight::ExtraBold);if(record)root->addChild(record,5);
                 found=m_tiles.emplace(value.id,Tile{root,nickname,record,destination,avatarSlot}).first;
-                auto& tile=found->second;tile.infoTag=iconButton->getTag();
+                auto& tile=found->second;tile.infoTag=iconButton->getTag();tile.face=icon;
+                // Round result: the 1st place card is gold from the start.
+                tile.goldBackground=ui::surface({card.width,card.height},{card.width/2,card.height/2},ui::Gold,{48,36,6},250,true);
+                tile.goldBackground->setVisible(false);root->addChild(tile.goldBackground,3);
                 tile.eliminatedBackground=ui::surface({card.width,card.height},{card.width/2,card.height/2},ui::Red,{42,13,28},250,true);
                 tile.eliminatedBackground->setVisible(false);root->addChild(tile.eliminatedBackground,4);
                 iconButton->setEnabled(false);
@@ -286,10 +294,12 @@ class SurvivalGameLayer final : public CCLayerColor {
             std::string record;auto color=survivalRankColor(value.rank,value.passing);
             // Result preview: identical cards until each player's own reveal.
             auto const revealed=completed && m_eliminationRevealed.contains(value.id);
-            if(completed)color=revealed?survivalRankColor(value.rank,false):SurvivalHudColor{164,181,205};
+            auto const goldCard=completed && value.rank==1 && value.passing;
+            if(completed)color=revealed?survivalRankColor(value.rank,false):goldCard?SurvivalHudColor{255,211,78}:SurvivalHudColor{164,181,205};
+            if(tile.goldBackground)tile.goldBackground->setVisible(goldCard);
             if(compact){
                 if(tile.titleText!=value.name){tile.titleText=value.name;tile.name->setString(value.name.c_str());ui::fitSingleLineMenuLabel(tile.name,card.titleWidth,card.titleHeight,.25f);}
-                tile.name->setColor(value.eliminated||revealed?ui::Red:value.id==view.ownId?ui::Cyan:ui::Text);
+                tile.name->setColor(value.eliminated||revealed?ui::Red:goldCard?ui::Gold:value.id==view.ownId?ui::Cyan:ui::Text);
             }else if(result){int delta=0;for(auto const& p:view.result["standings"].asArray().unwrapOr(std::vector<matjson::Value>{}))if(p["participantId"].asString().unwrapOr("")==value.id)delta=static_cast<int>(p["delta"].asInt().unwrapOr(0));
                 if(value.id==view.ownId)delta=static_cast<int>(view.result["actualDelta"].asInt().unwrapOr(delta));
                 record=value.rank>0?fmt::format("{} · {:+} LP",rank,delta):text("waiting","WAITING");color=value.rank>0?survivalResultRankColor(value.rank,delta):survivalRankColor(10,true);
@@ -300,9 +310,9 @@ class SurvivalGameLayer final : public CCLayerColor {
                     fmt::format("BEST {}% · {}",rankedScoreText(tile.progress.best.displayed,view.phase=="TIEBREAK"),status);
                 auto const title=compact?value.name:fmt::format("{} {}",rank,value.name);
                 if(tile.titleText!=title){tile.titleText=title;tile.name->setString(title.c_str());ui::fitSingleLineMenuLabel(tile.name,card.titleWidth,card.titleHeight,.25f);}
-                tile.name->setColor(value.eliminated||revealed?ui::Red:value.id==view.ownId?ui::Cyan:ui::Text);
+                tile.name->setColor(value.eliminated||revealed?ui::Red:goldCard?ui::Gold:value.id==view.ownId?ui::Cyan:ui::Text);
             }
-            auto const tint=completed?(revealed?survivalRankColor(value.rank,false):SurvivalHudColor{77,135,255}):value.eliminated?survivalRankColor(value.rank,false):
+            auto const tint=completed?(revealed?survivalRankColor(value.rank,false):goldCard?SurvivalHudColor{255,211,78}:SurvivalHudColor{77,135,255}):value.eliminated?survivalRankColor(value.rank,false):
                 (result||view.state=="PLAYING")&&value.rank>0?survivalRankColor(value.rank,result||value.passing):SurvivalHudColor{77,135,255};
             if(!tile.hasAccent||tile.accent!=tint){tile.hasAccent=true;tile.accent=tint;ui::setSurfaceAccent(tile.root,{tint.r,tint.g,tint.b});}
             if(completed){
@@ -351,10 +361,63 @@ class SurvivalGameLayer final : public CCLayerColor {
         wrap->addChild(ui::surface(size,{size.width/2,size.height/2},ui::Red,{42,13,28},250,true));tile.root->addChild(wrap,4);
         ui::setModeLobbyOpacity(wrap,0);ui::fadeModeLobbySurfaces(wrap,.18f,true);
         wrap->runAction(ui::ModeLobbyFade::create(.18f,255,ui::ModeLobbyEase::SineOut));
+        auto const execution=order<m_eliminationExecutions.size()?m_eliminationExecutions[order]:SurvivalExecution{};
+        if(tile.icon && execution.effect!=EliminationEffect::Default && !execution.executorId.empty()){playExecution(tile,id,execution,order);return;}
         if(tile.icon){auto const fall=SurvivalEliminationFallMilliseconds/1000.0f;
             tile.icon->runAction(CCSequence::create(CCSpawn::create(
                 CCEaseSineIn::create(CCMoveBy::create(fall,{order%4<2?-90.0f:90.0f,-getContentSize().height})),
                 CCRotateBy::create(fall,order%2?270.0f:-270.0f),CCScaleTo::create(fall,.18f),nullptr),CCHide::create(),nullptr));}
+    }
+    CCNode* iconFor(std::string const& id) {
+        for(auto const& p:m_eliminationPreview.standings)if(p.id==id){
+            if(id==m_eliminationPreview.ownId)return ui::PlayerIcon::createLocal();
+            if(p.bot){int index=1;auto dash=id.rfind('-');if(dash!=std::string::npos)index=numFromString<int>(id.substr(dash+1)).unwrapOr(1);return ui::PlayerIcon::createBot(index);}
+            return ui::PlayerIcon::createRemote(p.accountId);
+        }
+        return nullptr;
+    }
+    static CCPoint faceWorld(Tile const& tile) {
+        auto* face=tile.face?tile.face:tile.icon;
+        return face&&face->getParent()?face->getParent()->convertToWorldSpace(face->getPosition()):CCPointZero;
+    }
+    CCPoint executorWorld(std::string const& executorId) {
+        auto found=m_tiles.find(executorId);
+        if(found!=m_tiles.end() && found->second.root->isVisible())return faceWorld(found->second);
+        auto const size=getContentSize();return convertToWorldSpace({size.width/2,size.height-40});
+    }
+    // A custom effect from the round's 1st place on one eliminated card.
+    void playExecution(Tile& tile,std::string const& id,SurvivalExecution const& execution,std::size_t order) {
+        auto const fall=getContentSize().height*0.6f;
+        auto factory=[weak=WeakRef(this),id]()->CCNode*{auto owner=weak.lock();return owner?owner->iconFor(id):nullptr;};
+        auto const face=faceWorld(tile);
+        ui::EliminationFxTarget target{tile.icon,tile.root,tile.root->convertToNodeSpace(face),tile.face?tile.face->getScale():.6f,factory,static_cast<int>(order)};
+        auto const executor=executorWorld(execution.executorId);
+        if(execution.effect!=EliminationEffect::Slice){
+            ui::playEliminationFx(execution.effect,target,fall,tile.root->convertToNodeSpace(executor));return;
+        }
+        // Slice: the executor's icon floats over, cuts through, then returns.
+        CCNode* ghost=nullptr;
+        if(auto found=m_executorGhosts.find(execution.executorId);found!=m_executorGhosts.end())if(auto alive=found->second.lock())ghost=alive.data();
+        if(!ghost){
+            ghost=iconFor(execution.executorId);if(!ghost){ui::playSliceFx(target,fall,{1,-1.6f});return;}
+            ghost->setScale(target.iconScale*1.15f);ghost->setPosition(convertToNodeSpace(executor));addChild(ghost,60);
+            m_executorGhosts.insert_or_assign(execution.executorId,WeakRef<CCNode>(ghost));
+        }
+        ghost->stopAllActions();
+        auto const victim=convertToNodeSpace(face);
+        CCPoint const enter{-18,28},leave{18,-28};
+        auto slice=[weakSlot=WeakRef<CCNode>(tile.icon),weakRoot=WeakRef<CCNode>(tile.root),weakFace=WeakRef<CCNode>(tile.face?tile.face:tile.icon),target,fall,enter,leave]() mutable{
+            auto slot=weakSlot.lock();auto root=weakRoot.lock();if(!slot||!root)return;
+            if(auto face=weakFace.lock();face&&face->getParent())target.center=root->convertToNodeSpace(face->getParent()->convertToWorldSpace(face->getPosition()));
+            ui::playSliceFx(target,fall,{leave.x-enter.x,leave.y-enter.y});
+        };
+        ghost->runAction(CCSequence::create(
+            CCEaseSineOut::create(CCMoveTo::create(.1f,{victim.x+enter.x,victim.y+enter.y})),
+            CallFuncExt::create(slice),
+            CCMoveTo::create(.06f,{victim.x+leave.x,victim.y+leave.y}),
+            CCDelayTime::create(.2f),
+            CCEaseSineInOut::create(CCMoveTo::create(.24f,convertToNodeSpace(executor))),
+            CCRemoveSelf::create(),nullptr));
     }
     void stepEliminations(std::chrono::steady_clock::time_point now) {
         auto const elapsed=std::chrono::duration_cast<std::chrono::milliseconds>(now-m_eliminationStart).count()-SurvivalBeforeEliminationMilliseconds;
@@ -400,6 +463,11 @@ class SurvivalGameLayer final : public CCLayerColor {
         std::stable_sort(preview.standings.begin(),preview.standings.end(),[](auto const& a,auto const& b){return a.rank<b.rank;});
         m_eliminationPreview=preview;m_eliminationOrder=survivalEliminationOrder(preview.standings);
         m_eliminationStarts=survivalEliminationStarts(m_eliminationOrder.size());m_eliminationRevealed.clear();m_eliminationStart=now;
+        std::vector<SurvivalEffectPlayer> effectPlayers;
+        for(auto const& p:completed["players"].asArray().unwrapOr(std::vector<matjson::Value>{}))
+            effectPlayers.push_back({p["participantId"].asString().unwrapOr(""),p["name"].asString().unwrapOr(""),static_cast<int>(p["rank"].asInt().unwrapOr(0)),
+                p["lp"].asDouble().unwrapOr(0),eliminationEffectFromCode(p["eliminationEffect"].asString().unwrapOr("DEFAULT"))});
+        m_eliminationExecutions=survivalEliminationExecutions(effectPlayers,m_eliminationOrder);
         showParticipants(preview,false);
         auto const alreadyPresented=key==Mod::get()->getSavedValue<std::string>("survival-elimination-animation");
         if(alreadyPresented)for(std::size_t i=0;i<m_eliminationOrder.size();++i)revealElimination(m_eliminationOrder[i],false,i);

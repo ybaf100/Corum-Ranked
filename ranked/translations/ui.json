@@ -3326,5 +3326,85 @@
   "map-pool-descending": {
     "en": "DESCENDING",
     "ko": "내림차순"
+  },
+  "elim-fx-short": {
+    "en": "FX",
+    "ko": "연출"
+  },
+  "elim-fx-title": {
+    "en": "ELIMINATION EFFECT",
+    "ko": "탈락 연출"
+  },
+  "elim-fx-note": {
+    "en": "Plays on every eliminated player when you finish 1st in a round",
+    "ko": "라운드 1위일 때 모든 탈락자에게 재생됩니다"
+  },
+  "elim-fx-loading": {
+    "en": "Loading...",
+    "ko": "불러오는 중"
+  },
+  "elim-fx-error": {
+    "en": "Could not load the effects. Try again.",
+    "ko": "연출을 불러오지 못했습니다. 다시 시도하세요."
+  },
+  "elim-fx-DEFAULT": {
+    "en": "DEFAULT",
+    "ko": "기본"
+  },
+  "elim-fx-BOLT": {
+    "en": "BOLT",
+    "ko": "번개"
+  },
+  "elim-fx-SLICE": {
+    "en": "SLICE",
+    "ko": "반으로 가르기"
+  },
+  "elim-fx-SHATTER": {
+    "en": "SHATTER",
+    "ko": "산산조각"
+  },
+  "elim-fx-VORTEX": {
+    "en": "VORTEX",
+    "ko": "회오리"
+  },
+  "elim-req-none": {
+    "en": "Always available",
+    "ko": "항상 사용 가능"
+  },
+  "elim-req-survival": {
+    "en": "Reach Survival {}",
+    "ko": "서바이벌 {} 달성"
+  },
+  "elim-req-both": {
+    "en": "Reach {} in Survival and Solo Ranked",
+    "ko": "서바이벌 · 솔로 랭크 {} 달성"
+  },
+  "elim-req-grade": {
+    "en": "Reach achievement grade {}",
+    "ko": "도전과제 등급 {} 달성"
+  },
+  "elim-equip": {
+    "en": "EQUIP",
+    "ko": "장착"
+  },
+  "elim-equipped": {
+    "en": "EQUIPPED",
+    "ko": "장착 중"
+  },
+  "elim-locked": {
+    "en": "LOCKED",
+    "ko": "잠김"
+  },
+  "achievement-grade-none": {
+    "en": "NO GRADE",
+    "ko": "등급 없음"
+  },
+  "achievement-grade-next": {
+    "en": "{} · {} AP TO NEXT",
+    "ko": "{} · 다음 등급까지 {} AP"
+  },
+  "achievement-grade-max": {
+    "en": "{} · MAX",
+    "ko": "{} · 최고 등급"
   }
 }

@@ -2,6 +2,7 @@ import { observeSurvivalAchievementCheckpoint, observeSurvivalAchievementRecover
 import {survivalRoundBadges,type SurvivalRoundBadge} from "./survival-round-badges.js";
 import { survivalOnlineTargets,survivalOnlineRewardRank } from "./survival-online.js";
 import { RankedDomainError } from "./errors.js";
+import { normalizeEliminationEffect } from "./elimination-effects.js";
 import { survivalPlacementLp, survivalTierForLp, type SurvivalConfig } from "./survival.js";
 import { survivalDifficultyForAverage, survivalMapAllowed, validateSurvivalEngineConfig,
   type SurvivalDifficultyGroup, type SurvivalMapPhase, type SurvivalVerifiedMap } from "./survival-maps.js";
@@ -19,6 +20,8 @@ export interface SurvivalEntrant {
   /** Real human tier at admission; bots derive their icon from the LP snapshot. */
   displayedTier?: string;
   gdAccountId?: string;
+  /** Equipped elimination effect at admission (humans only). */
+  eliminationEffect?: string;
 }
 export interface SurvivalMatchPlayer extends SurvivalEntrant {
   eliminationStage: number | null;
@@ -617,7 +620,8 @@ export function survivalLiveView(match: SurvivalMatch, now: number, participantI
       return {participantId:p.participantId,name:entrant.name,kind:entrant.kind,gdAccountId:entrant.gdAccountId??null,
         displayedTier:match.config.tierBands.find(b=>b.tier===entrant.displayedTier)?.group??entrant.displayedTier??survivalTierForLp(entrant.lp,match.config.tierBands).group,rank:p.rank??entrant.finalRank,
         score:completed.phase==="TIEBREAK"?roundScore(match,completed,p)/1000:roundScore(match,completed,p),
-        qualified:p.qualified&&!p.forfeited,forfeited:p.forfeited};
+        qualified:p.qualified&&!p.forfeited,forfeited:p.forfeited,
+        lp:entrant.lp,eliminationEffect:entrant.kind==="HUMAN"?normalizeEliminationEffect(entrant.eliminationEffect):"DEFAULT"};
     })}:null;
   const ranked=survivalRankScores(activePlayers(round).map(p => ({participantId:p.participantId,
     score:roundScore(match,round,p),highestProgress:p.highestProgress,

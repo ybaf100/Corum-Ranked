@@ -26,3 +26,4 @@ export * from "./achievement-survival.js";
 
 export * from "./survival-achievement-checkpoint.js";
 export * from "./survival-round-badges.js";
+export * from "./elimination-effects.js";
