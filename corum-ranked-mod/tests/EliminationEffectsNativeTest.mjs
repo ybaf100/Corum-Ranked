@@ -88,20 +88,26 @@ test('achievement grade emblem opens the ladder; effect picker previews the sele
  assert.match(picker,/survivalEliminationStarts\(m_victims\.size\(\)\)/);
  // Every victim owns its cut: moving the ghost on to the next victim never cancels it.
  // Slice "musou" (game and preview share runSliceGathering): a scatter field, not a pile.
- assert.match(picker,/runSliceGathering\(m_world, executor, victims, \{size\.width \* 0\.56f, size\.height \* 0\.5f\}, \{size\.width \* 0\.3f, size\.height \* 0\.2f\}, fall, m_world\);/);assert.match(picker,/executor\.slot = m_executorIcon;/);
- assert.match(layer,/ui::runSliceGathering\(this,executor,victims,\{centerX,size\.height\*\.45f\},spread,size\.height\*\.6f,m_grid\);/);
+ assert.match(picker,/runSliceGathering\(m_world, \{executor\}, victims, \{size\.width \* 0\.56f, size\.height \* 0\.5f\}, \{size\.width \* 0\.3f, size\.height \* 0\.2f\}, fall, m_world\);/);assert.match(picker,/executor\.slot = m_executorIcon;/);
+ assert.match(layer,/ui::runSliceGathering\(this,executors,victims,\{size\.width\/2,size\.height\*\.45f\},CCSize\{size\.width\*\.31f,size\.height\*\.24f\},size\.height\*\.6f,m_grid\);/);
  // Held cards turn red only when their icon leaves for the field.
  assert.match(layer,/if\(m_sliceHeld\.contains\(id\)\)return;/);
  assert.match(layer,/owner->m_sliceHeld\.erase\(id\);owner->m_eliminationRevealed\.insert\(id\);/);
- assert.match(layer,/if\(!m_slicePlanned\.insert\(executorId\)\.second\)return;/);
- assert.match(layer,/m_slicePlanned\.clear\(\);m_sliceHeld\.clear\(\);/);
- // Two tied executors: a field each.
- assert.match(layer,/centerX=executors\.front\(\)==executorId\?size\.width\*\.29f:size\.width\*\.71f;spread\.width=size\.width\*\.17f;/);
+ assert.match(layer,/if\(m_sliceStarted\)return;\n\s*m_sliceStarted=true;/);
+ assert.match(layer,/m_sliceStarted=false;m_sliceHeld\.clear\(\);/);
+ // Mixed tie (one Slice, one other effect): the other effect plays first, Slice cards are held, then Slice starts.
+ assert.match(layer,/if\(m_sliceDelayMs>0\)\{m_sliceHeld\.insert\(id\);return;\}/);
+ assert.match(layer,/if\(m_sliceDelayMs>0 && !m_sliceStarted && elapsed>=m_sliceDelayMs && !m_sliceHeld\.empty\(\)\)startSliceGathering\(\);/);
+ assert.match(layer,/if\(m_sliceHeld\.erase\(id\)\)revealElimination\(id,false,i\);/);
+ // Two tied executors both on Slice: one joint field (alternating dashes, one counter, an X finale).
+ assert.match(layer,/executors\.push_back\(std::move\(executor\)\);/);
  const fx=readFileSync(join(root,'src/ui/SurvivalEliminationFx.cpp'),'utf8');
  const gather=fx.slice(fx.indexOf('void runSliceGathering'),fx.indexOf('void playEliminationFx'));
  // Gold executor, one flash-like dash per victim in the planned order, the finale
  // (wind-up, strike, hit-stop, through, follow) and the flight home.
- assert.match(gather,/player->setGold\(true\)/);assert.match(gather,/sliceMusouPlan\(n,/);
+ assert.match(gather,/player->setGold\(true\)/);assert.match(gather,/sliceMusouPlan\(n, joint,/);
+ assert.match(gather,/for \(std::size_t e = 0; e < joint; \+\+e\)/);assert.match(gather,/if \(cross\) slashLine\(stage, target\.center, \*cross, crossLength\);/);
+ assert.match(gather,/std::stable_sort\(byCut\.begin\(\), byCut\.end\(\)/);
  assert.match(fx,/for \(auto const& dash : plan\.dashes\)/);
  assert.match(fx,/CCEaseExponentialOut::create\(CCMoveTo::create\(plan\.dash, point\(dash\.to\)\)\)/);
  // Long-exposure light trail behind the flash dashes (short: 0.12 s), no afterimage copies.
@@ -132,7 +138,7 @@ int main(){
  assert(sliceMusouMilliseconds(8)==1300+7*100+1520 && sliceMusouMilliseconds(24)==1300+23*87+1520 && sliceMusouMilliseconds(48)==1300+47*50+1520);
  assert(sliceResultMilliseconds(24)==7871 && sliceResultMilliseconds(0)==5500 && sliceResultMilliseconds(1)==1950+2820+1100);
  for(std::size_t n:{1u,2u,3u,8u,24u,40u,48u,63u}){
-  auto const plan=sliceMusouPlan(n,{285,145},{176,77},40,30,120,{26,26},{543,294});
+  auto const plan=sliceMusouPlan(n,1,{285,145},{176,77},40,30,120,{26,26},{543,294});
   assert(plan.field.size()==n && plan.leave.size()==n && plan.dashes.size()==n-1);
   std::set<std::size_t> cut{plan.finale};float last=0;
   for(auto const& d:plan.dashes){assert(cut.insert(d.victim).second);assert(d.cut>=d.start && d.cut<=d.start+plan.dash+1e-6f);assert(d.cut>last);last=d.cut;}
@@ -142,26 +148,51 @@ int main(){
   // Every victim has landed before the first dash.
   for(auto t:plan.leave)assert(t+SliceVictimFlight<=SliceCutStartMs/1000.0f+1e-6f);
   for(auto p:plan.field)assert(std::pow((p.x-285)/176,2)+std::pow((p.y-145)/77,2)<=1.0001);
-  assert(plan.windup.x>=26 && plan.windup.x<=543 && plan.through.y>=26 && plan.through.y<=294);
+  assert(plan.windup[0].x>=26 && plan.windup[0].x<=543 && plan.through[0].y>=26 && plan.through[0].y<=294);
  }
+ // Joint cut (two tied Slice executors): same rules timing, alternating picks, each executor's
+ // dashes back to back (the second half a dash later), both strike the last victim from an X.
+ assert(sliceJointMilliseconds(0)==0 && sliceJointMilliseconds(1)==2820);
+ assert(sliceJointMilliseconds(24)==1300+12*100+50+1520 && sliceJointMilliseconds(48)==1300+24*83+41+1520);
+ for(std::size_t n:{1u,2u,3u,8u,24u,40u,48u,63u}){
+  auto const plan=sliceMusouPlan(n,2,{285,145},{176,77},40,30,120,{26,26},{543,294});
+  assert(plan.start.size()==2 && plan.windup.size()==2 && plan.through.size()==2 && plan.finaleDir.size()==2);
+  assert(plan.dashes.size()==n-1);
+  std::set<std::size_t> cut{plan.finale};float last[2]={0,0};std::size_t count[2]={0,0};
+  for(auto const& d:plan.dashes){assert(cut.insert(d.victim).second);assert(d.executor<2);assert(d.start>=last[d.executor]-1e-5f);
+   last[d.executor]=d.start+plan.dash;++count[d.executor];}
+  assert(cut.size()==n && count[0]>=count[1] && count[0]-count[1]<=1);
+  assert(plan.windupAt+1e-5f>=last[0] && plan.windupAt+1e-5f>=last[1]);
+  assert(std::abs(plan.home-sliceJointMilliseconds(n)/1000.0f)<0.002f);
+  // An X: opposite horizontal sides, both from above.
+  auto const t=plan.field[plan.finale];
+  assert(plan.windup[0].x<=t.x && plan.windup[1].x>=t.x);
+  assert(plan.finaleDir[0].x*plan.finaleDir[1].x<=0.0001f);
+ }
+ // Joint is shorter than one executor cutting everyone.
+ assert(sliceJointMilliseconds(24)<sliceMusouMilliseconds(24));
+ assert(sliceResultFromAnimation(SliceAfterOthersMs+sliceMusouMilliseconds(12))==1950+1550+sliceMusouMilliseconds(12)+1100);
  // All directions: consecutive dashes turn (most turn by more than 60 degrees).
- auto const plan=sliceMusouPlan(24,{640,405},{380,205},55,42,170,{40,40},{1240,680});
+ auto const plan=sliceMusouPlan(24,1,{640,405},{380,205},55,42,170,{40,40},{1240,680});
  int hard=0;for(std::size_t j=1;j<plan.dashes.size();++j){auto a=plan.dashes[j-1].dir,b=plan.dashes[j].dir;if(a.x*b.x+a.y*b.y<0.5f)++hard;}
  assert(hard*3>=static_cast<int>(plan.dashes.size()-1)*2);
  // Deterministic for the same count.
- auto const again=sliceMusouPlan(24,{640,405},{380,205},55,42,170,{40,40},{1240,680});
+ auto const again=sliceMusouPlan(24,1,{640,405},{380,205},55,42,170,{40,40},{1240,680});
  assert(again.finale==plan.finale && again.dashes.front().victim==plan.dashes.front().victim);
 }`));
 
 test('result presentation waits until the Slice icon is home',()=>{
  const layer=readFileSync(join(root,'src/ui/SurvivalGameLayer.cpp'),'utf8');
- assert.match(layer,/if\(most>0\)\{hold\.animation=sliceMusouMilliseconds\(most\);hold\.total=sliceResultMilliseconds\(most\);\}/);
+ assert.match(layer,/if\(slices\.size\(\)>1\)hold\.animation=sliceJointMilliseconds\(slice\);/);
+ assert.match(layer,/hold\.sliceDelay=others>0\?SliceAfterOthersMs:0;/);assert.match(layer,/hold\.animation=hold\.sliceDelay\+sliceMusouMilliseconds\(slice\);/);
+ assert.match(layer,/auto const hold=eliminationHold\(completed\);m_sliceDelayMs=hold\.sliceDelay;/);
  assert.match(layer,/auto const server=static_cast<int>\(completed\["presentationMs"\]\.asInt\(\)\.unwrapOr\(0\)\);/);
  assert.match(layer,/m_eliminationUntil=now\+std::chrono::milliseconds\(alreadyPresented\?0:SurvivalBeforeEliminationMilliseconds\+std::max\(SurvivalEliminationMilliseconds,hold\.animation\)\);/);
  assert.match(layer,/m_nextMapAt=now\+std::chrono::milliseconds\(alreadyPresented\?SurvivalRosterMilliseconds:hold\.total\);/);
  const rules=readFileSync(join(root,'../ranked/packages/rules/src/survival-match.ts'),'utf8');
  assert.match(rules,/return 1300\+regular\*dash\+1520;/);assert.match(rules,/Math\.min\(100,Math\.max\(50,Math\.round\(2000\/regular\)\)\)/);
- assert.match(rules,/export const SURVIVAL_SLICE_HOLD_MS = 1_100;/);assert.match(rules,/presentationMs:survivalResultMs\(match,completed\)/);
+ assert.match(rules,/export const SURVIVAL_SLICE_HOLD_MS = 1_100;/);assert.match(rules,/export const SURVIVAL_SLICE_AFTER_OTHERS_MS = 1_550;/);
+ assert.match(rules,/return 1300\+per\*dash\+Math\.floor\(dash\/2\)\+1520;/);assert.match(rules,/presentationMs:survivalResultMs\(match,completed\)/);
 });
 
 test('Slice reads on compact 64-player cards: backdrop, enlarged icons, combo counter, sharp hits, sound',()=>{

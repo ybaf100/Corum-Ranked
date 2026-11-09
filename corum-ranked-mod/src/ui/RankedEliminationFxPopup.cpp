@@ -313,7 +313,7 @@ void RankedEliminationFxPopup::executeVictim(std::size_t index) {
         executor.icon = []() -> CCNode* { return PlayerIcon::createLocal(); };
         executor.iconScale = kIconScale;
         auto const size = m_world->getContentSize();
-        runSliceGathering(m_world, executor, victims, {size.width * 0.56f, size.height * 0.5f}, {size.width * 0.3f, size.height * 0.2f}, fall, m_world);
+        runSliceGathering(m_world, {executor}, victims, {size.width * 0.56f, size.height * 0.5f}, {size.width * 0.3f, size.height * 0.2f}, fall, m_world);
         return;
     }
     // The card turns red as its effect starts.

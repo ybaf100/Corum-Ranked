@@ -124,19 +124,33 @@ export function survivalSliceMs(victims:number):number{
   const regular=victims-1,dash=regular>0?Math.min(100,Math.max(50,Math.round(2000/regular))):0;
   return 1300+regular*dash+1520;
 }
+/** Two tied executors both using Slice cut one field together: each makes at
+ * most ceil((victims-1)/2) dashes (the second half a dash later), then both
+ * strike the last victim. Mirrors the client sliceJointMilliseconds. */
+export function survivalJointSliceMs(victims:number):number{
+  if(victims<=0)return 0;
+  const per=Math.floor(victims/2),dash=per>0?Math.min(100,Math.max(50,Math.round(2000/per))):0;
+  return 1300+per*dash+Math.floor(dash/2)+1520;
+}
+/** One of two tied executors uses Slice: the other effect plays first (the
+ * 1.55 s elimination window), then Slice starts. */
+export const SURVIVAL_SLICE_AFTER_OTHERS_MS = 1_550;
 /** Round-result presentation length: 5.5 s, longer when a 1st place executor
- * (one, or one of two tied) uses Slice, so the screen moves on only after its
- * icon has returned to its card. With two tied executors each takes every
- * other victim; the larger half bounds the wait. */
+ * uses Slice, so the screen moves on only after its icon has returned to its
+ * card: one executor; two tied executors both on Slice (one joint field); or
+ * one of two on Slice after the other's eliminations (its share is every
+ * other victim; the larger half bounds the wait). */
 export function survivalResultMs(match:SurvivalMatch,round:SurvivalRound):number{
   const rows=round.players.map(p=>({p,e:match.players.find(e=>e.participantId===p.participantId)}));
   const winners=rows.filter(({p,e})=>(p.rank??e?.finalRank??null)===1);
   if(winners.length===0||winners.length>2)return SURVIVAL_RESULT_MS;
-  if(!winners.some(({e})=>e?.kind==="HUMAN"&&normalizeEliminationEffect(e.eliminationEffect)==="SLICE"))return SURVIVAL_RESULT_MS;
+  const slicers=winners.filter(({e})=>e?.kind==="HUMAN"&&normalizeEliminationEffect(e.eliminationEffect)==="SLICE").length;
+  if(slicers===0)return SURVIVAL_RESULT_MS;
   const victims=rows.filter(({p})=>!(p.qualified&&!p.forfeited)).length;
-  const own=winners.length===2?Math.ceil(victims/2):victims;
-  if(own===0)return SURVIVAL_RESULT_MS;
-  return Math.max(SURVIVAL_RESULT_MS,SURVIVAL_RESULT_BEFORE_MS+survivalSliceMs(own)+SURVIVAL_SLICE_HOLD_MS);
+  if(victims===0)return SURVIVAL_RESULT_MS;
+  const animation=winners.length===1?survivalSliceMs(victims):
+    slicers===2?survivalJointSliceMs(victims):SURVIVAL_SLICE_AFTER_OTHERS_MS+survivalSliceMs(Math.ceil(victims/2));
+  return Math.max(SURVIVAL_RESULT_MS,SURVIVAL_RESULT_BEFORE_MS+animation+SURVIVAL_SLICE_HOLD_MS);
 }
 const survivalPhases=(capacity:number):readonly SurvivalMapPhase[]=>capacity===64?
   ["ROUND_1","ROUND_2","ROUND_3","ROUND_4","FINAL"]:["ROUND_1","ROUND_2","ROUND_3","FINAL"];

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SURVIVAL_RESULT_MS, survivalResultMs, survivalSliceMs, type SurvivalMatch, type SurvivalRound } from "../src/index.js";
+import { SURVIVAL_RESULT_MS, survivalJointSliceMs, survivalResultMs, survivalSliceMs, type SurvivalMatch, type SurvivalRound } from "../src/index.js";
 
 type Row = { id: string; rank: number; qualified: boolean; effect?: string; kind?: "HUMAN" | "BOT" };
 function fixture(rows: Row[]): { match: SurvivalMatch; round: SurvivalRound } {
@@ -30,9 +30,17 @@ describe("round result presentation length", () => {
     expect(survivalResultMs(match, round)).toBe(1950 + survivalSliceMs(24) + 1100);
     expect(survivalResultMs(match, round)).toBe(7871);
   });
-  it("uses the larger half for two tied executors and ignores three or more", () => {
+  it("times a joint cut for two tied Slice executors (one field, alternating dashes)", () => {
+    expect(survivalJointSliceMs(0)).toBe(0);
+    expect(survivalJointSliceMs(1)).toBe(2820);
+    expect(survivalJointSliceMs(24)).toBe(1300 + 12 * 100 + 50 + 1520);
+    expect(survivalJointSliceMs(48)).toBe(1300 + 24 * 83 + 41 + 1520);
+    const both = fixture(field([{ id: "a", rank: 1, qualified: true, effect: "SLICE" }, { id: "b", rank: 1, qualified: true, effect: "SLICE" }], 38, 24));
+    expect(survivalResultMs(both.match, both.round)).toBe(1950 + survivalJointSliceMs(24) + 1100);
+  });
+  it("plays the other effect first when only one of two tied executors uses Slice; ignores three or more", () => {
     const two = fixture(field([{ id: "a", rank: 1, qualified: true }, { id: "b", rank: 1, qualified: true, effect: "SLICE" }], 38, 23));
-    expect(survivalResultMs(two.match, two.round)).toBe(1950 + survivalSliceMs(12) + 1100);
+    expect(survivalResultMs(two.match, two.round)).toBe(1950 + 1550 + survivalSliceMs(12) + 1100);
     const three = fixture(field([1, 2, 3].map(i => ({ id: `w${i}`, rank: 1, qualified: true, effect: "SLICE" })), 37, 24));
     expect(survivalResultMs(three.match, three.round)).toBe(SURVIVAL_RESULT_MS);
   });

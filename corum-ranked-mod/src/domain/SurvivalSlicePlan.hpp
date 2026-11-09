@@ -44,11 +44,29 @@ inline int sliceMusouMilliseconds(std::size_t victims) {
     if (victims == 0) return 0;
     return SliceCutStartMs + static_cast<int>(victims - 1) * sliceDashMilliseconds(victims) + SliceFinaleMs;
 }
-/** Round-result presentation length with a Slice executor of `victims`. */
-inline int sliceResultMilliseconds(std::size_t victims) {
-    if (victims == 0) return SliceResultMinimumMs;
-    return std::max(SliceResultMinimumMs, SliceResultBeforeMs + sliceMusouMilliseconds(victims) + SliceHoldMs);
+/** Two tied executors both using Slice cut one shared field together,
+ * alternating (the second half a dash later); each makes at most
+ * ceil((victims - 1) / 2) dashes, then both strike the last victim at once. */
+inline int sliceJointDashMilliseconds(std::size_t victims) {
+    if (victims < 2) return 0;
+    auto const per = static_cast<double>(victims / 2); // ceil((victims - 1) / 2)
+    return std::clamp(static_cast<int>(std::lround(SliceDashBudgetMs / per)), SliceDashMinMs, SliceDashMaxMs);
 }
+inline int sliceJointMilliseconds(std::size_t victims) {
+    if (victims == 0) return 0;
+    auto const dash = sliceJointDashMilliseconds(victims);
+    return SliceCutStartMs + static_cast<int>(victims / 2) * dash + dash / 2 + SliceFinaleMs;
+}
+/** One of two tied executors uses Slice: the other effect's eliminations
+ * play first (the whole elimination window), then Slice starts. */
+inline constexpr int SliceAfterOthersMs = 1550;
+/** Round-result length from the Slice animation (window start to home). */
+inline int sliceResultFromAnimation(int animationMs) {
+    if (animationMs <= 0) return SliceResultMinimumMs;
+    return std::max(SliceResultMinimumMs, SliceResultBeforeMs + animationMs + SliceHoldMs);
+}
+/** Round-result presentation length with a Slice executor of `victims`. */
+inline int sliceResultMilliseconds(std::size_t victims) { return sliceResultFromAnimation(sliceMusouMilliseconds(victims)); }
 
 struct SliceVec { float x = 0, y = 0; };
 inline SliceVec sliceUnit(SliceVec v) {
@@ -58,18 +76,21 @@ inline SliceVec sliceUnit(SliceVec v) {
 inline float sliceDistance(SliceVec a, SliceVec b) { return std::hypot(a.x - b.x, a.y - b.y); }
 
 struct SliceDash {
-    std::size_t victim = 0; // index into the victims (elimination order)
-    float start = 0;        // dash start
-    float cut = 0;          // when the blade crosses the victim
+    std::size_t victim = 0;   // index into the victims (elimination order)
+    std::size_t executor = 0; // 0, or 1 for the second of two joint executors
+    float start = 0;          // dash start
+    float cut = 0;            // when the blade crosses the victim
     SliceVec from, to, dir;
 };
 struct SliceMusouPlan {
     std::vector<SliceVec> field;    // per victim: scattered resting point
     std::vector<float> leave;       // per victim: when its icon leaves the card
-    std::vector<SliceDash> dashes;  // regular dashes in cut order
+    std::vector<SliceDash> dashes;  // regular dashes (both executors), by start
     std::size_t finale = 0;         // the last victim (nearest the field centre)
-    SliceVec start;                 // executor hover point before the first dash
-    SliceVec windup, through, finaleDir;
+    // Per executor: hover point before its first dash, finale wind-up point,
+    // where its finale strike ends, and the strike direction (two executors
+    // strike the last victim from opposite diagonals: an X).
+    std::vector<SliceVec> start, windup, through, finaleDir;
     float dash = 0, windupAt = 0, finaleCut = 0, home = 0;
 };
 
@@ -87,18 +108,21 @@ struct SliceRandom {
 };
 
 /**
- * `center`/`radius`: the scatter ellipse; `gap`: minimum distance between
- * resting icons (shrinks when the field is crowded); `overshoot`: how far a
- * dash runs past its victim; `finalReach`: wind-up and follow-through length;
- * `low`/`high`: the stage bounds the executor stays inside.
- * The executor's dash is a flash-like zip, x(u) = 1 - 2^(-10u) (cocos
+ * `executors`: 1, or 2 for a joint cut (alternating picks, the second
+ * executor half a dash later). `center`/`radius`: the scatter ellipse;
+ * `gap`: minimum distance between resting icons (shrinks when the field is
+ * crowded); `overshoot`: how far a dash runs past its victim; `finalReach`:
+ * wind-up and follow-through length; `low`/`high`: the stage bounds the
+ * executors stay inside.
+ * A dash is a flash-like zip, x(u) = 1 - 2^(-10u) (cocos
  * CCEaseExponentialOut), so the blade crosses a victim at
  * u = -log2(1 - f) / 10, f = distance / (distance + overshoot).
  */
-inline SliceMusouPlan sliceMusouPlan(std::size_t victims, SliceVec center, SliceVec radius, float gap, float overshoot,
-    float finalReach, SliceVec low, SliceVec high) {
+inline SliceMusouPlan sliceMusouPlan(std::size_t victims, std::size_t executors, SliceVec center, SliceVec radius, float gap,
+    float overshoot, float finalReach, SliceVec low, SliceVec high) {
     SliceMusouPlan plan;
     if (victims == 0) return plan;
+    executors = executors >= 2 ? 2 : 1;
     SliceRandom random(static_cast<std::uint32_t>(victims) * 7919u + 17u);
     // Scatter: rejection sampling inside the ellipse, relaxing the gap.
     for (int guard = 0; guard < 60 && plan.field.size() < victims; ++guard) {
@@ -122,47 +146,67 @@ inline SliceMusouPlan sliceMusouPlan(std::size_t victims, SliceVec center, Slice
         plan.leave.push_back(0.05f + SliceVictimSpread * static_cast<float>(k) / static_cast<float>(victims));
 
     auto clampInside = [&](SliceVec p) { return SliceVec{std::clamp(p.x, low.x, high.x), std::clamp(p.y, low.y, high.y)}; };
-    // The finale victim: nearest the centre. The rest: a tour that keeps the
-    // dashes long and turns hard every time.
+    // The finale victim: nearest the centre. The rest: a tour per executor
+    // that keeps the dashes long and turns hard every time.
     plan.finale = 0;
     for (std::size_t k = 1; k < victims; ++k)
         if (sliceDistance(plan.field[k], center) < sliceDistance(plan.field[plan.finale], center)) plan.finale = k;
-    plan.start = clampInside({center.x, center.y + radius.y + gap});
+    auto const top = center.y + radius.y + gap;
+    if (executors == 1) plan.start.push_back(clampInside({center.x, top}));
+    else {
+        plan.start.push_back(clampInside({center.x - radius.x * 0.5f, top}));
+        plan.start.push_back(clampInside({center.x + radius.x * 0.5f, top}));
+    }
     std::vector<std::size_t> rest;
     for (std::size_t k = 0; k < victims; ++k) if (k != plan.finale) rest.push_back(k);
     auto const ideal = std::max(gap * 3.0f, std::min(radius.x, radius.y) * 1.1f);
-    SliceVec at = plan.start, previous{0, -1};
-    plan.dash = static_cast<float>(sliceDashMilliseconds(victims)) / 1000.0f;
-    auto clock = SliceCutStartMs / 1000.0f;
-    while (!rest.empty()) {
+    std::vector<SliceVec> at = plan.start, previous(executors, SliceVec{0, -1});
+    plan.dash = static_cast<float>(executors == 1 ? sliceDashMilliseconds(victims) : sliceJointDashMilliseconds(victims)) / 1000.0f;
+    auto const half = executors == 1 ? 0.0f : static_cast<float>(sliceJointDashMilliseconds(victims) / 2) / 1000.0f;
+    std::vector<float> clock(executors, SliceCutStartMs / 1000.0f);
+    if (executors == 2) clock[1] += half;
+    for (std::size_t step = 0; !rest.empty(); ++step) {
+        auto const e = step % executors;
         std::size_t best = 0;
         float score = 1e9f;
         for (std::size_t i = 0; i < rest.size(); ++i) {
             auto const p = plan.field[rest[i]];
-            auto const d = sliceDistance(at, p);
-            auto const n = sliceUnit({p.x - at.x, p.y - at.y});
-            auto const s = std::abs(d - ideal) / ideal + 0.7f * ((previous.x * n.x + previous.y * n.y) + 1.0f) / 2.0f;
+            auto const d = sliceDistance(at[e], p);
+            auto const n = sliceUnit({p.x - at[e].x, p.y - at[e].y});
+            auto const s = std::abs(d - ideal) / ideal + 0.7f * ((previous[e].x * n.x + previous[e].y * n.y) + 1.0f) / 2.0f;
             if (s < score) { score = s; best = i; }
         }
         auto const victim = rest[best];
         rest.erase(rest.begin() + static_cast<std::ptrdiff_t>(best));
         auto const target = plan.field[victim];
-        auto const dir = sliceUnit({target.x - at.x, target.y - at.y});
-        auto const distance = sliceDistance(at, target);
+        auto const dir = sliceUnit({target.x - at[e].x, target.y - at[e].y});
+        auto const distance = sliceDistance(at[e], target);
         auto const f = distance / (distance + overshoot);
         auto const crossing = std::min(1.0f, -std::log2(1.0f - f) / 10.0f);
-        SliceDash dash{victim, clock, clock + crossing * plan.dash, at, {target.x + dir.x * overshoot, target.y + dir.y * overshoot}, dir};
+        SliceDash dash{victim, e, clock[e], clock[e] + crossing * plan.dash, at[e], {target.x + dir.x * overshoot, target.y + dir.y * overshoot}, dir};
         plan.dashes.push_back(dash);
-        at = dash.to;
-        previous = dir;
-        clock += plan.dash;
+        at[e] = dash.to;
+        previous[e] = dir;
+        clock[e] += plan.dash;
     }
-    plan.windupAt = clock;
+    std::stable_sort(plan.dashes.begin(), plan.dashes.end(), [](auto const& a, auto const& b) { return a.start < b.start; });
+    plan.windupAt = executors == 1 ? clock[0]
+        : SliceCutStartMs / 1000.0f + static_cast<float>(victims / 2) * plan.dash + half;
     auto const target = plan.field[plan.finale];
-    auto const away = sliceUnit({at.x - target.x, at.y - target.y});
-    plan.windup = clampInside({target.x + away.x * finalReach, target.y + away.y * finalReach});
-    plan.finaleDir = sliceUnit({target.x - plan.windup.x, target.y - plan.windup.y});
-    plan.through = clampInside({target.x + plan.finaleDir.x * finalReach, target.y + plan.finaleDir.y * finalReach});
+    if (executors == 1) {
+        auto const away = sliceUnit({at[0].x - target.x, at[0].y - target.y});
+        plan.windup.push_back(clampInside({target.x + away.x * finalReach, target.y + away.y * finalReach}));
+    } else {
+        // An X: the first from the upper left, the second from the upper right.
+        auto const d = finalReach * 0.7071f;
+        plan.windup.push_back(clampInside({target.x - d, target.y + d}));
+        plan.windup.push_back(clampInside({target.x + d, target.y + d}));
+    }
+    for (auto const& windup : plan.windup) {
+        auto const dir = sliceUnit({target.x - windup.x, target.y - windup.y});
+        plan.finaleDir.push_back(dir);
+        plan.through.push_back(clampInside({target.x + dir.x * finalReach, target.y + dir.y * finalReach}));
+    }
     plan.finaleCut = plan.windupAt + SliceFinalWindup + SliceFinalStrike;
     plan.home = plan.finaleCut + SliceHitStop + SliceFinalThrough + SliceFollow + SliceReturn;
     return plan;

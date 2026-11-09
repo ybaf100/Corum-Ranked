@@ -276,44 +276,51 @@ private:
 // Cocos rotation is clockwise: lean into the dash direction.
 float lean(SliceVec dir, float degrees) { return dir.x >= 0 ? degrees : -degrees; }
 
-// Executor motion (the gold icon; `lag` delays a copy):
-// out of its card, over the field, one ease-out dash per victim, the finale
-// wind-up, strike, hit-stop, follow-through, and the flight home.
-CCSequence* executorActions(SliceGatherExecutor const& executor, SliceMusouPlan const& plan, float big, float lift,
-    float follow, float lag, std::function<void()> done) {
+// Executor `e`'s motion: out of its card, over the field, one flash dash per
+// victim it cuts (the second of two joint executors half a dash later), the
+// finale wind-up, strike, hit-stop, follow-through, and the flight home.
+CCSequence* executorActions(SliceGatherExecutor const& executor, SliceMusouPlan const& plan, std::size_t e, float big, float lift,
+    float follow, std::function<void()> done) {
     auto* actions = CCArray::create();
-    if (lag > 0) actions->addObject(CCDelayTime::create(lag));
+    auto const start = plan.start[e], windup = plan.windup[e], through = plan.through[e], finaleDir = plan.finaleDir[e];
     actions->addObject(CCSpawn::create(CCEaseSineOut::create(CCMoveBy::create(SliceLift, {0, lift})),
         CCEaseBackOut::create(CCScaleTo::create(SliceLift, big)), nullptr));
     CCPoint const raised{executor.home.x, executor.home.y + lift};
     ccBezierConfig over;
-    over.controlPoint_1 = CCPoint{raised.x + (plan.start.x - raised.x) * 0.3f, std::max(raised.y, plan.start.y) + lift * 3.0f};
-    over.controlPoint_2 = CCPoint{raised.x + (plan.start.x - raised.x) * 0.7f, std::max(raised.y, plan.start.y) + lift * 2.0f};
-    over.endPosition = point(plan.start);
+    over.controlPoint_1 = CCPoint{raised.x + (start.x - raised.x) * 0.3f, std::max(raised.y, start.y) + lift * 3.0f};
+    over.controlPoint_2 = CCPoint{raised.x + (start.x - raised.x) * 0.7f, std::max(raised.y, start.y) + lift * 2.0f};
+    over.endPosition = point(start);
     actions->addObject(CCSpawn::create(CCEaseSineInOut::create(CCBezierTo::create(SliceTravel, over)),
-        CCSequence::create(CCRotateTo::create(SliceTravel / 2, plan.start.x >= raised.x ? 20.0f : -20.0f), CCRotateTo::create(SliceTravel / 2, 0.0f), nullptr), nullptr));
+        CCSequence::create(CCRotateTo::create(SliceTravel / 2, start.x >= raised.x ? 20.0f : -20.0f), CCRotateTo::create(SliceTravel / 2, 0.0f), nullptr), nullptr));
     // A short charge before the first dash.
     auto const charge = SliceCutStartMs / 1000.0f - SliceLift - SliceTravel;
     actions->addObject(CCSequence::create(
         CCSpawn::create(CCEaseSineOut::create(CCMoveBy::create(charge / 2, {0, lift * 0.5f})), CCScaleTo::create(charge / 2, big * 1.12f), CCRotateTo::create(charge / 2, -18.0f), nullptr),
         CCSpawn::create(CCEaseSineIn::create(CCMoveBy::create(charge / 2, {0, -lift * 0.5f})), CCScaleTo::create(charge / 2, big), CCRotateTo::create(charge / 2, 0.0f), nullptr), nullptr));
+    // Its dashes back to back from its first start; then it waits for the
+    // other executor before the finale.
+    auto clock = SliceCutStartMs / 1000.0f;
     for (auto const& dash : plan.dashes) {
+        if (dash.executor != e) continue;
+        if (dash.start > clock + 0.0005f) actions->addObject(CCDelayTime::create(dash.start - clock));
         actions->addObject(CCSpawn::create(CCEaseExponentialOut::create(CCMoveTo::create(plan.dash, point(dash.to))),
             CCSequence::create(CCRotateTo::create(plan.dash * 0.3f, lean(dash.dir, 28.0f)), CCRotateTo::create(plan.dash * 0.7f, lean(dash.dir, 8.0f)), nullptr),
             CCSequence::create(CCScaleTo::create(plan.dash * 0.3f, big * 1.12f), CCScaleTo::create(plan.dash * 0.7f, big), nullptr), nullptr));
+        clock = dash.start + plan.dash;
     }
+    if (plan.windupAt > clock + 0.0005f) actions->addObject(CCDelayTime::create(plan.windupAt - clock));
     // Finale: draw back and charge, strike, freeze on the hit, cut through.
     auto const target = point(plan.field[plan.finale]);
-    actions->addObject(CCSpawn::create(CCEaseSineInOut::create(CCMoveTo::create(SliceFinalWindup, point(plan.windup))),
-        CCScaleTo::create(SliceFinalWindup, big * 1.25f), CCRotateTo::create(SliceFinalWindup, lean(plan.finaleDir, -40.0f)), nullptr));
+    actions->addObject(CCSpawn::create(CCEaseSineInOut::create(CCMoveTo::create(SliceFinalWindup, point(windup))),
+        CCScaleTo::create(SliceFinalWindup, big * 1.25f), CCRotateTo::create(SliceFinalWindup, lean(finaleDir, -40.0f)), nullptr));
     actions->addObject(CCEaseSineIn::create(CCMoveTo::create(SliceFinalStrike, target)));
     actions->addObject(CCDelayTime::create(SliceHitStop));
-    actions->addObject(CCSpawn::create(CCEaseOut::create(CCMoveTo::create(SliceFinalThrough, point(plan.through)), 3.0f),
-        CCRotateTo::create(SliceFinalThrough, lean(plan.finaleDir, 50.0f)), nullptr));
-    actions->addObject(CCSpawn::create(CCEaseSineOut::create(CCMoveBy::create(SliceFollow, {plan.finaleDir.x * follow, plan.finaleDir.y * follow})),
+    actions->addObject(CCSpawn::create(CCEaseOut::create(CCMoveTo::create(SliceFinalThrough, point(through)), 3.0f),
+        CCRotateTo::create(SliceFinalThrough, lean(finaleDir, 50.0f)), nullptr));
+    actions->addObject(CCSpawn::create(CCEaseSineOut::create(CCMoveBy::create(SliceFollow, {finaleDir.x * follow, finaleDir.y * follow})),
         CCScaleTo::create(SliceFollow, big), CCRotateTo::create(SliceFollow, 0.0f), nullptr));
     // Home along an arc.
-    CCPoint const after{plan.through.x + plan.finaleDir.x * follow, plan.through.y + plan.finaleDir.y * follow};
+    CCPoint const after{through.x + finaleDir.x * follow, through.y + finaleDir.y * follow};
     ccBezierConfig back;
     back.controlPoint_1 = CCPoint{after.x + (executor.home.x - after.x) * 0.3f, std::max(after.y, executor.home.y) + lift * 4.0f};
     back.controlPoint_2 = CCPoint{after.x + (executor.home.x - after.x) * 0.75f, std::max(after.y, executor.home.y) + lift * 2.5f};
@@ -327,11 +334,15 @@ CCSequence* executorActions(SliceGatherExecutor const& executor, SliceMusouPlan 
 }
 } // namespace
 
-float sliceGatherSeconds(std::size_t victims) { return static_cast<float>(sliceMusouMilliseconds(victims)) / 1000.0f; }
+float sliceGatherSeconds(std::size_t victims, std::size_t executors) {
+    return static_cast<float>(executors >= 2 ? sliceJointMilliseconds(victims) : sliceMusouMilliseconds(victims)) / 1000.0f;
+}
 
-void runSliceGathering(CCNode* layer, SliceGatherExecutor const& executor, std::vector<SliceGatherVictim> const& victims,
+void runSliceGathering(CCNode* layer, std::vector<SliceGatherExecutor> const& executors, std::vector<SliceGatherVictim> const& victims,
     CCPoint center, CCSize spread, float fall, CCNode* shakeTarget) {
-    if (!layer || victims.empty()) return;
+    if (!layer || victims.empty() || executors.empty()) return;
+    auto const& executor = executors.front();
+    auto const joint = std::min<std::size_t>(executors.size(), 2);
     auto* stage = CCNode::create();
     stage->setContentSize(layer->getContentSize());
     layer->addChild(stage, 60);
@@ -342,7 +353,7 @@ void runSliceGathering(CCNode* layer, SliceGatherExecutor const& executor, std::
     auto const fieldScale = std::clamp(executor.iconScale * 2.0f, std::max(executor.iconScale, 0.45f), 1.0f);
     auto const big = fieldScale * 1.3f;
     auto const iconSize = 32.0f * fieldScale;
-    auto const plan = sliceMusouPlan(n, {center.x, center.y}, {spread.width, spread.height}, iconSize * 1.25f, iconSize * 0.95f,
+    auto const plan = sliceMusouPlan(n, joint, {center.x, center.y}, {spread.width, spread.height}, iconSize * 1.25f, iconSize * 0.95f,
         std::min(iconSize * 3.8f, std::max(spread.width, spread.height) * 0.9f), {iconSize * 0.8f, iconSize * 0.8f},
         {area.width - iconSize * 0.8f, area.height - iconSize * 0.8f});
     auto const lift = iconSize * 0.45f;
@@ -402,12 +413,16 @@ void runSliceGathering(CCNode* layer, SliceGatherExecutor const& executor, std::
     std::optional<WeakRef<CCNode>> stageRef;
     stageRef.emplace(stage);
     // One cut per dash: the halves split along the dash; a short shake
-    // perpendicular to the blade (harder every fifth), a crash sound.
-    for (std::size_t j = 0; j < plan.dashes.size(); ++j) {
-        auto const& dash = plan.dashes[j];
+    // perpendicular to the blade (harder every fifth), a crash sound. One
+    // shared counter, in cut order (two joint executors interleave).
+    std::vector<std::size_t> byCut(plan.dashes.size());
+    for (std::size_t j = 0; j < byCut.size(); ++j) byCut[j] = j;
+    std::stable_sort(byCut.begin(), byCut.end(), [&](std::size_t a, std::size_t b) { return plan.dashes[a].cut < plan.dashes[b].cut; });
+    for (std::size_t rank = 0; rank < byCut.size(); ++rank) {
+        auto const& dash = plan.dashes[byCut[rank]];
         auto* copy = copies[dash.victim];
-        EliminationFxTarget target{copy, stage, {}, fieldScale, victims[dash.victim].icon, static_cast<int>(j)};
-        auto const count = static_cast<int>(j) + 1;
+        EliminationFxTarget target{copy, stage, {}, fieldScale, victims[dash.victim].icon, static_cast<int>(rank)};
+        auto const count = static_cast<int>(rank) + 1;
         auto const strong = count % 5 == 0;
         CCPoint const dir{dash.dir.x, dash.dir.y}, push{-dash.dir.y, dash.dir.x};
         stage->runAction(CCSequence::create(CCDelayTime::create(dash.cut), CallFuncExt::create(
@@ -427,11 +442,15 @@ void runSliceGathering(CCNode* layer, SliceGatherExecutor const& executor, std::
     }
     // Finale: the blade stops on the last victim (hit-stop: a white flash and
     // the counter), then it splits with a long slash, ring, flash, hard shake.
+    // Two joint executors strike it at once from opposite diagonals: an X.
     {
         auto const k = plan.finale;
         auto* copy = copies[k];
         EliminationFxTarget target{copy, stage, {}, fieldScale, victims[k].icon, static_cast<int>(n)};
-        CCPoint const dir{plan.finaleDir.x, plan.finaleDir.y}, push{-plan.finaleDir.y, plan.finaleDir.x};
+        CCPoint const dir{plan.finaleDir[0].x, plan.finaleDir[0].y}, push{-plan.finaleDir[0].y, plan.finaleDir[0].x};
+        std::optional<CCPoint> cross;
+        if (plan.finaleDir.size() > 1) cross = CCPoint{plan.finaleDir[1].x, plan.finaleDir[1].y};
+        auto const crossLength = 52.0f * std::max(0.6f, fieldScale) * 2.6f;
         auto const count = static_cast<int>(n);
         stage->runAction(CCSequence::create(CCDelayTime::create(plan.finaleCut), CallFuncExt::create([stage, copy, iconSize, counter, counterScale, count]() {
                 flash(stage, copy->getPosition(), iconSize * 0.42f, {1, 1, 1, 0.9f});
@@ -443,9 +462,10 @@ void runSliceGathering(CCNode* layer, SliceGatherExecutor const& executor, std::
                 counter->runAction(CCSequence::create(CCEaseBackOut::create(CCScaleTo::create(0.3f, counterScale * 1.35f)), CCDelayTime::create(0.45f), CCFadeOut::create(0.3f), nullptr));
             }),
             CCDelayTime::create(SliceHitStop),
-            CallFuncExt::create([target, copy, fall, dir, push, stage, fieldScale, shake, shakeBase, stageRef, stageBase]() mutable {
+            CallFuncExt::create([target, copy, fall, dir, push, cross, crossLength, stage, fieldScale, shake, shakeBase, stageRef, stageBase]() mutable {
                 target.center = copy->getPosition();
                 playSliceFx(target, fall, dir, true);
+                if (cross) slashLine(stage, target.center, *cross, crossLength);
                 finaleBurst(stage, target.center, std::max(0.7f, fieldScale));
                 if (shake) if (auto node = shake->lock()) shakeNode(node.data(), shakeBase, push, 10.0f, 8);
                 if (stageRef) if (auto node = stageRef->lock()) shakeNode(node.data(), stageBase, push, 8.0f, 8);
@@ -453,18 +473,21 @@ void runSliceGathering(CCNode* layer, SliceGatherExecutor const& executor, std::
             }), nullptr));
     }
 
-    // The executor: gold, out of its card, flash-dashing through the field,
-    // home, leaving a short long-exposure light trail.
-    if (auto* ghost = executor.icon ? executor.icon() : nullptr) {
+    // The executors: gold, out of their cards, flash-dashing through the
+    // field, home, each leaving a short long-exposure light trail.
+    for (std::size_t e = 0; e < joint; ++e) {
+        auto const& owner = executors[e];
+        auto* ghost = owner.icon ? owner.icon() : nullptr;
+        if (!ghost) continue;
         if (auto* player = typeinfo_cast<PlayerIcon*>(ghost)) player->setGold(true);
-        ghost->setScale(executor.iconScale);
-        ghost->setPosition(executor.home);
+        ghost->setScale(owner.iconScale);
+        ghost->setPosition(owner.home);
         stage->addChild(ghost, 200);
         std::optional<WeakRef<CCNode>> home;
-        auto const homeScale = executor.slot ? executor.slot->getScale() : 1.0f;
-        if (executor.slot) { home.emplace(executor.slot); executor.slot->setVisible(false); }
+        auto const homeScale = owner.slot ? owner.slot->getScale() : 1.0f;
+        if (owner.slot) { home.emplace(owner.slot); owner.slot->setVisible(false); }
         // Landing: the card icon shows again with a bump and a small flash.
-        ghost->runAction(executorActions(executor, plan, big, lift, follow, 0.0f, [home, homeScale, stageRef, at = executor.home, iconSize]() mutable {
+        ghost->runAction(executorActions(owner, plan, e, big, lift, follow, [home, homeScale, stageRef, at = owner.home, iconSize]() mutable {
             if (home) if (auto node = home->lock()) {
                 node->setVisible(true);
                 node->setScale(homeScale * 1.3f);

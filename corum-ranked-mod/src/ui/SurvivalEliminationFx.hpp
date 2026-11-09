@@ -53,10 +53,12 @@ struct SliceGatherExecutor {
     EliminationIconFactory icon;
     float iconScale = 1.0f;
 };
-// Seconds from the start until the gold icon is back home.
-float sliceGatherSeconds(std::size_t victims);
+// Seconds from the start until the gold icon(s) are back home.
+float sliceGatherSeconds(std::size_t victims, std::size_t executors = 1);
 // `shakeTarget` (the card grid) shakes with every cut and hard on the finale.
-void runSliceGathering(cocos2d::CCNode* layer, SliceGatherExecutor const& executor,
+// Two `executors` (tied 1st places both using Slice) cut the field together:
+// alternating dashes, one counter, an X-shaped finale strike.
+void runSliceGathering(cocos2d::CCNode* layer, std::vector<SliceGatherExecutor> const& executors,
     std::vector<SliceGatherVictim> const& victims, cocos2d::CCPoint center, cocos2d::CCSize spread, float fall,
     cocos2d::CCNode* shakeTarget = nullptr);
 

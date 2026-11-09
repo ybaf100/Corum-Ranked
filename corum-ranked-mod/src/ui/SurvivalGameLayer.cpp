@@ -77,9 +77,12 @@ class SurvivalGameLayer final : public CCLayerColor {
     std::vector<int> m_eliminationStarts;
     // Executor (1st place) and effect per entry of m_eliminationOrder.
     std::vector<SurvivalExecution> m_eliminationExecutions;
-    // Executors whose Slice gathering already started this presentation, and
-    // the cards it holds until their icons leave (then they turn red).
-    std::set<std::string> m_slicePlanned;
+    // Whether the Slice gathering already started this presentation, the
+    // cards it holds until their icons leave (then they turn red), and when
+    // it starts (after the other effect's eliminations when one of two tied
+    // executors uses another effect).
+    bool m_sliceStarted=false;
+    int m_sliceDelayMs=0;
     std::set<std::string> m_sliceHeld;
     std::set<std::string> m_eliminationRevealed;
     std::chrono::steady_clock::time_point m_eliminationStart{};
@@ -356,10 +359,12 @@ class SurvivalGameLayer final : public CCLayerColor {
         // A card held by a Slice gathering turns red when its icon leaves.
         if(m_sliceHeld.contains(id))return;
         auto const execution=order<m_eliminationExecutions.size()?m_eliminationExecutions[order]:SurvivalExecution{};
-        if(animate && execution.effect==EliminationEffect::Slice && !execution.executorId.empty()){
+        if(animate && execution.effect==EliminationEffect::Slice && !execution.executorId.empty() && !m_sliceStarted){
             auto found=m_tiles.find(id);
             if(found!=m_tiles.end() && found->second.root->isVisible() && !found->second.eliminationShown && found->second.icon){
-                startSliceGathering(execution.executorId);
+                // Mixed executors: hold the card until the other effect is done.
+                if(m_sliceDelayMs>0){m_sliceHeld.insert(id);return;}
+                startSliceGathering();
                 if(m_sliceHeld.contains(id))return;
             }
         }
@@ -411,21 +416,31 @@ class SurvivalGameLayer final : public CCLayerColor {
         auto const executor=executorWorld(execution.executorId);
         ui::playEliminationFx(execution.effect,target,fall,tile.root->convertToNodeSpace(executor));
     }
-    // Slice ("musou"): at the executor's first reveal, every card it executes
-    // this round (visible page) is held; its gold icon leaves its card, the
-    // victims' icons scatter over a wide field (each card turns red as its
-    // icon leaves), the gold icon dashes through them in all directions, one
-    // cut per dash, and flies home. Two tied executors use a field each, left
-    // and right. The presentation waits for the return (eliminationHold).
-    void startSliceGathering(std::string const& executorId) {
-        if(!m_slicePlanned.insert(executorId).second)return;
+    // Slice ("musou"): every card a Slice executor executes this round
+    // (visible page) is held; the gold icon leaves its card, the victims'
+    // icons scatter over a wide field (each card turns red as its icon
+    // leaves), the gold icon dashes through them in all directions, one cut
+    // per dash, and flies home. Two tied executors both using Slice cut the
+    // same field together (alternating dashes, one counter, an X finale).
+    // With one Slice and one other effect, the other effect's eliminations
+    // play first and Slice starts after the elimination window. The
+    // presentation waits for the return (eliminationHold).
+    void startSliceGathering() {
+        if(m_sliceStarted)return;
+        m_sliceStarted=true;
+        std::vector<std::string> executorIds;
         std::vector<ui::SliceGatherVictim> victims;
         for(std::size_t i=0;i<m_eliminationOrder.size()&&i<m_eliminationExecutions.size();++i){
             auto const& execution=m_eliminationExecutions[i];
-            if(execution.executorId!=executorId||execution.effect!=EliminationEffect::Slice)continue;
+            if(execution.executorId.empty()||execution.effect!=EliminationEffect::Slice)continue;
+            if(std::find(executorIds.begin(),executorIds.end(),execution.executorId)==executorIds.end())executorIds.push_back(execution.executorId);
             auto const& id=m_eliminationOrder[i];
             auto found=m_tiles.find(id);
-            if(found==m_tiles.end()||!found->second.root->isVisible()||found->second.eliminationShown||!found->second.icon||m_eliminationRevealed.contains(id))continue;
+            if(found==m_tiles.end()||!found->second.root->isVisible()||found->second.eliminationShown||!found->second.icon||m_eliminationRevealed.contains(id)){
+                // Held but no longer cuttable (paged away): plain reveal.
+                if(m_sliceHeld.erase(id))revealElimination(id,false,i);
+                continue;
+            }
             auto& tile=found->second;
             m_sliceHeld.insert(id);
             auto factory=[weak=WeakRef(this),id]()->CCNode*{auto owner=weak.lock();return owner?owner->iconFor(id):nullptr;};
@@ -438,24 +453,23 @@ class SurvivalGameLayer final : public CCLayerColor {
             victims.push_back({tile.icon,convertToNodeSpace(faceWorld(tile)),factory,tile.face?tile.face->getScale():.6f,detach});
         }
         if(victims.empty())return;
-        ui::SliceGatherExecutor executor;
-        if(auto found=m_tiles.find(executorId);found!=m_tiles.end()&&found->second.root->isVisible()){
-            executor.slot=found->second.icon;executor.iconScale=found->second.face?found->second.face->getScale():.6f;
-        }else executor.iconScale=victims.front().iconScale;
-        executor.home=convertToNodeSpace(executorWorld(executorId));
-        executor.icon=[weak=WeakRef(this),executorId]()->CCNode*{auto owner=weak.lock();return owner?owner->iconFor(executorId):nullptr;};
-        // One field in the middle; with two tied executors, one field each.
-        std::vector<std::string> executors;
-        for(auto const& execution:m_eliminationExecutions)
-            if(execution.effect==EliminationEffect::Slice&&!execution.executorId.empty()&&std::find(executors.begin(),executors.end(),execution.executorId)==executors.end())
-                executors.push_back(execution.executorId);
+        std::vector<ui::SliceGatherExecutor> executors;
+        for(auto const& executorId:executorIds){
+            ui::SliceGatherExecutor executor;
+            if(auto found=m_tiles.find(executorId);found!=m_tiles.end()&&found->second.root->isVisible()){
+                executor.slot=found->second.icon;executor.iconScale=found->second.face?found->second.face->getScale():.6f;
+            }else executor.iconScale=victims.front().iconScale;
+            executor.home=convertToNodeSpace(executorWorld(executorId));
+            executor.icon=[weak=WeakRef(this),executorId]()->CCNode*{auto owner=weak.lock();return owner?owner->iconFor(executorId):nullptr;};
+            executors.push_back(std::move(executor));
+        }
+        // One wide field in the middle, for one or two executors.
         auto const size=getContentSize();
-        auto centerX=size.width/2;auto spread=CCSize{size.width*.31f,size.height*.24f};
-        if(executors.size()>1){centerX=executors.front()==executorId?size.width*.29f:size.width*.71f;spread.width=size.width*.17f;}
-        ui::runSliceGathering(this,executor,victims,{centerX,size.height*.45f},spread,size.height*.6f,m_grid);
+        ui::runSliceGathering(this,executors,victims,{size.width/2,size.height*.45f},CCSize{size.width*.31f,size.height*.24f},size.height*.6f,m_grid);
     }
     void stepEliminations(std::chrono::steady_clock::time_point now) {
         auto const elapsed=std::chrono::duration_cast<std::chrono::milliseconds>(now-m_eliminationStart).count()-SurvivalBeforeEliminationMilliseconds;
+        if(m_sliceDelayMs>0 && !m_sliceStarted && elapsed>=m_sliceDelayMs && !m_sliceHeld.empty())startSliceGathering();
         for(std::size_t i=0;i<m_eliminationOrder.size()&&i<m_eliminationStarts.size();++i)
             if(elapsed>=m_eliminationStarts[i] && !m_eliminationRevealed.contains(m_eliminationOrder[i]))revealElimination(m_eliminationOrder[i],true,i);
     }
@@ -465,16 +479,26 @@ class SurvivalGameLayer final : public CCLayerColor {
             if(p["participantId"].asString().unwrapOr("")==view.ownId)return !p["qualified"].asBool().unwrapOr(false);
         return false;
     }
-    struct EliminationHold { int animation=0; int total=SurvivalRosterMilliseconds; };
-    // The longest Slice executor (victims it cuts) sets the wait; the server's
-    // presentationMs (same formula, all victims) is respected when present.
+    struct EliminationHold { int animation=0; int total=SurvivalRosterMilliseconds; int sliceDelay=0; };
+    // Slice sets the wait: one executor, two joint executors (one field), or
+    // one Slice after the other effect's eliminations. The server's
+    // presentationMs (same formula, an upper bound) is respected when present.
     EliminationHold eliminationHold(matjson::Value const& completed) const {
         std::map<std::string,std::size_t> slices;
-        for(auto const& execution:m_eliminationExecutions)
-            if(execution.effect==EliminationEffect::Slice&&!execution.executorId.empty())++slices[execution.executorId];
-        std::size_t most=0;for(auto const& entry:slices)most=std::max(most,entry.second);
+        std::size_t slice=0,others=0;
+        for(auto const& execution:m_eliminationExecutions){
+            if(execution.effect==EliminationEffect::Slice&&!execution.executorId.empty()){++slices[execution.executorId];++slice;}
+            else ++others;
+        }
         EliminationHold hold;
-        if(most>0){hold.animation=sliceMusouMilliseconds(most);hold.total=sliceResultMilliseconds(most);}
+        if(slice>0){
+            if(slices.size()>1)hold.animation=sliceJointMilliseconds(slice);
+            else{
+                hold.sliceDelay=others>0?SliceAfterOthersMs:0;
+                hold.animation=hold.sliceDelay+sliceMusouMilliseconds(slice);
+            }
+            hold.total=sliceResultFromAnimation(hold.animation);
+        }
         auto const server=static_cast<int>(completed["presentationMs"].asInt().unwrapOr(0));
         hold.total=std::clamp(std::max(hold.total,server),SurvivalRosterMilliseconds,15000);
         return hold;
@@ -516,7 +540,7 @@ class SurvivalGameLayer final : public CCLayerColor {
         for(auto const& p:completed["players"].asArray().unwrapOr(std::vector<matjson::Value>{}))
             effectPlayers.push_back({p["participantId"].asString().unwrapOr(""),p["name"].asString().unwrapOr(""),static_cast<int>(p["rank"].asInt().unwrapOr(0)),
                 p["lp"].asDouble().unwrapOr(0),eliminationEffectFromCode(p["eliminationEffect"].asString().unwrapOr("DEFAULT"))});
-        m_eliminationExecutions=survivalEliminationExecutions(effectPlayers,m_eliminationOrder);m_slicePlanned.clear();m_sliceHeld.clear();
+        m_eliminationExecutions=survivalEliminationExecutions(effectPlayers,m_eliminationOrder);m_sliceStarted=false;m_sliceHeld.clear();
         showParticipants(preview,false);
         auto const alreadyPresented=key==Mod::get()->getSavedValue<std::string>("survival-elimination-animation");
         if(alreadyPresented)for(std::size_t i=0;i<m_eliminationOrder.size();++i)revealElimination(m_eliminationOrder[i],false,i);
@@ -525,7 +549,7 @@ class SurvivalGameLayer final : public CCLayerColor {
         m_heading->setString(fmt::format("SURVIVAL · {} · {}",phase,text("result","RESULT")).c_str());
         // Slice holds the result until its icon is home (the server's
         // presentationMs bounds the same wait from every victim).
-        auto const hold=eliminationHold(completed);
+        auto const hold=eliminationHold(completed);m_sliceDelayMs=hold.sliceDelay;
         m_eliminationUntil=now+std::chrono::milliseconds(alreadyPresented?0:SurvivalBeforeEliminationMilliseconds+std::max(SurvivalEliminationMilliseconds,hold.animation));
         m_nextMapAt=now+std::chrono::milliseconds(alreadyPresented?SurvivalRosterMilliseconds:hold.total);return true;
     }
