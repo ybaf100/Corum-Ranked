@@ -2,6 +2,7 @@
 
 #include <Geode/Geode.hpp>
 #include <functional>
+#include <vector>
 #include "../domain/SurvivalEliminationEffects.hpp"
 
 namespace corum::ranked::ui {
@@ -29,14 +30,21 @@ void playEliminationFx(EliminationEffect effect, EliminationFxTarget const& targ
 void playSliceFx(EliminationFxTarget const& target, float fall, cocos2d::CCPoint swipe);
 // The default fall (move, spin, shrink, hide) of a card icon `slot`.
 void playDefaultFall(cocos2d::CCNode* slot, int order, float fall);
-// Slice executor: the 1st place icon `ghost` (in its parent's space) swoops
-// over `victim` and returns `home`; a new call restarts the motion from the
-// ghost's current position. The cut itself is scheduled per victim with
-// scheduleSliceCut, so a following victim never cancels a pending cut.
-inline const cocos2d::CCPoint kSliceEnter{-18.0f, 28.0f};
-inline const cocos2d::CCPoint kSliceLeave{18.0f, -28.0f};
-inline constexpr float kSliceCutDelay = 0.1f; // the ghost reaches the victim
-void runSliceGhost(cocos2d::CCNode* ghost, cocos2d::CCPoint victim, cocos2d::CCPoint home);
+// Slice executor. With several victims the 1st place icon flies one planned
+// route: it swoops through each card in elimination order, arriving as that
+// card's cut lands, and the swipe alternates direction (an X rhythm) before
+// it returns home. The cuts are scheduled per card (scheduleSliceCut), so the
+// route never has to wait for or cancel one.
+struct SliceStop {
+    cocos2d::CCPoint victim;  // icon centre in the ghost's parent space
+    float at = 0.0f;          // seconds from now when this card's cut lands
+    bool mirrored = false;    // swipe top-right -> bottom-left instead
+};
+inline constexpr float kSliceCutDelay = 0.1f; // reveal -> cut
+cocos2d::CCPoint sliceEnter(bool mirrored);
+cocos2d::CCPoint sliceLeave(bool mirrored);
+cocos2d::CCPoint sliceSwipe(bool mirrored);
+void runSliceRoute(cocos2d::CCNode* ghost, std::vector<SliceStop> const& stops, cocos2d::CCPoint home);
 // Runs `cut` on `host` after kSliceCutDelay (the host owns the pending cut).
 void scheduleSliceCut(cocos2d::CCNode* host, std::function<void()> cut);
 

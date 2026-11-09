@@ -1,6 +1,6 @@
 {
   "name": "@corum-ranked/rules",
-  "version": "0.5.0-beta.175",
+  "version": "0.5.0-beta.176",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",

@@ -135,7 +135,7 @@ void playSliceFx(EliminationFxTarget const& target, float fall, CCPoint swipe) {
                 CCScaleTo::create(duration - 0.22f, 0.45f), nullptr),
             CCRemoveSelf::create(), nullptr));
     }
-    slashLine(target.host, target.center, d, 74.0f);
+    slashLine(target.host, target.center, d, 84.0f);
     sparks(target.host, target.center, 5, {255, 240, 190, 255}, 26.0f);
 }
 
@@ -148,16 +148,42 @@ void playDefaultFall(CCNode* slot, int order, float fall) {
         CCHide::create(), nullptr));
 }
 
-void runSliceGhost(CCNode* ghost, CCPoint victim, CCPoint home) {
+CCPoint sliceEnter(bool mirrored) { return mirrored ? CCPoint{18.0f, 28.0f} : CCPoint{-18.0f, 28.0f}; }
+CCPoint sliceLeave(bool mirrored) { return mirrored ? CCPoint{-18.0f, -28.0f} : CCPoint{18.0f, -28.0f}; }
+CCPoint sliceSwipe(bool mirrored) {
+    auto const a = sliceEnter(mirrored), b = sliceLeave(mirrored);
+    return {b.x - a.x, b.y - a.y};
+}
+
+void runSliceRoute(CCNode* ghost, std::vector<SliceStop> const& stops, CCPoint home) {
     if (!ghost) return;
     ghost->stopAllActions();
     ghost->setVisible(true);
-    ghost->runAction(CCSequence::create(
-        CCEaseSineOut::create(CCMoveTo::create(kSliceCutDelay, {victim.x + kSliceEnter.x, victim.y + kSliceEnter.y})),
-        CCMoveTo::create(0.06f, {victim.x + kSliceLeave.x, victim.y + kSliceLeave.y}),
-        CCDelayTime::create(0.2f),
-        CCEaseSineInOut::create(CCMoveTo::create(0.24f, home)),
-        CCRemoveSelf::create(), nullptr));
+    auto const scale = ghost->getScale();
+    ghost->setScale(scale * 0.7f);
+    auto* actions = CCArray::create();
+    // Pop out of the 1st place card.
+    actions->addObject(CCEaseBackOut::create(CCScaleTo::create(0.08f, scale)));
+    auto now = 0.08f;
+    for (auto const& stop : stops) {
+        auto const enter = sliceEnter(stop.mirrored), leave = sliceLeave(stop.mirrored);
+        // Reach the entry point just before the cut, then swipe through it.
+        auto const arrive = std::max(now + 0.03f, stop.at - 0.03f);
+        auto const travel = arrive - now;
+        actions->addObject(CCSpawn::create(
+            CCEaseSineInOut::create(CCMoveTo::create(travel, {stop.victim.x + enter.x, stop.victim.y + enter.y})),
+            CCRotateTo::create(travel, stop.mirrored ? 20.0f : -20.0f), nullptr));
+        actions->addObject(CCSpawn::create(
+            CCMoveTo::create(0.06f, {stop.victim.x + leave.x, stop.victim.y + leave.y}),
+            CCRotateTo::create(0.06f, stop.mirrored ? -28.0f : 28.0f), nullptr));
+        now = arrive + 0.06f;
+    }
+    actions->addObject(CCDelayTime::create(0.16f));
+    actions->addObject(CCSpawn::create(
+        CCEaseSineInOut::create(CCMoveTo::create(0.26f, home)),
+        CCRotateTo::create(0.26f, 0.0f), CCScaleTo::create(0.26f, scale * 0.7f), nullptr));
+    actions->addObject(CCRemoveSelf::create());
+    ghost->runAction(CCSequence::create(actions));
 }
 
 void scheduleSliceCut(CCNode* host, std::function<void()> cut) {

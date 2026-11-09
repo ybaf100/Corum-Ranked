@@ -291,16 +291,24 @@ void RankedEliminationFxPopup::executeVictim(std::size_t index) {
     switch (m_selected) {
     case EliminationEffect::Default: playDefaultFall(slot, order, fall); break;
     case EliminationEffect::Slice: {
+        // Each card owns its cut; the swipe alternates direction per card.
+        auto const mirrored = index % 2 == 1;
+        scheduleSliceCut(card, [target, fall, mirrored]() { playSliceFx(target, fall, sliceSwipe(mirrored)); });
+        // The first card plans the executor's route through all three.
+        if (index != 0) break;
         auto* ghost = PlayerIcon::createLocal();
-        if (!ghost) { playSliceFx(target, fall, {kSliceLeave.x - kSliceEnter.x, kSliceLeave.y - kSliceEnter.y}); break; }
+        if (!ghost) break;
         ghost->setScale(kIconScale * 1.15f);
         ghost->setPosition(m_executorAt);
         m_world->addChild(ghost, 30);
-        auto const victim = m_world->convertToNodeSpace(card->convertToWorldSpace(slot->getPosition()));
-        scheduleSliceCut(card, [target, fall]() {
-            playSliceFx(target, fall, {kSliceLeave.x - kSliceEnter.x, kSliceLeave.y - kSliceEnter.y});
-        });
-        runSliceGhost(ghost, victim, m_executorAt);
+        auto const starts = survivalEliminationStarts(m_victims.size());
+        std::vector<SliceStop> stops;
+        for (std::size_t i = 0; i < m_victims.size() && i < starts.size(); ++i) {
+            auto const [stopCard, stopSlot] = m_victims[i];
+            stops.push_back({m_world->convertToNodeSpace(stopCard->convertToWorldSpace(stopSlot->getPosition())),
+                (starts[i] - starts[0]) / 1000.0f + kSliceCutDelay, i % 2 == 1});
+        }
+        runSliceRoute(ghost, stops, m_executorAt);
         break;
     }
     default:

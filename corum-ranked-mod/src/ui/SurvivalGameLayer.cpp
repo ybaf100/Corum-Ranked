@@ -75,7 +75,8 @@ class SurvivalGameLayer final : public CCLayerColor {
     std::vector<int> m_eliminationStarts;
     // Executor (1st place) and effect per entry of m_eliminationOrder.
     std::vector<SurvivalExecution> m_eliminationExecutions;
-    std::unordered_map<std::string,WeakRef<CCNode>> m_executorGhosts;
+    // Executors whose Slice route is already planned this presentation.
+    std::set<std::string> m_slicePlanned;
     std::set<std::string> m_eliminationRevealed;
     std::chrono::steady_clock::time_point m_eliminationStart{};
     std::string m_jukeboxContext;
@@ -392,24 +393,34 @@ class SurvivalGameLayer final : public CCLayerColor {
         if(execution.effect!=EliminationEffect::Slice){
             ui::playEliminationFx(execution.effect,target,fall,tile.root->convertToNodeSpace(executor));return;
         }
-        // Slice: the executor's icon floats over, cuts through, then returns.
-        CCNode* ghost=nullptr;
-        if(auto found=m_executorGhosts.find(execution.executorId);found!=m_executorGhosts.end())if(auto alive=found->second.lock())ghost=alive.data();
-        if(!ghost){
-            ghost=iconFor(execution.executorId);if(!ghost){ui::playSliceFx(target,fall,{1,-1.6f});return;}
-            ghost->setScale(target.iconScale*1.15f);ghost->setPosition(convertToNodeSpace(executor));addChild(ghost,60);
-            m_executorGhosts.insert_or_assign(execution.executorId,WeakRef<CCNode>(ghost));
-        }
-        auto slice=[weakSlot=WeakRef<CCNode>(tile.icon),weakRoot=WeakRef<CCNode>(tile.root),weakFace=WeakRef<CCNode>(tile.face?tile.face:tile.icon),target,fall]() mutable{
+        // Slice: the swipe alternates direction per victim (an X rhythm).
+        auto const mirrored=order%2==1;
+        auto slice=[weakSlot=WeakRef<CCNode>(tile.icon),weakRoot=WeakRef<CCNode>(tile.root),weakFace=WeakRef<CCNode>(tile.face?tile.face:tile.icon),target,fall,mirrored]() mutable{
             auto slot=weakSlot.lock();auto root=weakRoot.lock();if(!slot||!root)return;
             if(auto face=weakFace.lock();face&&face->getParent())target.center=root->convertToNodeSpace(face->getParent()->convertToWorldSpace(face->getPosition()));
-            ui::playSliceFx(target,fall,{ui::kSliceLeave.x-ui::kSliceEnter.x,ui::kSliceLeave.y-ui::kSliceEnter.y});
+            ui::playSliceFx(target,fall,ui::sliceSwipe(mirrored));
         };
-        // The cut is owned by this card, so the next victim moving the ghost
-        // on never cancels it (fast or same-frame reveals used to keep only
-        // the last cut).
+        // The cut is owned by this card, so nothing else can cancel it.
         ui::scheduleSliceCut(tile.root,slice);
-        ui::runSliceGhost(ghost,convertToNodeSpace(face),convertToNodeSpace(executor));
+        // The executor's first cut plans its whole route through every card
+        // it executes this round, timed to each card's cut.
+        if(m_slicePlanned.insert(execution.executorId).second)planSliceRoute(execution.executorId,order,executor,target.iconScale);
+    }
+    void planSliceRoute(std::string const& executorId,std::size_t first,CCPoint executor,float iconScale) {
+        if(first>=m_eliminationStarts.size())return;
+        auto const base=m_eliminationStarts[first];
+        std::vector<ui::SliceStop> stops;
+        for(std::size_t i=first;i<m_eliminationOrder.size()&&i<m_eliminationExecutions.size()&&i<m_eliminationStarts.size();++i){
+            auto const& execution=m_eliminationExecutions[i];
+            if(execution.executorId!=executorId||execution.effect!=EliminationEffect::Slice)continue;
+            auto found=m_tiles.find(m_eliminationOrder[i]);
+            if(found==m_tiles.end()||!found->second.root->isVisible())continue; // other page: no motion
+            stops.push_back({convertToNodeSpace(faceWorld(found->second)),(m_eliminationStarts[i]-base)/1000.0f+ui::kSliceCutDelay,i%2==1});
+        }
+        if(stops.empty())return;
+        auto* ghost=iconFor(executorId);if(!ghost)return;
+        ghost->setScale(iconScale*1.15f);ghost->setPosition(convertToNodeSpace(executor));addChild(ghost,60);
+        ui::runSliceRoute(ghost,stops,convertToNodeSpace(executor));
     }
     void stepEliminations(std::chrono::steady_clock::time_point now) {
         auto const elapsed=std::chrono::duration_cast<std::chrono::milliseconds>(now-m_eliminationStart).count()-SurvivalBeforeEliminationMilliseconds;
@@ -459,7 +470,7 @@ class SurvivalGameLayer final : public CCLayerColor {
         for(auto const& p:completed["players"].asArray().unwrapOr(std::vector<matjson::Value>{}))
             effectPlayers.push_back({p["participantId"].asString().unwrapOr(""),p["name"].asString().unwrapOr(""),static_cast<int>(p["rank"].asInt().unwrapOr(0)),
                 p["lp"].asDouble().unwrapOr(0),eliminationEffectFromCode(p["eliminationEffect"].asString().unwrapOr("DEFAULT"))});
-        m_eliminationExecutions=survivalEliminationExecutions(effectPlayers,m_eliminationOrder);
+        m_eliminationExecutions=survivalEliminationExecutions(effectPlayers,m_eliminationOrder);m_slicePlanned.clear();
         showParticipants(preview,false);
         auto const alreadyPresented=key==Mod::get()->getSavedValue<std::string>("survival-elimination-animation");
         if(alreadyPresented)for(std::size_t i=0;i<m_eliminationOrder.size();++i)revealElimination(m_eliminationOrder[i],false,i);
