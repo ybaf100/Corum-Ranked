@@ -38,16 +38,16 @@ CCNode* rankChip(int rank) {
 }
 }
 
-TierProgressBar* TierProgressBar::create(TierProgressView view, float width, std::string const& promotionTarget) {
+TierProgressBar* TierProgressBar::create(TierProgressView view, float width, std::string const& promotionTarget, bool compact) {
     auto* node = new TierProgressBar;
-    if (node->init(std::move(view), width, promotionTarget)) { node->autorelease();return node; }
+    if (node->init(std::move(view), width, promotionTarget, compact)) { node->autorelease();return node; }
     delete node;return nullptr;
 }
 
-bool TierProgressBar::init(TierProgressView view, float width, std::string const& promotionTarget) {
+bool TierProgressBar::init(TierProgressView view, float width, std::string const& promotionTarget, bool compact) {
     if (!CCNode::init()) return false;
     setID("ranked-tier-progress"_spr);
-    m_view = std::move(view);m_width = width;
+    m_view = std::move(view);m_width = width;m_compact = compact;
     m_tone = tierColor(m_view.tier);
     m_labels = buildLabels(m_view, promotionTarget);addChild(m_labels, 3);
     // Receives the panel fade only (the labels may be dimmed by the bar itself).
@@ -68,7 +68,10 @@ CCNode* TierProgressBar::buildLabels(TierProgressView const& view, std::string c
     auto const left = -width / 2.0f, right = width / 2.0f;
     auto const tier = view.tier;
     auto const tone = tierColor(tier);
-    // Top row: own badge and tier, then the next tier (or rank) on the right.
+    // Top row: own badge and tier, then the next tier (or rank) on the right
+    // (left out when compact: the mode card already shows the emblem and tier).
+    auto const row = m_compact ? -11.0f : -14.0f;
+    if (!m_compact) {
     auto* badge = createAnimatedRankBadge(tier, {18, 18}, RankBadgeDisplay::Matched);
     badge->setPosition({left + 9.0f, 11.0f});root->addChild(badge, 3);
     auto* name = label(rankTierDisplay(tier), .25f, {left + 21.0f, 11.0f}, tone, FontWeight::Black);
@@ -89,6 +92,7 @@ CCNode* TierProgressBar::buildLabels(TierProgressView const& view, std::string c
     if (!next.empty()) {
         auto* nextLabel = label(next, .20f, {nextX, 11.0f}, TextMuted, FontWeight::ExtraBold);
         nextLabel->setAnchorPoint({1.0f, 0.5f});fitMenuLabelWidth(nextLabel, width * .34f, .20f, .12f);root->addChild(nextLabel, 4);
+    }
     }
     // Bottom row: what is left, and the score (or the series marks).
     std::string caption, score;ccColor3B captionColor = Gold;
@@ -113,11 +117,11 @@ CCNode* TierProgressBar::buildLabels(TierProgressView const& view, std::string c
         || view.kind == TierProgressKind::RankChase)
         score = fmt::format("{} / {} LP", view.score, view.maximum);
     else if (view.kind != TierProgressKind::Promotion) score = fmt::format("{} LP", view.score);
-    auto* captionLabel = label(caption, .21f, {left, -14.0f}, captionColor, FontWeight::ExtraBold);
+    auto* captionLabel = label(caption, .21f, {left, row}, captionColor, FontWeight::ExtraBold);
     captionLabel->setAnchorPoint({0.0f, 0.5f});fitMenuLabelWidth(captionLabel, width * .62f, .21f, .13f);root->addChild(captionLabel, 4);
     if (!m_caption) m_caption = captionLabel;
     if (!score.empty()) {
-        auto* scoreLabel = label(score, .18f, {right, -14.0f}, TextMuted, FontWeight::SemiBold);
+        auto* scoreLabel = label(score, .18f, {right, row}, TextMuted, FontWeight::SemiBold);
         scoreLabel->setAnchorPoint({1.0f, 0.5f});fitMenuLabelWidth(scoreLabel, width * .36f, .18f, .11f);root->addChild(scoreLabel, 4);
     }
     if (view.kind == TierProgressKind::Promotion) {
@@ -127,7 +131,7 @@ CCNode* TierProgressBar::buildLabels(TierProgressView const& view, std::string c
             auto const x = right - 4.0f - static_cast<float>(games - 1 - i) * 10.0f;
             auto const result = i < static_cast<int>(view.promotionResults.size()) ? view.promotionResults[static_cast<std::size_t>(i)] : std::string();
             auto const accent = result == "WIN" ? Green : result.empty() ? TextMuted : Red;
-            auto* mark = surface({8, 8}, {x, -14.0f}, accent, result.empty() ? Ink : SurfaceSoft, 255, !result.empty());
+            auto* mark = surface({8, 8}, {x, row}, accent, result.empty() ? Ink : SurfaceSoft, 255, !result.empty());
             root->addChild(mark, 4);
         }
     }

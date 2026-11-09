@@ -462,7 +462,7 @@ test('equipped title stays separate from the shared streak/promotion/warning sta
     assert.match(lobby, /equippedTitle->setID\("ranked-profile-equipped-title"_spr\)/);
     assert.match(lobby, /addRankStatus\(profile/);
     // The title sits at -68, one line lower while a Survival series shows its requirement.
-    assert.match(lobby, /leftCenter\.y - \(survival && profile\.promotion\.active && view\.survival\.loaded \? 76\.0f : 68\.0f\)/);
+    assert.match(lobby, /leftCenter\.y - \(cardBar \? 64\.0f : survival && profile\.promotion\.active && view\.survival\.loaded \? 76\.0f : 68\.0f\)/);
     assert.match(lobby, /addPlacementProgress/);
     const card = popup.slice(popup.indexOf('    void addPlayerCard('), popup.indexOf('    void renderResources('));
     assert.match(card, /addRankStatus\(profile/);

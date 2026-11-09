@@ -177,13 +177,18 @@ int main(){using namespace corum::ranked;
   assert(o.solo.position.x==l.rightX&&o.survival.position.x==l.leftX&&o.panel.sx==l.scale);
   o.step(.25f);float quarterX=o.solo.position.x,quarterSurvivalX=o.survival.position.x,quarterPanelX=o.panel.position.x;
   int quarterSurvivalAlpha=o.survival.real,quarterMenuAlpha=o.panel.real;
-  assert(o.panel.sx==l.scale&&o.panel.position.x>l.leftX-94*l.scale&&o.panel.position.x<l.rightX-94*l.scale);
-  if(mode==RankedMode::SoloRanked)assert(o.survival.position.x>l.leftX&&o.survival.real==255&&o.panel.real==0);
-  else assert(o.survival.position.x==l.leftX&&o.panel.real==255);
-  if(mode==RankedMode::SoloRanked)assert(quarterX<l.rightX&&quarterX>l.leftX);else assert(quarterX==l.rightX);
+  // Fade out first: nothing has moved yet, the leaving card is fading in place, the menu is not shown.
+  assert(o.panel.sx==l.scale&&std::abs(o.panel.position.x-(l.rightX-94*l.scale))<.001f&&o.panel.real==0);
+  if(mode==RankedMode::SoloRanked)assert(o.survival.position.x==l.leftX&&o.survival.real>0&&o.survival.real<255);
+  else assert(o.survival.position.x==l.leftX&&o.survival.real==255&&o.solo.real>0&&o.solo.real<255);
+  assert(quarterX==l.rightX);
   assert(!o.m_modeTransition.back()&&!o.m_modeTransition.select(mode));
   o.step(.5f);assert(!o.panelMenu.touch);
-  if(mode==RankedMode::SoloRanked){assert(std::abs(o.solo.position.x-o.survival.position.x)<.001f);assert(o.survival.real>=127&&o.survival.real<=128&&o.panel.real>=127&&o.panel.real<=128);}
+  // Then the move: the leaving card is gone and the menu has not appeared; Solo slides.
+  if(mode==RankedMode::SoloRanked)assert(o.solo.position.x>l.leftX&&o.solo.position.x<l.rightX&&o.survival.real==0&&o.panel.real==0);
+  else assert(o.solo.real==0&&o.panel.real==0);
+  o.step(.85f);assert(o.panel.real>0&&o.panel.real<255&&std::abs(o.panel.position.x-(l.rightX-94*l.scale))<.001f);
+  if(mode==RankedMode::SoloRanked)assert(o.solo.position.x==l.leftX);
   o.step(1);
   assert(!o.m_modeTransition.moving()&&o.menu.touch&&o.panelMenu.touch&&!o.survivalMenu.touch&&!o.soloMenu.touch);
   assert(o.panel.sx==l.scale&&o.panel.real==255);
@@ -214,7 +219,7 @@ test('mode lobby owns Cocos actions and defers full UI replacement while moving'
  const popup=read('src/RankedPopup.cpp');
  const animate=method(popup,'    void animateModeLobby(');
  assert.match(animate,/ModeLobbySlide::create\(duration,m_lobbySurvival,m_lobbySolo,layout,mode,opening\)/);
- assert.match(animate,/CCEaseSineInOut::create\(motion\)/);
+ assert.match(animate,/CCSequence::create\(motion, CallFuncExt::create/);assert.match(animate,/constexpr float duration = corum::ranked::ModeLobbySeconds;/);
  assert.doesNotMatch(animate,/CCScaleTo|CCMoveTo|removeAllChildren/);
  assert.match(animate,/setZOrder\(5\)/);
  assert.match(method(popup,'    bool prepareUiTransition('),/if \(m_modeTransition.moving\(\) \|\| \(!matched && m_queueAnimating\)\).*return false/);

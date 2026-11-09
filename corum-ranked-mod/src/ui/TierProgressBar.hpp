@@ -23,11 +23,13 @@ class TierProgressBar final : public cocos2d::CCNode {
     TierProgressView m_from;
     float m_anim = 0.0f;
     bool m_animating = false, m_up = true, m_tierChange = false;
-    bool init(TierProgressView view, float width, std::string const& promotionTarget);
+    // Compact (lobby mode card): no badge/name row, only the bar and its caption.
+    bool m_compact = false;
+    bool init(TierProgressView view, float width, std::string const& promotionTarget, bool compact);
     cocos2d::CCNode* buildLabels(TierProgressView const& view, std::string const& promotionTarget);
     void redraw();
 public:
-    static TierProgressBar* create(TierProgressView view, float width, std::string const& promotionTarget = {});
+    static TierProgressBar* create(TierProgressView view, float width, std::string const& promotionTarget = {}, bool compact = false);
     void update(float dt) override;
     void animateFrom(TierProgressView from, bool up);
 };

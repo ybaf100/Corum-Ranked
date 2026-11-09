@@ -47,6 +47,13 @@ struct ModeLobbyFrame {
     float survivalX, soloX, menuX;
     int survivalOpacity, soloOpacity, menuOpacity, entryOpacity;
 };
+/** Fade out, move, fade in: what leaves fades out in place before anything
+ * moves, the selected card then slides, and what arrives fades in at its
+ * final place. Closing plays the same frames backwards. */
+inline constexpr float ModeLobbyFadeOutEnd = 0.29f;  // Solo: 0.18 s of 0.62 s
+inline constexpr float ModeLobbyFadeInStart = 0.71f; // Solo: the last 0.18 s
+inline constexpr float ModeLobbySurvivalOutEnd = 0.35f, ModeLobbySurvivalInStart = 0.55f;
+inline constexpr float ModeLobbySeconds = 0.62f;
 inline ModeLobbyFrame modeLobbyFrame(ModeLobbyLayout const& layout, RankedMode mode, float progress) {
     auto const p = std::clamp(progress,0.0f,1.0f);
     auto const mix = [](float from,float to,float t) { return from + (to-from)*t; };
@@ -55,17 +62,17 @@ inline ModeLobbyFrame modeLobbyFrame(ModeLobbyLayout const& layout, RankedMode m
         return t*t*(3.0f-2.0f*t);
     };
     auto const opacity = [](float v) { return static_cast<int>(std::lround(255.0f*v)); };
-    auto const menuX = mix(layout.leftX,layout.rightX,p);
     if (mode == RankedMode::SoloRanked) {
-        // Both cards cross at the center. The outgoing Survival card and the
-        // incoming menu follow the same path and exchange content at crossing.
-        auto const swap = fade(0.42f,0.58f);
-        return {menuX,mix(layout.rightX,layout.leftX,p),menuX,
-            opacity(1-swap),255,opacity(swap),opacity(1-fade(0,0.25f))};
+        // Survival and the Solo entry controls fade out in place; then the
+        // Solo card slides to the left; then the menu fades in on the right.
+        auto const out = fade(0,ModeLobbyFadeOutEnd);
+        auto const move = fade(ModeLobbyFadeOutEnd,ModeLobbyFadeInStart);
+        return {layout.leftX,mix(layout.rightX,layout.leftX,move),layout.rightX,
+            opacity(1-out),255,opacity(fade(ModeLobbyFadeInStart,1)),opacity(1-out)};
     }
-    // The menu emerges from behind the stationary Survival card and covers
-    // Solo on the right. Reverse uses exactly the same positions and opacity.
-    return {layout.leftX,layout.rightX,menuX,255,opacity(1-fade(0.4f,0.95f)),255,
-        opacity(1-fade(0,0.25f))};
+    // Survival stays: Solo and the entry controls fade out in place, then the
+    // menu fades in where Solo was.
+    auto const out = fade(0,ModeLobbySurvivalOutEnd);
+    return {layout.leftX,layout.rightX,layout.rightX,255,opacity(1-out),opacity(fade(ModeLobbySurvivalInStart,1)),opacity(1-out)};
 }
 } // namespace corum::ranked

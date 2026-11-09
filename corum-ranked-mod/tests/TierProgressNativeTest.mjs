@@ -44,7 +44,7 @@ test('Survival promotion plays its tier motion first: promotion -> podium -> sco
 });
 test('lobby animates any LP change since the last visit: digit roll, tier bar, emblem hand-over',()=>{
  const popup=readFileSync(join(root,'src/RankedPopup.cpp'),'utf8'),motion=readFileSync(join(root,'src/ui/LobbyScoreTransition.cpp'),'utf8');
- assert.match(popup,/readSeen\("card", survival\)/);assert.match(popup,/writeSeen\("bar", survival, nowTier, nowLp\)/);
+ assert.match(popup,/readSeen\("card", survival\)/);assert.match(popup,/auto const\* what = compact \? "cardbar" : "bar";/);assert.match(popup,/writeSeen\(what, survival, nowTier, nowLp\)/);
  assert.match(popup,/RollingNumber::create\(seen\.lp, view\.profileScore, "LP"/);
  assert.match(popup,/LobbyTierTransition::create\(group, oldEmblem, emblem, oldTier, tier, bloom, up\)/);
  assert.match(popup,/bar->animateFrom\(std::move\(from\), up\)/);
@@ -88,4 +88,15 @@ test('tier bar draws the thin gold / Mythic frame with a travelling gloss and a 
  assert.match(bar,/if \(style == TierBarStyle::Elite\) \{[\s\S]{0,500}mythicPastel/);
  assert.match(bar,/clockwiseBorderStroke\(fx1 - fx0, fy1 - fy0, m_time \/ 3\.0,/);
  assert.match(bar,/std::fmod\(m_time \/ 2\.4, 1\.0\)/);
+});
+
+test('lobby mode card shows a compact tier bar (bar and caption) where it has room',()=>{
+ const popup=readFileSync(join(root,'src/RankedPopup.cpp'),'utf8');
+ const card=popup.slice(popup.indexOf('    void renderModeCard('),popup.indexOf('    struct SeenScore {'));
+ assert.match(card,/auto const cardBar = !placement && !profile\.promotion\.active && \(survival \? source\.survival\.loaded : view\.profileScoreVisible\)/);
+ assert.match(card,/cardBarKind != corum::ranked::TierProgressKind::Promotion/);
+ assert.match(card,/if \(cardBar\) addTierProgress\(source, survival, \{leftCenter\.x, leftCenter\.y - \(hasTitle \? 75\.0f : 70\.0f\)\}, 150\.0f, true\);/);
+ assert.match(card,/leftCenter\.y - \(cardBar && hasTitle \? 97\.0f : 92\.0f\)/);
+ const bar=readFileSync(join(root,'src/ui/TierProgressBar.cpp'),'utf8');
+ assert.match(bar,/auto const row = m_compact \? -11\.0f : -14\.0f;/);assert.match(bar,/if \(!m_compact\) \{/);
 });

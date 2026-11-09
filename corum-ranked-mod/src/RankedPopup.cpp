@@ -2453,11 +2453,19 @@ class CorumRankedLayer final : public CCLayerColor {
             }
         }
         auto const hasTitle = view.achievements.equippedTitle.active;
+        // A compact tier bar (bar and caption) under the LP where the card has
+        // room: not during placement or a promotion series (their marks sit
+        // there) or while Survival is syncing. With a title, the title moves up
+        // a little and the record down.
+        auto const cardBarKind = tierProgressFor(source, survival).kind;
+        auto const cardBar = !placement && !profile.promotion.active && (survival ? source.survival.loaded : view.profileScoreVisible)
+            && cardBarKind != corum::ranked::TierProgressKind::Hidden && cardBarKind != corum::ranked::TierProgressKind::Promotion;
+        if (cardBar) addTierProgress(source, survival, {leftCenter.x, leftCenter.y - (hasTitle ? 75.0f : 70.0f)}, 150.0f, true);
         if (hasTitle) {
             auto* equippedTitle = makeLabel(
                 achievementTitleText(view.achievements.equippedTitle),
                 0.20f,
-                {leftCenter.x, leftCenter.y - (survival && profile.promotion.active && view.survival.loaded ? 76.0f : 68.0f)},
+                {leftCenter.x, leftCenter.y - (cardBar ? 64.0f : survival && profile.promotion.active && view.survival.loaded ? 76.0f : 68.0f)},
                 achievementTitleColor(view.achievements.equippedTitle),
                 "semibold"
             );
@@ -2468,7 +2476,7 @@ class CorumRankedLayer final : public CCLayerColor {
         }
 
         auto* record = makeLabel(survival?corum::ranked::survivalRecordText(source.survival.wins,source.survival.losses,corum::ranked::i18n::isKorean()):corum::ranked::matchRecordText(view.profileWins,view.profileLosses,
-            corum::ranked::i18n::isKorean()),0.26f,{leftCenter.x,leftCenter.y - 92.0f},
+            corum::ranked::i18n::isKorean()),0.26f,{leftCenter.x,leftCenter.y - (cardBar && hasTitle ? 97.0f : 92.0f)},
             corum::ranked::ui::TextMuted,"semibold");
         corum::ranked::ui::fitMenuLabelWidth(record,170,0.26f,0.20f);
         record->setID("ranked-profile-record"_spr); m_root->addChild(record,8);
@@ -2548,13 +2556,16 @@ class CorumRankedLayer final : public CCLayerColor {
         progress.style = corum::ranked::tierBarStyle(survival, input.tier, input.ladderTier, input.rank);
         return progress;
     }
-    void addTierProgress(RuntimeView const& view, bool survival, CCPoint at) {
+    // `compact` (lobby mode card): bar and caption only, with its own "seen"
+    // record so the card and the mode panel each animate an LP change once.
+    void addTierProgress(RuntimeView const& view, bool survival, CCPoint at, float width = 166.0f, bool compact = false) {
         auto progress = tierProgressFor(view, survival);
         if (progress.kind == corum::ranked::TierProgressKind::Hidden) return;
         auto const target = survival ? view.survival.profile.promotion.targetTier : view.promotion.targetTier;
-        auto const seen = readSeen("bar", survival);
+        auto const* what = compact ? "cardbar" : "bar";
+        auto const seen = readSeen(what, survival);
         auto const nowTier = progress.tier;auto const nowLp = progress.score;
-        if (auto* bar = corum::ranked::ui::TierProgressBar::create(progress, 166.0f, upper(target))) {
+        if (auto* bar = corum::ranked::ui::TierProgressBar::create(progress, width, upper(target), compact)) {
             bar->setPosition(at);m_root->addChild(bar, 6);
             if (seen.valid && (seen.tier != nowTier || seen.lp != nowLp)) {
                 auto from = tierProgressFor(view, survival, seen);
@@ -2562,7 +2573,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 if (from.kind != corum::ranked::TierProgressKind::Hidden) bar->animateFrom(std::move(from), up);
             }
         }
-        writeSeen("bar", survival, nowTier, nowLp);
+        writeSeen(what, survival, nowTier, nowLp);
     }
 
     void renderModePanel(RuntimeView const& view, corum::ranked::RankedMode mode) {
@@ -2908,7 +2919,8 @@ class CorumRankedLayer final : public CCLayerColor {
     void animateModeLobby(corum::ranked::RankedMode mode, bool opening) {
         updateModeLobbyHeader();
         auto const layout = corum::ranked::modeLobbyLayout(CCDirector::sharedDirector()->getWinSize().width,CCDirector::sharedDirector()->getWinSize().height);
-        constexpr float duration = 0.48f;
+        // Fade out, move, fade in (modeLobbyFrame); linear here, each phase eases itself.
+        constexpr float duration = corum::ranked::ModeLobbySeconds;
         if(m_lobbyHover)m_lobbyHover->setActive(false);
         if(opening && m_lobbyContents) {
             corum::ranked::ui::setModeLobbyOpacity(m_lobbyContents,0);
@@ -2930,7 +2942,7 @@ class CorumRankedLayer final : public CCLayerColor {
         m_lobbyPanel->setVisible(true);
         m_renderedUiKey = presentationKey();
         auto* motion = corum::ranked::ui::ModeLobbySlide::create(duration,m_lobbySurvival,m_lobbySolo,layout,mode,opening);
-        auto* sequence=CCSequence::create(CCEaseSineInOut::create(motion), CallFuncExt::create([weak=WeakRef(this),opening,mode] {
+        auto* sequence=CCSequence::create(motion, CallFuncExt::create([weak=WeakRef(this),opening,mode] {
             auto self=weak.lock();if(!self || !self->getParent())return;
             auto finish=[weak]{if(auto owner=weak.lock();owner && owner->getParent()){
                 owner->m_modeTransition.finish();owner->syncLobbyInput();owner->refreshLobbyHover();}};
