@@ -449,7 +449,7 @@ class SurvivalGameLayer final : public CCLayerColor {
         auto const size=getContentSize();
         auto pileX=size.width/2;
         if(executors.size()>1)pileX=executors.front()==executorId?size.width*.36f:size.width*.64f;
-        ui::runSliceGathering(this,executor,victims,{pileX,size.height*.46f},size.height*.6f);
+        ui::runSliceGathering(this,executor,victims,{pileX,size.height*.46f},size.height*.6f,m_grid);
     }
     void stepEliminations(std::chrono::steady_clock::time_point now) {
         auto const elapsed=std::chrono::duration_cast<std::chrono::milliseconds>(now-m_eliminationStart).count()-SurvivalBeforeEliminationMilliseconds;

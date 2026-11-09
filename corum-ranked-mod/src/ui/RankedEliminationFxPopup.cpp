@@ -19,7 +19,7 @@ constexpr float kRow = 42.0f;
 constexpr float kIconScale = 0.5f;
 // The preview replays the whole 1.55 s elimination window, then waits.
 constexpr float kPreviewLead = 0.3f;
-constexpr float kPreviewLoop = 2.6f;
+constexpr float kPreviewLoop = 3.0f;
 
 std::size_t effectIndex(EliminationEffect effect) {
     for (std::size_t i = 0; i < kEliminationEffects.size(); ++i) if (kEliminationEffects[i] == effect) return i;
@@ -308,7 +308,7 @@ void RankedEliminationFxPopup::executeVictim(std::size_t index) {
         executor.icon = []() -> CCNode* { return PlayerIcon::createLocal(); };
         executor.iconScale = kIconScale;
         auto const size = m_world->getContentSize();
-        runSliceGathering(m_world, executor, victims, {size.width * 0.62f, size.height * 0.55f}, fall);
+        runSliceGathering(m_world, executor, victims, {size.width * 0.62f, size.height * 0.55f}, fall, m_world);
         return;
     }
     // The card turns red as its effect starts.

@@ -27,14 +27,18 @@ float eliminationFxSeconds();
 // `executor` is the executor icon centre in host space (Vortex pulls there).
 void playEliminationFx(EliminationEffect effect, EliminationFxTarget const& target, float fall, cocos2d::CCPoint executor);
 // Slice: the halves split along the swipe direction `swipe` (host space).
-void playSliceFx(EliminationFxTarget const& target, float fall, cocos2d::CCPoint swipe);
+// `finale`: the last cut (bigger slash, wider sparks, slower fall).
+void playSliceFx(EliminationFxTarget const& target, float fall, cocos2d::CCPoint swipe, bool finale = false);
 // The default fall (move, spin, shrink, hide) of a card icon `slot`.
 void playDefaultFall(cocos2d::CCNode* slot, int order, float fall);
 // Slice ("gather and cut"): the executor's icon turns gold and leaves its
 // card; the victims' icons leave their cards one after another (each card
 // turns red as its icon leaves) and gather in one pile; the gold icon then
-// cuts the pile one icon at a time, quickly, swiping back and forth, and
-// flies back to its card. Everything runs on one stage node in `layer`.
+// cuts the pile one player at a time in a few big sweeps (about five cuts per
+// sweep, in blade order) trailed by two afterimages, each cut a white flash,
+// halves popping apart and sparks, the last player after a slow-motion beat
+// with a bigger swing, shockwave ring and flash, and flies back to its card.
+// Everything runs on one stage node in `layer`.
 struct SliceGatherVictim {
     cocos2d::CCNode* slot = nullptr;        // card icon, hidden as it leaves (held weakly)
     cocos2d::CCPoint from;                  // icon centre in layer space
@@ -50,7 +54,8 @@ struct SliceGatherExecutor {
 };
 // Seconds from the start until the gold icon is back home.
 float sliceGatherSeconds(std::size_t victims);
+// `shakeTarget` (the card grid) shakes once per sweep and hard on the finale.
 void runSliceGathering(cocos2d::CCNode* layer, SliceGatherExecutor const& executor,
-    std::vector<SliceGatherVictim> const& victims, cocos2d::CCPoint pile, float fall);
+    std::vector<SliceGatherVictim> const& victims, cocos2d::CCPoint pile, float fall, cocos2d::CCNode* shakeTarget = nullptr);
 
 } // namespace corum::ranked::ui

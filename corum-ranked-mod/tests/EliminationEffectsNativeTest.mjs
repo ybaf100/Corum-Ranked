@@ -83,12 +83,12 @@ test('achievement grade emblem opens the ladder; effect picker previews the sele
  assert.match(frame,/frame\(m_static, m_size, 0, kAchievementFrameWidth,/);
  // Preview: rows select (locked ones too), the stage replays every 2.6 s, the game and the preview share the motion.
  assert.match(picker,/menu_selector\(RankedEliminationFxPopup::onSelect\)/);
- assert.match(picker,/schedule\(schedule_selector\(RankedEliminationFxPopup::previewTick\), kPreviewLoop\)/);
+ assert.match(picker,/schedule\(schedule_selector\(RankedEliminationFxPopup::previewTick\), kPreviewLoop\)/);assert.match(picker,/constexpr float kPreviewLoop = 3\.0f;/);
  assert.match(picker,/survivalEliminationStarts\(m_victims\.size\(\)\)/);
  // Every victim owns its cut: moving the ghost on to the next victim never cancels it.
  // Slice "gather and cut" (game and preview share runSliceGathering).
- assert.match(picker,/runSliceGathering\(m_world, executor, victims,/);assert.match(picker,/executor\.slot = m_executorIcon;/);
- assert.match(layer,/ui::runSliceGathering\(this,executor,victims,\{pileX,size\.height\*\.46f\},size\.height\*\.6f\);/);
+ assert.match(picker,/runSliceGathering\(m_world, executor, victims, \{size\.width \* 0\.62f, size\.height \* 0\.55f\}, fall, m_world\);/);assert.match(picker,/executor\.slot = m_executorIcon;/);
+ assert.match(layer,/ui::runSliceGathering\(this,executor,victims,\{pileX,size\.height\*\.46f\},size\.height\*\.6f,m_grid\);/);
  // Held cards turn red only when their icon leaves for the pile.
  assert.match(layer,/if\(m_sliceHeld\.contains\(id\)\)return;/);
  assert.match(layer,/owner->m_sliceHeld\.erase\(id\);owner->m_eliminationRevealed\.insert\(id\);/);
@@ -98,10 +98,14 @@ test('achievement grade emblem opens the ladder; effect picker previews the sele
  assert.match(layer,/pileX=executors\.front\(\)==executorId\?size\.width\*\.36f:size\.width\*\.64f;/);
  const fx=readFileSync(join(root,'src/ui/SurvivalEliminationFx.cpp'),'utf8');
  const gather=fx.slice(fx.indexOf('void runSliceGathering'),fx.indexOf('void playEliminationFx'));
- // Gold executor, staggered departures over 0.4 s, first cut at 1.0 s, cut gap clamped 0.035..0.12 s, home again.
- assert.match(gather,/player->setGold\(true\)/);assert.match(fx,/constexpr float kGatherSpread = 0\.40f;/);assert.match(fx,/constexpr float kGatherCutStart = 1\.0f;/);
- assert.match(fx,/std::clamp\(0\.9f \/ static_cast<float>\(std::max<std::size_t>\(1, victims\)\), 0\.035f, 0\.12f\)/);
- assert.match(gather,/CCMoveTo::create\(kGatherReturn, executor\.home\)/);
+ // Gold executor, departures over 0.55 s, first sweep at 1.3 s, about five cuts per big sweep
+ // (at most six sweeps), a final swing after a 0.3 s beat, afterimages, shakes and a finale burst.
+ assert.match(gather,/player->setGold\(true\)/);assert.match(fx,/constexpr float kGatherSpread = 0\.55f;/);assert.match(fx,/constexpr float kGatherCutStart = 1\.3f;/);
+ assert.match(fx,/plan\.sweeps = regular == 0 \? 0 : std::min<std::size_t>\(6, \(regular \+ 4\) \/ 5\);/);
+ assert.match(fx,/constexpr float kGatherFinalBeat = 0\.30f;/);assert.match(fx,/constexpr float kGatherBudget = 3\.45f;/);
+ assert.match(fx,/CCMoveTo::create\(kGatherReturn, executor\.home\)/);
+ assert.match(gather,/player->setIconOpacity\(opacity\)/);assert.match(gather,/finaleBurst\(stage, target\.center\)/);
+ assert.match(gather,/shakeNode\(node\.data\(\), shakeBase, 10\.0f, 7\)/);
  // Simplified bolt: short (46 before icon scale), thin, four sparks, no scale-up bump.
  assert.match(fx,/auto const top = 46\.0f;/);assert.match(fx,/sparks\(target\.host, target\.center, 4,/);assert.doesNotMatch(fx,/CCScaleTo::create\(0\.1f, 1\.25f\)/);
  // Season note under the list; the both-modes requirement wording.
@@ -110,9 +114,9 @@ test('achievement grade emblem opens the ladder; effect picker previews the sele
 });
 
 test('Slice gathering for a 64-player round fits the elimination window plus the hold',()=>{
- // 24 eliminated: 1.0 s to the first cut, 24 cuts 0.0375 s apart, 0.15 s + 0.35 s home.
- const gap=Math.min(0.12,Math.max(0.035,0.9/24));const total=1.0+gap*24+0.15+0.35;
- assert.ok(Math.abs(total-2.4)<1e-9);assert.ok(total<=1.55+2.0);
- // 48 eliminated (the worst 64-player case): still inside.
- const gap48=Math.min(0.12,Math.max(0.035,0.9/48));assert.ok(1.0+gap48*48+0.5<=3.55);
+ // Mirrors gatherPlan: sweeps = min(6, ceil((n-1)/5)), sweep = min(0.26, (3.45-1.3-0.3-0.5)/sweeps).
+ const total=(n)=>{const regular=n-1;const sweeps=regular===0?0:Math.min(6,Math.ceil(regular/5));
+  const sweep=sweeps?Math.min(0.26,(3.45-1.3-0.3-0.15-0.35)/sweeps):0.26;return 1.3+sweeps*sweep+0.3+0.15+0.35;};
+ assert.ok(Math.abs(total(24)-3.4)<1e-9);
+ for(const n of [1,2,3,8,24,40,48,63])assert.ok(total(n)<=1.55+2.0+1e-9,`${n} eliminated`);
 });

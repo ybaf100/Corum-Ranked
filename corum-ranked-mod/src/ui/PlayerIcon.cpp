@@ -103,6 +103,10 @@ void PlayerIcon::setGold(bool gold) {
     else if (m_local) applyLocalCosmetics();
 }
 
+void PlayerIcon::setIconOpacity(GLubyte opacity) {
+    if (m_icon) m_icon->setOpacity(opacity);
+}
+
 void PlayerIcon::applyGold() {
     if (!m_gold || !m_icon) return;
     m_icon->setColors({255, 207, 74}, {255, 246, 200});

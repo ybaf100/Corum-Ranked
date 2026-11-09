@@ -25,6 +25,8 @@ public:
     void userInfoChanged(GJUserScore* score) override;
     // Paint the icon gold (Slice executor); survives a late remote icon load.
     void setGold(bool gold);
+    // Opacity of the drawn icon (afterimage trails).
+    void setIconOpacity(GLubyte opacity);
 
 private:
     bool initLocal();

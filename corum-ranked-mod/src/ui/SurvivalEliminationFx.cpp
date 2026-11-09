@@ -116,29 +116,32 @@ void bolt(CCNode* host, CCPoint center, int order, float iconScale) {
 
 float eliminationFxSeconds() { return SurvivalEliminationFallMilliseconds / 1000.0f; }
 
-void playSliceFx(EliminationFxTarget const& target, float fall, CCPoint swipe) {
+void playSliceFx(EliminationFxTarget const& target, float fall, CCPoint swipe, bool finale) {
     if (!target.slot || !target.host) return;
     target.slot->setVisible(false);
     auto const d = unit(swipe), n = CCPoint{-d.y, d.x};
     auto const r = 60.0f;
     CCPoint const p1{d.x * r, d.y * r}, p2{-d.x * r, -d.y * r};
-    auto const duration = eliminationFxSeconds();
+    auto const duration = finale ? 0.95f : 0.65f;
+    // The hit: a white flash on the icon, then the halves pop apart and spin away.
+    flash(target.host, target.center, finale ? 22.0f : 13.0f, {1, 1, 1, 0.9f});
     for (int side : {1, -1}) {
         auto const off = CCPoint{n.x * r * static_cast<float>(side), n.y * r * static_cast<float>(side)};
         auto* half = iconPiece(target, {p1, p2, {p2.x + off.x, p2.y + off.y}, {p1.x + off.x, p1.y + off.y}});
         auto const push = CCPoint{n.x * 16.0f * static_cast<float>(side), n.y * 16.0f * static_cast<float>(side)};
-        // Push apart, hold a beat so the cut reads, then fall.
+        auto const spin = side > 0 ? 200.0f : -190.0f;
         half->runAction(CCSequence::create(
-            CCEaseSineOut::create(CCMoveBy::create(0.12f, push)),
-            CCDelayTime::create(0.1f),
+            CCSpawn::create(CCEaseSineOut::create(CCMoveBy::create(0.065f, push)), CCRotateBy::create(0.065f, spin * 0.11f),
+                CCScaleTo::create(0.065f, target.iconScale * 1.08f), nullptr),
             CCSpawn::create(
-                CCEaseSineIn::create(CCMoveBy::create(duration - 0.22f, {push.x * 1.4f, -fall})),
-                CCRotateBy::create(duration - 0.22f, side > 0 ? 70.0f : -70.0f),
-                CCScaleTo::create(duration - 0.22f, 0.45f), nullptr),
+                CCEaseSineIn::create(CCMoveBy::create(duration - 0.065f, {push.x * 3.4f, -fall})),
+                CCRotateBy::create(duration - 0.065f, spin),
+                CCScaleTo::create(duration - 0.065f, target.iconScale * 0.5f), nullptr),
             CCRemoveSelf::create(), nullptr));
     }
-    slashLine(target.host, target.center, d, 84.0f);
-    sparks(target.host, target.center, 5, {255, 240, 190, 255}, 26.0f);
+    slashLine(target.host, target.center, d, finale ? 150.0f : 84.0f);
+    if (finale) slashLine(target.host, target.center, d, 110.0f);
+    sparks(target.host, target.center, 5, {255, 240, 190, 255}, finale ? 58.0f : 28.0f);
 }
 
 void playDefaultFall(CCNode* slot, int order, float fall) {
@@ -151,33 +154,142 @@ void playDefaultFall(CCNode* slot, int order, float fall) {
 }
 
 namespace {
+// Gather and cut timing (seconds from the elimination window start).
 constexpr float kGatherLift = 0.24f;      // gold icon rises out of its card
-constexpr float kGatherSpread = 0.40f;    // victims leave over this span
-constexpr float kGatherTravel = 0.55f;    // each victim's flight to the pile
-constexpr float kGatherCutStart = 1.0f;   // first cut
+constexpr float kGatherSpread = 0.55f;    // victims leave over this span
+constexpr float kGatherTravel = 0.70f;    // each victim's flight to the pile
+constexpr float kGatherWindup = 0.24f;    // pull back before the first sweep
+constexpr float kGatherCutStart = 1.3f;   // first sweep
+constexpr float kGatherSweep = 0.26f;     // one big sweep through the pile
+constexpr float kGatherFinalBeat = 0.30f; // slow-motion beat before the last player
+constexpr float kGatherFinalSwing = 0.14f;
 constexpr float kGatherReturn = 0.35f;
-float gatherCutGap(std::size_t victims) {
-    return std::clamp(0.9f / static_cast<float>(std::max<std::size_t>(1, victims)), 0.035f, 0.12f);
+constexpr float kGatherBudget = 3.45f;    // inside the 1.55 s window + 2.0 s hold
+constexpr int kShakeTag = 7481;
+
+struct GatherPlan {
+    std::size_t sweeps = 0;
+    float sweep = kGatherSweep;
+    std::vector<float> cuts; // per victim, in cut order
+    float lastCut = 0.0f;
+};
+
+// One cut per player: about five per big sweep, spread over the middle of
+// the sweep in blade order; the last player gets its own final swing.
+GatherPlan gatherPlan(std::size_t victims) {
+    GatherPlan plan;
+    if (victims == 0) return plan;
+    auto const regular = victims - 1;
+    plan.sweeps = regular == 0 ? 0 : std::min<std::size_t>(6, (regular + 4) / 5);
+    if (plan.sweeps > 0)
+        plan.sweep = std::min(kGatherSweep, (kGatherBudget - kGatherCutStart - kGatherFinalBeat - 0.15f - kGatherReturn) / static_cast<float>(plan.sweeps));
+    for (std::size_t k = 0; k < regular; ++k) {
+        auto const sweep = std::min(plan.sweeps - 1, k * plan.sweeps / regular);
+        auto const first = (sweep * regular + plan.sweeps - 1) / plan.sweeps;
+        auto const next = ((sweep + 1) * regular + plan.sweeps - 1) / plan.sweeps;
+        auto const count = next > first ? next - first : 1;
+        auto const q = count > 1 ? static_cast<float>(k - first) / static_cast<float>(count - 1) : 0.5f;
+        plan.cuts.push_back(kGatherCutStart + static_cast<float>(sweep) * plan.sweep + plan.sweep * (0.2f + 0.6f * q));
+    }
+    plan.lastCut = kGatherCutStart + static_cast<float>(plan.sweeps) * plan.sweep + kGatherFinalBeat;
+    plan.cuts.push_back(plan.lastCut);
+    return plan;
+}
+
+// A short shake of `target` around `base` (stops the previous one first).
+void shakeNode(CCNode* target, CCPoint base, float amplitude, int steps) {
+    if (!target) return;
+    target->stopActionByTag(kShakeTag);
+    target->setPosition(base);
+    auto* actions = CCArray::create();
+    for (int i = 0; i < steps; ++i) {
+        auto const fade = 1.0f - static_cast<float>(i) / static_cast<float>(steps);
+        auto const x = (i % 2 ? amplitude : -amplitude) * fade, y = (i % 3 == 0 ? amplitude : -amplitude) * 0.7f * fade;
+        actions->addObject(CCMoveTo::create(0.03f, {base.x + x, base.y + y}));
+    }
+    actions->addObject(CCMoveTo::create(0.03f, base));
+    auto* sequence = CCSequence::create(actions);
+    sequence->setTag(kShakeTag);
+    target->runAction(sequence);
+}
+
+// The finale: a gold shockwave ring and a short screen flash.
+void finaleBurst(CCNode* stage, CCPoint center) {
+    auto* ring = CCDrawNode::create();
+    constexpr int segments = 40;
+    for (int i = 0; i < segments; ++i) {
+        auto const a0 = 2.0f * kPi * static_cast<float>(i) / segments, a1 = 2.0f * kPi * static_cast<float>(i + 1) / segments;
+        CCPoint q[] {{std::cos(a0) * 14.0f, std::sin(a0) * 14.0f}, {std::cos(a1) * 14.0f, std::sin(a1) * 14.0f},
+            {std::cos(a1) * 17.0f, std::sin(a1) * 17.0f}, {std::cos(a0) * 17.0f, std::sin(a0) * 17.0f}};
+        ring->drawPolygon(q, 4, {1.0f, 0.9f, 0.55f, 0.95f}, 0, {1.0f, 0.9f, 0.55f, 0.95f});
+    }
+    ring->setPosition(center);
+    ring->setScale(0.3f);
+    stage->addChild(ring, 150);
+    ring->runAction(CCSequence::create(CCEaseSineOut::create(CCScaleTo::create(0.5f, 4.2f)), CCRemoveSelf::create(), nullptr));
+    auto const size = stage->getContentSize();
+    auto* white = CCLayerColor::create({255, 248, 224, 0}, size.width, size.height);
+    stage->addChild(white, 300);
+    white->runAction(CCSequence::create(CCFadeTo::create(0.05f, 110), CCFadeTo::create(0.3f, 0), CCRemoveSelf::create(), nullptr));
+}
+
+// Executor motion (the main gold icon, or a trailing afterimage `lag` later).
+CCSequence* executorActions(SliceGatherExecutor const& executor, GatherPlan const& plan, CCPoint pile, float reach, float lag,
+    std::function<void()> done) {
+    auto const scale = executor.iconScale;
+    CCPoint const a{pile.x - 0.8f * reach, pile.y + reach}, b{pile.x + 0.8f * reach, pile.y - reach};
+    CCPoint const fa{pile.x - 0.95f * reach * 1.15f, pile.y + reach * 1.15f}, fb{pile.x + 0.95f * reach * 1.15f, pile.y - reach * 1.15f};
+    auto* actions = CCArray::create();
+    if (lag > 0) actions->addObject(CCDelayTime::create(lag));
+    actions->addObject(CCSpawn::create(CCEaseSineOut::create(CCMoveBy::create(kGatherLift, {0, 18})),
+        CCEaseBackOut::create(CCScaleTo::create(kGatherLift, scale * 1.3f)), nullptr));
+    // Fly over the pile, then wind up to the first sweep's start.
+    auto const windStart = kGatherCutStart - kGatherWindup;
+    actions->addObject(CCSpawn::create(CCEaseSineInOut::create(CCMoveTo::create(windStart - kGatherLift, {pile.x - 0.4f * reach, pile.y + 0.5f * reach})),
+        CCRotateTo::create(windStart - kGatherLift, -20.0f), nullptr));
+    actions->addObject(CCSpawn::create(CCEaseSineIn::create(CCMoveTo::create(kGatherWindup, a)), CCRotateTo::create(kGatherWindup, -45.0f), nullptr));
+    // Big sweeps, alternating, eased in and out so each one reads as a swing.
+    for (std::size_t sweep = 0; sweep < plan.sweeps; ++sweep) {
+        auto const forward = sweep % 2 == 0;
+        actions->addObject(CCSpawn::create(CCEaseSineInOut::create(CCMoveTo::create(plan.sweep, forward ? b : a)),
+            CCRotateTo::create(plan.sweep, forward ? 35.0f : -35.0f), nullptr));
+    }
+    // Final swing: pull back to the far side during the beat, then cut through.
+    auto const atA = plan.sweeps % 2 == 0;
+    auto const from = atA ? fa : fb, to = atA ? fb : fa;
+    auto const beat = std::max(0.05f, kGatherFinalBeat - kGatherFinalSwing / 2.0f);
+    actions->addObject(CCSpawn::create(CCEaseSineOut::create(CCMoveTo::create(beat, from)), CCScaleTo::create(beat, scale * 1.45f),
+        CCRotateTo::create(beat, atA ? -50.0f : 50.0f), nullptr));
+    actions->addObject(CCSpawn::create(CCEaseSineIn::create(CCMoveTo::create(kGatherFinalSwing, to)),
+        CCRotateTo::create(kGatherFinalSwing, atA ? 50.0f : -50.0f), nullptr));
+    actions->addObject(CCDelayTime::create(0.15f));
+    actions->addObject(CCSpawn::create(CCEaseSineInOut::create(CCMoveTo::create(kGatherReturn, executor.home)),
+        CCRotateTo::create(kGatherReturn, 0.0f), CCScaleTo::create(kGatherReturn, scale), nullptr));
+    if (done) actions->addObject(CallFuncExt::create(std::move(done)));
+    actions->addObject(CCRemoveSelf::create());
+    return CCSequence::create(actions);
 }
 } // namespace
 
 float sliceGatherSeconds(std::size_t victims) {
-    return kGatherCutStart + gatherCutGap(victims) * static_cast<float>(victims) + 0.15f + kGatherReturn;
+    auto const plan = gatherPlan(victims);
+    return plan.lastCut + 0.15f + kGatherReturn;
 }
 
 void runSliceGathering(CCNode* layer, SliceGatherExecutor const& executor, std::vector<SliceGatherVictim> const& victims,
-    CCPoint pile, float fall) {
+    CCPoint pile, float fall, CCNode* shakeTarget) {
     if (!layer || victims.empty()) return;
     auto* stage = CCNode::create();
     stage->setContentSize(layer->getContentSize());
     layer->addChild(stage, 60);
     auto const n = victims.size();
-    auto const gap = gatherCutGap(n);
-    // Swipe ends: top-left <-> bottom-right of the pile.
-    CCPoint const a{pile.x - 24.0f, pile.y + 32.0f}, b{pile.x + 24.0f, pile.y - 32.0f};
+    auto const plan = gatherPlan(n);
+    // Sweep reach from the icon size (cards scale with the grid).
+    auto const reach = std::clamp(executor.iconScale / 0.6f, 0.6f, 1.4f) * 62.0f;
+    std::optional<WeakRef<CCNode>> shake;
+    CCPoint shakeBase{};
+    if (shakeTarget) { shake.emplace(shakeTarget); shakeBase = shakeTarget->getPosition(); }
 
-    // Victim copies sit on their cards until they leave for the pile.
-    std::vector<CCNode*> copies;
     for (std::size_t k = 0; k < n; ++k) {
         auto const& victim = victims[k];
         auto* copy = victim.icon ? victim.icon() : nullptr;
@@ -186,7 +298,6 @@ void runSliceGathering(CCNode* layer, SliceGatherExecutor const& executor, std::
         copy->setPosition(victim.from);
         // The first to be cut lies on top; cut halves (z 20) fall above the pile.
         stage->addChild(copy, -static_cast<int>(std::min<std::size_t>(k, 200)));
-        copies.push_back(copy);
         auto const leave = 0.05f + kGatherSpread * static_cast<float>(k) / static_cast<float>(n);
         auto const jitter = CCPoint{static_cast<float>(static_cast<int>(k * 37 % 23) - 11), static_cast<float>(static_cast<int>(k * 53 % 19) - 9)};
         auto const spin = static_cast<float>(static_cast<int>(k * 29 % 40) - 20);
@@ -203,45 +314,51 @@ void runSliceGathering(CCNode* layer, SliceGatherExecutor const& executor, std::
                 CCScaleTo::create(kGatherTravel, victim.iconScale * 0.9f),
                 CCRotateBy::create(kGatherTravel, spin), nullptr),
             nullptr));
-        // The cut: the copy splits along the current swipe.
-        auto const cutAt = kGatherCutStart + gap * static_cast<float>(k);
-        auto const forward = k % 2 == 0;
+        // The cut, along the sweep the blade is in.
+        auto const cutAt = plan.cuts[k];
+        auto const last = k + 1 == n;
+        std::size_t sweep = plan.sweeps;
+        if (!last && plan.sweeps > 0)
+            sweep = std::min(plan.sweeps - 1, static_cast<std::size_t>(std::max(0.0f, (cutAt - kGatherCutStart) / plan.sweep)));
+        auto const forward = sweep % 2 == 0;
         EliminationFxTarget target{copy, stage, {}, victim.iconScale * 0.9f, victim.icon, static_cast<int>(k)};
-        stage->runAction(CCSequence::create(CCDelayTime::create(cutAt), CallFuncExt::create([target, copy, fall, forward, a, b]() mutable {
+        stage->runAction(CCSequence::create(CCDelayTime::create(cutAt), CallFuncExt::create([target, copy, fall, forward, last, stage]() mutable {
             target.center = copy->getPosition();
-            auto const swipe = forward ? CCPoint{b.x - a.x, b.y - a.y} : CCPoint{a.x - b.x, a.y - b.y};
-            playSliceFx(target, fall, swipe);
+            playSliceFx(target, fall, forward ? CCPoint{0.8f, -1.0f} : CCPoint{-0.8f, 1.0f}, last);
+            if (last) finaleBurst(stage, target.center);
         }), nullptr));
     }
+    // One shake per sweep, a big one on the final swing.
+    for (std::size_t sweep = 0; sweep < plan.sweeps; ++sweep) {
+        stage->runAction(CCSequence::create(CCDelayTime::create(kGatherCutStart + plan.sweep * (static_cast<float>(sweep) + 0.25f)),
+            CallFuncExt::create([shake, shakeBase]() mutable { if (shake) if (auto node = shake->lock()) shakeNode(node.data(), shakeBase, 4.0f, 3); }), nullptr));
+    }
+    stage->runAction(CCSequence::create(CCDelayTime::create(plan.lastCut),
+        CallFuncExt::create([shake, shakeBase]() mutable { if (shake) if (auto node = shake->lock()) shakeNode(node.data(), shakeBase, 10.0f, 7); }), nullptr));
 
-    // The executor: gold, out of its card, over the pile, cutting, home.
+    // The executor: gold, out of its card, over the pile, sweeping, home.
+    // Two gold afterimages trail it.
     if (auto* ghost = executor.icon ? executor.icon() : nullptr) {
         if (auto* player = typeinfo_cast<PlayerIcon*>(ghost)) player->setGold(true);
-        auto const scale = executor.iconScale;
-        ghost->setScale(scale);
+        ghost->setScale(executor.iconScale);
         ghost->setPosition(executor.home);
         stage->addChild(ghost, 200);
         std::optional<WeakRef<CCNode>> home;
         if (executor.slot) { home.emplace(executor.slot); executor.slot->setVisible(false); }
-        auto* actions = CCArray::create();
-        actions->addObject(CCSpawn::create(CCEaseSineOut::create(CCMoveBy::create(kGatherLift, {0, 18})),
-            CCEaseBackOut::create(CCScaleTo::create(kGatherLift, scale * 1.3f)), nullptr));
-        auto const firstSwipe = kGatherCutStart - gap / 2.0f;
-        actions->addObject(CCSpawn::create(CCEaseSineInOut::create(CCMoveTo::create(firstSwipe - kGatherLift, a)),
-            CCRotateTo::create(firstSwipe - kGatherLift, -20.0f), nullptr));
-        for (std::size_t k = 0; k < n; ++k) {
-            auto const forward = k % 2 == 0;
-            actions->addObject(CCSpawn::create(CCMoveTo::create(gap, forward ? b : a),
-                CCRotateTo::create(gap, forward ? 24.0f : -24.0f), nullptr));
+        ghost->runAction(executorActions(executor, plan, pile, reach, 0.0f,
+            [home]() mutable { if (home) if (auto node = home->lock()) node->setVisible(true); }));
+        int trailZ = 199;
+        for (auto const [lag, opacity] : {std::pair<float, GLubyte>{0.035f, 100}, std::pair<float, GLubyte>{0.07f, 48}}) {
+            auto* trail = executor.icon();
+            if (!trail) continue;
+            if (auto* player = typeinfo_cast<PlayerIcon*>(trail)) { player->setGold(true); player->setIconOpacity(opacity); }
+            trail->setScale(executor.iconScale);
+            trail->setPosition(executor.home);
+            stage->addChild(trail, trailZ--);
+            trail->runAction(executorActions(executor, plan, pile, reach, lag, {}));
         }
-        actions->addObject(CCDelayTime::create(0.15f));
-        actions->addObject(CCSpawn::create(CCEaseSineInOut::create(CCMoveTo::create(kGatherReturn, executor.home)),
-            CCRotateTo::create(kGatherReturn, 0.0f), CCScaleTo::create(kGatherReturn, scale), nullptr));
-        actions->addObject(CallFuncExt::create([home]() mutable { if (home) if (auto node = home->lock()) node->setVisible(true); }));
-        actions->addObject(CCRemoveSelf::create());
-        ghost->runAction(CCSequence::create(actions));
     }
-    stage->runAction(CCSequence::create(CCDelayTime::create(sliceGatherSeconds(n) + 0.7f), CCRemoveSelf::create(), nullptr));
+    stage->runAction(CCSequence::create(CCDelayTime::create(sliceGatherSeconds(n) + 1.0f), CCRemoveSelf::create(), nullptr));
 }
 
 
