@@ -105,6 +105,8 @@ private:
 
     cocos2d::CCNode* m_toolbar = nullptr;
     cocos2d::CCSize m_toolbarSize;
+    // Width both toolbar rows need without overlap (reset | list, arrows | preset).
+    static constexpr float kToolbarDesignWidth = 500.0f;
     std::vector<ToolbarItem> m_toolbarItems;
     CCMenuItemSpriteExtra* m_visibleButton = nullptr;
     CCMenuItemSpriteExtra* m_smallerButton = nullptr;

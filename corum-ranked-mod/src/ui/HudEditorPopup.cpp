@@ -428,52 +428,59 @@ CCLabelBMFont* HudEditorPopup::toolbarCaption(std::string const& text, CCPoint o
 // approved design: element / size / transparency / 1 px moves, then
 // hide / grid / presets / reset ... list / cancel / save.
 void HudEditorPopup::buildToolbar() {
-    auto const dockW = std::min(m_size.width - 16.0f, std::max(420.0f, m_size.width * 0.80f));
+    // Both rows need kToolbarDesignWidth (the reset button ran under LIST and
+    // the preset label under the arrows on a 455 pt dock). Narrower screens
+    // compress the layout by k instead of overlapping.
+    auto const dockW = std::min(m_size.width - 16.0f, std::max(kToolbarDesignWidth, m_size.width * 0.80f));
+    auto const k = std::min(1.0f, dockW / kToolbarDesignWidth);
     m_toolbarSize = CCSize{dockW, 58.0f};
     m_toolbar = surface(m_toolbarSize, {}, Cyan, Surface, 242, true);
     m_toolbar->setID("hud-editor-toolbar"_spr);
     m_canvas->addChild(m_toolbar, 50);
-    auto const L = -dockW / 2.0f, R = dockW / 2.0f;
+    auto const L0 = -dockW / 2.0f, R0 = dockW / 2.0f;
+    auto L = [&](float a) { return L0 + a * k; };
+    auto R = [&](float a) { return R0 - a * k; };
+    auto W = [&](float w, float h = 20.0f) { return CCSize{w * k, h}; };
     constexpr float top = 13.0f, bottom = -13.0f;
-    CCSize const square {20.0f, 20.0f};
+    auto const square = W(20.0f);
 
-    toolbarButton("<", square, {L + 16.0f, top}, menu_selector(HudEditorPopup::onPrevious), Blue);
-    m_elementName = toolbarCaption("", {L + 62.0f, top + 4.0f}, 64.0f, Text, 0.24f);
-    m_indexLabel = toolbarCaption("", {L + 62.0f, top - 6.0f}, 64.0f, TextMuted, 0.15f);
-    toolbarButton(">", square, {L + 108.0f, top}, menu_selector(HudEditorPopup::onNext), Blue);
+    toolbarButton("<", square, {L(16.0f), top}, menu_selector(HudEditorPopup::onPrevious), Blue);
+    m_elementName = toolbarCaption("", {L(62.0f), top + 4.0f}, 64.0f * k, Text, 0.24f);
+    m_indexLabel = toolbarCaption("", {L(62.0f), top - 6.0f}, 64.0f * k, TextMuted, 0.15f);
+    toolbarButton(">", square, {L(108.0f), top}, menu_selector(HudEditorPopup::onNext), Blue);
 
-    toolbarCaption(i18n::text("hud-size", "SIZE"), {L + 136.0f, top}, 26.0f, TextMuted, 0.18f);
-    m_smallerButton = toolbarButton("-", square, {L + 160.0f, top}, menu_selector(HudEditorPopup::onSmaller), Blue);
-    m_scaleLabel = toolbarCaption("", {L + 186.0f, top}, 30.0f, Gold, 0.24f);
-    m_largerButton = toolbarButton("+", square, {L + 212.0f, top}, menu_selector(HudEditorPopup::onLarger), Blue);
+    toolbarCaption(i18n::text("hud-size", "SIZE"), {L(136.0f), top}, 26.0f * k, TextMuted, 0.18f);
+    m_smallerButton = toolbarButton("-", square, {L(160.0f), top}, menu_selector(HudEditorPopup::onSmaller), Blue);
+    m_scaleLabel = toolbarCaption("", {L(186.0f), top}, 30.0f * k, Gold, 0.24f);
+    m_largerButton = toolbarButton("+", square, {L(212.0f), top}, menu_selector(HudEditorPopup::onLarger), Blue);
 
-    toolbarCaption(i18n::text("hud-transparency", "TRANSPARENCY"), {L + 244.0f, top}, 34.0f, TextMuted, 0.18f);
-    m_opaqueButton = toolbarButton("-", square, {L + 274.0f, top}, menu_selector(HudEditorPopup::onLessTransparent), Blue);
-    m_transparencyLabel = toolbarCaption("", {L + 300.0f, top}, 30.0f, Gold, 0.24f);
-    m_transparentButton = toolbarButton("+", square, {L + 326.0f, top}, menu_selector(HudEditorPopup::onMoreTransparent), Blue);
+    toolbarCaption(i18n::text("hud-transparency", "TRANSPARENCY"), {L(244.0f), top}, 34.0f * k, TextMuted, 0.18f);
+    m_opaqueButton = toolbarButton("-", square, {L(274.0f), top}, menu_selector(HudEditorPopup::onLessTransparent), Blue);
+    m_transparencyLabel = toolbarCaption("", {L(300.0f), top}, 30.0f * k, Gold, 0.24f);
+    m_transparentButton = toolbarButton("+", square, {L(326.0f), top}, menu_selector(HudEditorPopup::onMoreTransparent), Blue);
 
-    arrowButton(0.0f, {L + 356.0f, top}, 0);
-    arrowButton(90.0f, {L + 378.0f, top}, 1);
-    arrowButton(-90.0f, {L + 400.0f, top}, 2);
-    arrowButton(180.0f, {L + 422.0f, top}, 3);
-    m_presetLabel = toolbarCaption("", {R - 26.0f, top}, 44.0f, Gold, 0.18f);
+    arrowButton(0.0f, {L(356.0f), top}, 0);
+    arrowButton(90.0f, {L(378.0f), top}, 1);
+    arrowButton(-90.0f, {L(400.0f), top}, 2);
+    arrowButton(180.0f, {L(422.0f), top}, 3);
+    m_presetLabel = toolbarCaption("", {R(26.0f), top}, 44.0f * k, Gold, 0.18f);
 
-    m_visibleButton = toolbarButton(i18n::text("hud-hide", "HIDE"), {50, 20}, {L + 31.0f, bottom},
+    m_visibleButton = toolbarButton(i18n::text("hud-hide", "HIDE"), W(50), {L(31.0f), bottom},
         menu_selector(HudEditorPopup::onToggleVisible), Red, &m_visibleCaption);
-    m_gridButton = toolbarButton(i18n::text("hud-grid-on", "GRID 8PX"), {54, 20}, {L + 88.0f, bottom},
+    m_gridButton = toolbarButton(i18n::text("hud-grid-on", "GRID 8PX"), W(54), {L(88.0f), bottom},
         menu_selector(HudEditorPopup::onGrid), Blue, &m_gridCaption);
     auto const presets = HudPresets;
     for (std::size_t index = 0; index < presets.size(); ++index) {
         toolbarButton(i18n::text(std::string(hudPresetKey(m_mode, presets[index])), std::string(hudPresetFallback(m_mode, presets[index]))),
-            {46, 20}, {L + 146.0f + 47.0f * static_cast<float>(index), bottom}, menu_selector(HudEditorPopup::onPreset), Cyan,
+            W(46), {L(146.0f + 47.0f * static_cast<float>(index)), bottom}, menu_selector(HudEditorPopup::onPreset), Cyan,
             nullptr, static_cast<int>(index));
     }
-    toolbarButton(i18n::text("hud-reset", "RESET"), {46, 20}, {L + 146.0f + 47.0f * 3 + 6.0f, bottom}, menu_selector(HudEditorPopup::onReset), Orange);
-    toolbarButton(i18n::text("hud-list", "LIST"), {42, 20}, {R - 126.0f, bottom}, menu_selector(HudEditorPopup::onList), Gold);
-    toolbarButton(i18n::text("cancel", "CANCEL"), {42, 20}, {R - 80.0f, bottom}, menu_selector(HudEditorPopup::onCancel), Blue);
-    toolbarButton(i18n::text("hud-save", "SAVE"), {50, 20}, {R - 30.0f, bottom}, menu_selector(HudEditorPopup::onSave), Green);
+    toolbarButton(i18n::text("hud-reset", "RESET"), W(46), {L(146.0f + 47.0f * 3 + 6.0f), bottom}, menu_selector(HudEditorPopup::onReset), Orange);
+    toolbarButton(i18n::text("hud-list", "LIST"), W(42), {R(126.0f), bottom}, menu_selector(HudEditorPopup::onList), Gold);
+    toolbarButton(i18n::text("cancel", "CANCEL"), W(42), {R(80.0f), bottom}, menu_selector(HudEditorPopup::onCancel), Blue);
+    toolbarButton(i18n::text("hud-save", "SAVE"), W(50), {R(30.0f), bottom}, menu_selector(HudEditorPopup::onSave), Green);
     // Collapse tab sits on the dock's top edge.
-    toolbarButton(i18n::text("hud-collapse", "HIDE TOOLS"), {36, 14}, {R - 24.0f, m_toolbarSize.height / 2.0f + 8.0f},
+    toolbarButton(i18n::text("hud-collapse", "HIDE TOOLS"), W(36, 14), {R(24.0f), m_toolbarSize.height / 2.0f + 8.0f},
         menu_selector(HudEditorPopup::onCollapse), Blue);
 
     // Collapsed tools leave one button at the bottom centre.

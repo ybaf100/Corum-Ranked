@@ -352,3 +352,20 @@ int main(){
 }
 `);
 });
+
+test('HUD editor toolbar rows never overlap (reset vs list, arrows vs preset label)',()=>{
+ const source=read('src/ui/HudEditorPopup.cpp');
+ assert.match(read('src/ui/HudEditorPopup.hpp'),/static constexpr float kToolbarDesignWidth = 500\.0f;/);
+ assert.match(source,/std::max\(kToolbarDesignWidth, m_size\.width \* 0\.80f\)/);
+ assert.match(source,/auto const k = std::min\(1\.0f, dockW \/ kToolbarDesignWidth\);/);
+ // Mirror the layout: left items at L0 + a*k, right items at R0 - a*k, widths * k.
+ for(const screen of [427,480,569,640,768,1024,1366]){
+  const dockW=Math.min(screen-16,Math.max(500,screen*0.8)),k=Math.min(1,dockW/500),L0=-dockW/2,R0=dockW/2;
+  const box=(x,w)=>[x-w/2,x+w/2];
+  const bottom=[box(L0+31*k,50*k),box(L0+88*k,54*k),...[0,1,2].map(i=>box(L0+(146+47*i)*k,46*k)),box(L0+(146+141+6)*k,46*k),
+   box(R0-126*k,42*k),box(R0-80*k,42*k),box(R0-30*k,50*k)];
+  for(let i=1;i<bottom.length;i++)assert.ok(bottom[i][0]>=bottom[i-1][1]-0.01,`bottom row ${i} at ${screen}`);
+  const lastArrow=box(L0+422*k,22),preset=box(R0-26*k,44*k);
+  assert.ok(preset[0]>=lastArrow[1]-1.5,`preset label at ${screen}`);
+ }
+});
