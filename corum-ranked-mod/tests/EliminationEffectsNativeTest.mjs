@@ -120,3 +120,21 @@ test('Slice gathering for a 64-player round fits the elimination window plus the
  assert.ok(Math.abs(total(24)-3.4)<1e-9);
  for(const n of [1,2,3,8,24,40,48,63])assert.ok(total(n)<=1.55+2.0+1e-9,`${n} eliminated`);
 });
+
+test('Slice reads on compact 64-player cards: backdrop, enlarged pile, combo counter, sharp hits, sound',()=>{
+ const fx=readFileSync(join(root,'src/ui/SurvivalEliminationFx.cpp'),'utf8');
+ // The pile and the gold icon grow off the cards; sweeps stay inside the stage.
+ assert.match(fx,/auto const pileScale = std::clamp\(executor\.iconScale \* 2\.2f, std::max\(executor\.iconScale, 0\.5f\), 1\.15f\);/);
+ assert.match(fx,/CCScaleTo::create\(kGatherTravel, pileScale\)/);
+ assert.match(fx,/layer->getContentSize\(\)\.height \* 0\.22f/);
+ // A dark backdrop fades in after the gathering and out at the end.
+ assert.match(fx,/CCFadeTo::create\(0\.6f, 150\)/);
+ // x1, x2, ... over the pile, a bigger punch on the last cut.
+ assert.match(fx,/counter->setString\(fmt::format\("x\{\}", count\)\.c_str\(\)\);/);
+ // Small icon-sized hit flash and a hairline slash instead of the big white disc and wide bars.
+ assert.match(fx,/flash\(target\.host, target\.center, \(finale \? 14\.0f : 8\.0f\) \* std::max\(0\.6f, target\.iconScale\), \{1, 1, 1, 0\.75f\}\);/);
+ assert.match(fx,/Layer\{3\.6f, \{255, 211, 78, 120\}\}, Layer\{1\.4f, \{255, 255, 255, 255\}\}/);
+ // Slash sound per sweep and a heavier one on the finale, at the Ranked volume.
+ assert.match(fx,/playSlashSound\(1\.35f, 0\.12f\);/);assert.match(fx,/playSlashSound\(0\.9f, 0\.26f\);/);
+ assert.match(fx,/RankedVolumeControl::get\(\)\.volume\(\)/);
+});

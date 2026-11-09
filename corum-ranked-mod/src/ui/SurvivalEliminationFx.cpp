@@ -9,6 +9,9 @@
 #include <vector>
 #include "../domain/CompetitiveHudLayout.hpp"
 #include "PlayerIcon.hpp"
+#include "RankedVisuals.hpp"
+#include "../RankedVolumeControl.hpp"
+#include <Geode/binding/FMODAudioEngine.hpp>
 
 using namespace geode::prelude;
 
@@ -41,7 +44,8 @@ CCNode* iconPiece(EliminationFxTarget const& target, std::vector<CCPoint> polygo
 void slashLine(CCNode* host, CCPoint center, CCPoint direction, float length) {
     auto const angle = -std::atan2(direction.y, direction.x) * 180.0f / kPi;
     struct Layer { float width; ccColor4B color; };
-    for (auto const& layer : {Layer{7.0f, {255, 211, 78, 120}}, Layer{2.5f, {255, 255, 255, 255}}}) {
+    // Sharp: a thin gold glow under a hairline white core, gone quickly.
+    for (auto const& layer : {Layer{3.6f, {255, 211, 78, 120}}, Layer{1.4f, {255, 255, 255, 255}}}) {
         auto* bar = CCLayerColor::create(layer.color, length, layer.width);
         bar->ignoreAnchorPointForPosition(false);
         bar->setAnchorPoint({0.5f, 0.5f});
@@ -49,7 +53,7 @@ void slashLine(CCNode* host, CCPoint center, CCPoint direction, float length) {
         bar->setRotation(angle);
         bar->setScaleX(0.15f);
         host->addChild(bar, 22);
-        bar->runAction(CCSequence::create(CCScaleTo::create(0.07f, 1.0f, 1.0f), CCFadeOut::create(0.2f), CCRemoveSelf::create(), nullptr));
+        bar->runAction(CCSequence::create(CCScaleTo::create(0.05f, 1.0f, 1.0f), CCFadeOut::create(0.14f), CCRemoveSelf::create(), nullptr));
     }
 }
 
@@ -124,7 +128,7 @@ void playSliceFx(EliminationFxTarget const& target, float fall, CCPoint swipe, b
     CCPoint const p1{d.x * r, d.y * r}, p2{-d.x * r, -d.y * r};
     auto const duration = finale ? 0.95f : 0.65f;
     // The hit: a white flash on the icon, then the halves pop apart and spin away.
-    flash(target.host, target.center, finale ? 22.0f : 13.0f, {1, 1, 1, 0.9f});
+    flash(target.host, target.center, (finale ? 14.0f : 8.0f) * std::max(0.6f, target.iconScale), {1, 1, 1, 0.75f});
     for (int side : {1, -1}) {
         auto const off = CCPoint{n.x * r * static_cast<float>(side), n.y * r * static_cast<float>(side)};
         auto* half = iconPiece(target, {p1, p2, {p2.x + off.x, p2.y + off.y}, {p1.x + off.x, p1.y + off.y}});
@@ -139,8 +143,9 @@ void playSliceFx(EliminationFxTarget const& target, float fall, CCPoint swipe, b
                 CCScaleTo::create(duration - 0.065f, target.iconScale * 0.5f), nullptr),
             CCRemoveSelf::create(), nullptr));
     }
-    slashLine(target.host, target.center, d, finale ? 150.0f : 84.0f);
-    if (finale) slashLine(target.host, target.center, d, 110.0f);
+    auto const reach = 52.0f * std::max(0.6f, target.iconScale);
+    slashLine(target.host, target.center, d, finale ? reach * 2.6f : reach * 1.5f);
+    if (finale) slashLine(target.host, target.center, d, reach * 1.9f);
     sparks(target.host, target.center, 5, {255, 240, 190, 255}, finale ? 58.0f : 28.0f);
 }
 
@@ -196,6 +201,14 @@ GatherPlan gatherPlan(std::size_t victims) {
     return plan;
 }
 
+// The GD crash sound, pitched up for a sweep and down for the finale, at the
+// Ranked volume.
+void playSlashSound(float speed, float volume) {
+    auto const gain = RankedVolumeControl::get().volume();
+    if (gain <= 0) return;
+    if (auto* engine = FMODAudioEngine::sharedEngine()) engine->playEffect("explode_11.ogg", speed, 0.0f, volume * gain);
+}
+
 // A short shake of `target` around `base` (stops the previous one first).
 void shakeNode(CCNode* target, CCPoint base, float amplitude, int steps) {
     if (!target) return;
@@ -220,21 +233,21 @@ void finaleBurst(CCNode* stage, CCPoint center) {
     for (int i = 0; i < segments; ++i) {
         auto const a0 = 2.0f * kPi * static_cast<float>(i) / segments, a1 = 2.0f * kPi * static_cast<float>(i + 1) / segments;
         CCPoint q[] {{std::cos(a0) * 14.0f, std::sin(a0) * 14.0f}, {std::cos(a1) * 14.0f, std::sin(a1) * 14.0f},
-            {std::cos(a1) * 17.0f, std::sin(a1) * 17.0f}, {std::cos(a0) * 17.0f, std::sin(a0) * 17.0f}};
+            {std::cos(a1) * 15.5f, std::sin(a1) * 15.5f}, {std::cos(a0) * 15.5f, std::sin(a0) * 15.5f}};
         ring->drawPolygon(q, 4, {1.0f, 0.9f, 0.55f, 0.95f}, 0, {1.0f, 0.9f, 0.55f, 0.95f});
     }
     ring->setPosition(center);
     ring->setScale(0.3f);
     stage->addChild(ring, 150);
-    ring->runAction(CCSequence::create(CCEaseSineOut::create(CCScaleTo::create(0.5f, 4.2f)), CCRemoveSelf::create(), nullptr));
+    ring->runAction(CCSequence::create(CCEaseSineOut::create(CCScaleTo::create(0.38f, 3.2f)), CCRemoveSelf::create(), nullptr));
     auto const size = stage->getContentSize();
     auto* white = CCLayerColor::create({255, 248, 224, 0}, size.width, size.height);
     stage->addChild(white, 300);
-    white->runAction(CCSequence::create(CCFadeTo::create(0.05f, 110), CCFadeTo::create(0.3f, 0), CCRemoveSelf::create(), nullptr));
+    white->runAction(CCSequence::create(CCFadeTo::create(0.04f, 70), CCFadeTo::create(0.22f, 0), CCRemoveSelf::create(), nullptr));
 }
 
 // Executor motion (the main gold icon, or a trailing afterimage `lag` later).
-CCSequence* executorActions(SliceGatherExecutor const& executor, GatherPlan const& plan, CCPoint pile, float reach, float lag,
+CCSequence* executorActions(SliceGatherExecutor const& executor, GatherPlan const& plan, CCPoint pile, float reach, float big, float lag,
     std::function<void()> done) {
     auto const scale = executor.iconScale;
     CCPoint const a{pile.x - 0.8f * reach, pile.y + reach}, b{pile.x + 0.8f * reach, pile.y - reach};
@@ -242,7 +255,7 @@ CCSequence* executorActions(SliceGatherExecutor const& executor, GatherPlan cons
     auto* actions = CCArray::create();
     if (lag > 0) actions->addObject(CCDelayTime::create(lag));
     actions->addObject(CCSpawn::create(CCEaseSineOut::create(CCMoveBy::create(kGatherLift, {0, 18})),
-        CCEaseBackOut::create(CCScaleTo::create(kGatherLift, scale * 1.3f)), nullptr));
+        CCEaseBackOut::create(CCScaleTo::create(kGatherLift, big)), nullptr));
     // Fly over the pile, then wind up to the first sweep's start.
     auto const windStart = kGatherCutStart - kGatherWindup;
     actions->addObject(CCSpawn::create(CCEaseSineInOut::create(CCMoveTo::create(windStart - kGatherLift, {pile.x - 0.4f * reach, pile.y + 0.5f * reach})),
@@ -258,7 +271,7 @@ CCSequence* executorActions(SliceGatherExecutor const& executor, GatherPlan cons
     auto const atA = plan.sweeps % 2 == 0;
     auto const from = atA ? fa : fb, to = atA ? fb : fa;
     auto const beat = std::max(0.05f, kGatherFinalBeat - kGatherFinalSwing / 2.0f);
-    actions->addObject(CCSpawn::create(CCEaseSineOut::create(CCMoveTo::create(beat, from)), CCScaleTo::create(beat, scale * 1.45f),
+    actions->addObject(CCSpawn::create(CCEaseSineOut::create(CCMoveTo::create(beat, from)), CCScaleTo::create(beat, big * 1.15f),
         CCRotateTo::create(beat, atA ? -50.0f : 50.0f), nullptr));
     actions->addObject(CCSpawn::create(CCEaseSineIn::create(CCMoveTo::create(kGatherFinalSwing, to)),
         CCRotateTo::create(kGatherFinalSwing, atA ? 50.0f : -50.0f), nullptr));
@@ -284,8 +297,24 @@ void runSliceGathering(CCNode* layer, SliceGatherExecutor const& executor, std::
     layer->addChild(stage, 60);
     auto const n = victims.size();
     auto const plan = gatherPlan(n);
-    // Sweep reach from the icon size (cards scale with the grid).
-    auto const reach = std::clamp(executor.iconScale / 0.6f, 0.6f, 1.4f) * 62.0f;
+    // On compact 64-player cards the icons are tiny: the pile and the gold
+    // icon grow while they are off the cards so every cut reads.
+    auto const pileScale = std::clamp(executor.iconScale * 2.2f, std::max(executor.iconScale, 0.5f), 1.15f);
+    auto const big = pileScale * 1.3f;
+    // Sweeps stay within the stage (the picker preview is small).
+    auto const reach = std::min(std::clamp(pileScale / 0.6f, 0.6f, 2.0f) * 52.0f, layer->getContentSize().height * 0.22f);
+    auto const spreadScale = pileScale / 0.6f;
+    // A dark backdrop over the board while the pile is cut.
+    auto const end = sliceGatherSeconds(n);
+    auto* dim = CCLayerColor::create({2, 4, 10, 0}, stage->getContentSize().width, stage->getContentSize().height);
+    stage->addChild(dim, -1000);
+    dim->runAction(CCSequence::create(CCDelayTime::create(0.45f), CCFadeTo::create(0.6f, 150),
+        CCDelayTime::create(std::max(0.0f, end - 0.35f - 1.05f)), CCFadeTo::create(0.35f, 0), CCRemoveSelf::create(), nullptr));
+    // Combo counter over the pile: x1, x2, ... punching on every cut.
+    auto* counter = menuLabel("", 0.62f, {pile.x, std::min(pile.y + reach * 1.35f, layer->getContentSize().height - 16.0f)}, Gold, FontWeight::Black);
+    counter->setVisible(false);
+    stage->addChild(counter, 250);
+    auto const counterScale = counter->getScale();
     std::optional<WeakRef<CCNode>> shake;
     CCPoint shakeBase{};
     if (shakeTarget) { shake.emplace(shakeTarget); shakeBase = shakeTarget->getPosition(); }
@@ -299,7 +328,7 @@ void runSliceGathering(CCNode* layer, SliceGatherExecutor const& executor, std::
         // The first to be cut lies on top; cut halves (z 20) fall above the pile.
         stage->addChild(copy, -static_cast<int>(std::min<std::size_t>(k, 200)));
         auto const leave = 0.05f + kGatherSpread * static_cast<float>(k) / static_cast<float>(n);
-        auto const jitter = CCPoint{static_cast<float>(static_cast<int>(k * 37 % 23) - 11), static_cast<float>(static_cast<int>(k * 53 % 19) - 9)};
+        auto const jitter = CCPoint{static_cast<float>(static_cast<int>(k * 37 % 23) - 11) * spreadScale, static_cast<float>(static_cast<int>(k * 53 % 19) - 9) * spreadScale};
         auto const spin = static_cast<float>(static_cast<int>(k * 29 % 40) - 20);
         std::optional<WeakRef<CCNode>> slot;
         if (victim.slot) slot.emplace(victim.slot);
@@ -311,7 +340,7 @@ void runSliceGathering(CCNode* layer, SliceGatherExecutor const& executor, std::
             }),
             CCSpawn::create(
                 CCEaseSineInOut::create(CCMoveTo::create(kGatherTravel, {pile.x + jitter.x, pile.y + jitter.y})),
-                CCScaleTo::create(kGatherTravel, victim.iconScale * 0.9f),
+                CCScaleTo::create(kGatherTravel, pileScale),
                 CCRotateBy::create(kGatherTravel, spin), nullptr),
             nullptr));
         // The cut, along the sweep the blade is in.
@@ -321,20 +350,36 @@ void runSliceGathering(CCNode* layer, SliceGatherExecutor const& executor, std::
         if (!last && plan.sweeps > 0)
             sweep = std::min(plan.sweeps - 1, static_cast<std::size_t>(std::max(0.0f, (cutAt - kGatherCutStart) / plan.sweep)));
         auto const forward = sweep % 2 == 0;
-        EliminationFxTarget target{copy, stage, {}, victim.iconScale * 0.9f, victim.icon, static_cast<int>(k)};
-        stage->runAction(CCSequence::create(CCDelayTime::create(cutAt), CallFuncExt::create([target, copy, fall, forward, last, stage]() mutable {
+        EliminationFxTarget target{copy, stage, {}, pileScale, victim.icon, static_cast<int>(k)};
+        auto const count = static_cast<int>(k) + 1;
+        stage->runAction(CCSequence::create(CCDelayTime::create(cutAt), CallFuncExt::create([target, copy, fall, forward, last, stage, counter, counterScale, count]() mutable {
             target.center = copy->getPosition();
             playSliceFx(target, fall, forward ? CCPoint{0.8f, -1.0f} : CCPoint{-0.8f, 1.0f}, last);
-            if (last) finaleBurst(stage, target.center);
+            counter->setVisible(true);
+            counter->setString(fmt::format("x{}", count).c_str());
+            counter->stopAllActions();
+            counter->setScale(counterScale * (last ? 1.9f : 1.3f));
+            counter->runAction(CCEaseBackOut::create(CCScaleTo::create(last ? 0.3f : 0.12f, counterScale * (last ? 1.35f : 1.0f))));
+            if (last) {
+                finaleBurst(stage, target.center);
+                counter->setColor({255, 255, 255});
+                counter->runAction(CCSequence::create(CCDelayTime::create(0.45f), CCFadeOut::create(0.3f), nullptr));
+            }
         }), nullptr));
     }
     // One shake per sweep, a big one on the final swing.
     for (std::size_t sweep = 0; sweep < plan.sweeps; ++sweep) {
         stage->runAction(CCSequence::create(CCDelayTime::create(kGatherCutStart + plan.sweep * (static_cast<float>(sweep) + 0.25f)),
-            CallFuncExt::create([shake, shakeBase]() mutable { if (shake) if (auto node = shake->lock()) shakeNode(node.data(), shakeBase, 4.0f, 3); }), nullptr));
+            CallFuncExt::create([shake, shakeBase]() mutable {
+                if (shake) if (auto node = shake->lock()) shakeNode(node.data(), shakeBase, 4.0f, 3);
+                playSlashSound(1.35f, 0.12f);
+            }), nullptr));
     }
     stage->runAction(CCSequence::create(CCDelayTime::create(plan.lastCut),
-        CallFuncExt::create([shake, shakeBase]() mutable { if (shake) if (auto node = shake->lock()) shakeNode(node.data(), shakeBase, 10.0f, 7); }), nullptr));
+        CallFuncExt::create([shake, shakeBase]() mutable {
+            if (shake) if (auto node = shake->lock()) shakeNode(node.data(), shakeBase, 10.0f, 7);
+            playSlashSound(0.9f, 0.26f);
+        }), nullptr));
 
     // The executor: gold, out of its card, over the pile, sweeping, home.
     // Two gold afterimages trail it.
@@ -345,7 +390,7 @@ void runSliceGathering(CCNode* layer, SliceGatherExecutor const& executor, std::
         stage->addChild(ghost, 200);
         std::optional<WeakRef<CCNode>> home;
         if (executor.slot) { home.emplace(executor.slot); executor.slot->setVisible(false); }
-        ghost->runAction(executorActions(executor, plan, pile, reach, 0.0f,
+        ghost->runAction(executorActions(executor, plan, pile, reach, big, 0.0f,
             [home]() mutable { if (home) if (auto node = home->lock()) node->setVisible(true); }));
         int trailZ = 199;
         for (auto const [lag, opacity] : {std::pair<float, GLubyte>{0.035f, 100}, std::pair<float, GLubyte>{0.07f, 48}}) {
@@ -355,7 +400,7 @@ void runSliceGathering(CCNode* layer, SliceGatherExecutor const& executor, std::
             trail->setScale(executor.iconScale);
             trail->setPosition(executor.home);
             stage->addChild(trail, trailZ--);
-            trail->runAction(executorActions(executor, plan, pile, reach, lag, {}));
+            trail->runAction(executorActions(executor, plan, pile, reach, big, lag, {}));
         }
     }
     stage->runAction(CCSequence::create(CCDelayTime::create(sliceGatherSeconds(n) + 1.0f), CCRemoveSelf::create(), nullptr));
