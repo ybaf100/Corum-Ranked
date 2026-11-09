@@ -5,8 +5,10 @@
 #include <Geode/cocos/misc_nodes/CCClippingNode.h>
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <vector>
 #include "../domain/CompetitiveHudLayout.hpp"
+#include "PlayerIcon.hpp"
 
 using namespace geode::prelude;
 
@@ -148,48 +150,100 @@ void playDefaultFall(CCNode* slot, int order, float fall) {
         CCHide::create(), nullptr));
 }
 
-CCPoint sliceEnter(bool mirrored) { return mirrored ? CCPoint{18.0f, 28.0f} : CCPoint{-18.0f, 28.0f}; }
-CCPoint sliceLeave(bool mirrored) { return mirrored ? CCPoint{-18.0f, -28.0f} : CCPoint{18.0f, -28.0f}; }
-CCPoint sliceSwipe(bool mirrored) {
-    auto const a = sliceEnter(mirrored), b = sliceLeave(mirrored);
-    return {b.x - a.x, b.y - a.y};
+namespace {
+constexpr float kGatherLift = 0.24f;      // gold icon rises out of its card
+constexpr float kGatherSpread = 0.40f;    // victims leave over this span
+constexpr float kGatherTravel = 0.55f;    // each victim's flight to the pile
+constexpr float kGatherCutStart = 1.0f;   // first cut
+constexpr float kGatherReturn = 0.35f;
+float gatherCutGap(std::size_t victims) {
+    return std::clamp(0.9f / static_cast<float>(std::max<std::size_t>(1, victims)), 0.035f, 0.12f);
+}
+} // namespace
+
+float sliceGatherSeconds(std::size_t victims) {
+    return kGatherCutStart + gatherCutGap(victims) * static_cast<float>(victims) + 0.15f + kGatherReturn;
 }
 
-void runSliceRoute(CCNode* ghost, std::vector<SliceStop> const& stops, CCPoint home) {
-    if (!ghost) return;
-    ghost->stopAllActions();
-    ghost->setVisible(true);
-    auto const scale = ghost->getScale();
-    ghost->setScale(scale * 0.7f);
-    auto* actions = CCArray::create();
-    // Pop out of the 1st place card.
-    actions->addObject(CCEaseBackOut::create(CCScaleTo::create(0.08f, scale)));
-    auto now = 0.08f;
-    for (auto const& stop : stops) {
-        auto const enter = sliceEnter(stop.mirrored), leave = sliceLeave(stop.mirrored);
-        // Reach the entry point just before the cut, then swipe through it.
-        auto const arrive = std::max(now + 0.03f, stop.at - 0.03f);
-        auto const travel = arrive - now;
-        actions->addObject(CCSpawn::create(
-            CCEaseSineInOut::create(CCMoveTo::create(travel, {stop.victim.x + enter.x, stop.victim.y + enter.y})),
-            CCRotateTo::create(travel, stop.mirrored ? 20.0f : -20.0f), nullptr));
-        actions->addObject(CCSpawn::create(
-            CCMoveTo::create(0.06f, {stop.victim.x + leave.x, stop.victim.y + leave.y}),
-            CCRotateTo::create(0.06f, stop.mirrored ? -28.0f : 28.0f), nullptr));
-        now = arrive + 0.06f;
+void runSliceGathering(CCNode* layer, SliceGatherExecutor const& executor, std::vector<SliceGatherVictim> const& victims,
+    CCPoint pile, float fall) {
+    if (!layer || victims.empty()) return;
+    auto* stage = CCNode::create();
+    stage->setContentSize(layer->getContentSize());
+    layer->addChild(stage, 60);
+    auto const n = victims.size();
+    auto const gap = gatherCutGap(n);
+    // Swipe ends: top-left <-> bottom-right of the pile.
+    CCPoint const a{pile.x - 24.0f, pile.y + 32.0f}, b{pile.x + 24.0f, pile.y - 32.0f};
+
+    // Victim copies sit on their cards until they leave for the pile.
+    std::vector<CCNode*> copies;
+    for (std::size_t k = 0; k < n; ++k) {
+        auto const& victim = victims[k];
+        auto* copy = victim.icon ? victim.icon() : nullptr;
+        if (!copy) copy = CCNode::create();
+        copy->setScale(victim.iconScale);
+        copy->setPosition(victim.from);
+        // The first to be cut lies on top; cut halves (z 20) fall above the pile.
+        stage->addChild(copy, -static_cast<int>(std::min<std::size_t>(k, 200)));
+        copies.push_back(copy);
+        auto const leave = 0.05f + kGatherSpread * static_cast<float>(k) / static_cast<float>(n);
+        auto const jitter = CCPoint{static_cast<float>(static_cast<int>(k * 37 % 23) - 11), static_cast<float>(static_cast<int>(k * 53 % 19) - 9)};
+        auto const spin = static_cast<float>(static_cast<int>(k * 29 % 40) - 20);
+        std::optional<WeakRef<CCNode>> slot;
+        if (victim.slot) slot.emplace(victim.slot);
+        auto detach = victim.detach;
+        copy->runAction(CCSequence::create(CCDelayTime::create(leave),
+            CallFuncExt::create([slot, detach]() mutable {
+                if (slot) if (auto node = slot->lock()) node->setVisible(false);
+                if (detach) detach();
+            }),
+            CCSpawn::create(
+                CCEaseSineInOut::create(CCMoveTo::create(kGatherTravel, {pile.x + jitter.x, pile.y + jitter.y})),
+                CCScaleTo::create(kGatherTravel, victim.iconScale * 0.9f),
+                CCRotateBy::create(kGatherTravel, spin), nullptr),
+            nullptr));
+        // The cut: the copy splits along the current swipe.
+        auto const cutAt = kGatherCutStart + gap * static_cast<float>(k);
+        auto const forward = k % 2 == 0;
+        EliminationFxTarget target{copy, stage, {}, victim.iconScale * 0.9f, victim.icon, static_cast<int>(k)};
+        stage->runAction(CCSequence::create(CCDelayTime::create(cutAt), CallFuncExt::create([target, copy, fall, forward, a, b]() mutable {
+            target.center = copy->getPosition();
+            auto const swipe = forward ? CCPoint{b.x - a.x, b.y - a.y} : CCPoint{a.x - b.x, a.y - b.y};
+            playSliceFx(target, fall, swipe);
+        }), nullptr));
     }
-    actions->addObject(CCDelayTime::create(0.16f));
-    actions->addObject(CCSpawn::create(
-        CCEaseSineInOut::create(CCMoveTo::create(0.26f, home)),
-        CCRotateTo::create(0.26f, 0.0f), CCScaleTo::create(0.26f, scale * 0.7f), nullptr));
-    actions->addObject(CCRemoveSelf::create());
-    ghost->runAction(CCSequence::create(actions));
+
+    // The executor: gold, out of its card, over the pile, cutting, home.
+    if (auto* ghost = executor.icon ? executor.icon() : nullptr) {
+        if (auto* player = typeinfo_cast<PlayerIcon*>(ghost)) player->setGold(true);
+        auto const scale = executor.iconScale;
+        ghost->setScale(scale);
+        ghost->setPosition(executor.home);
+        stage->addChild(ghost, 200);
+        std::optional<WeakRef<CCNode>> home;
+        if (executor.slot) { home.emplace(executor.slot); executor.slot->setVisible(false); }
+        auto* actions = CCArray::create();
+        actions->addObject(CCSpawn::create(CCEaseSineOut::create(CCMoveBy::create(kGatherLift, {0, 18})),
+            CCEaseBackOut::create(CCScaleTo::create(kGatherLift, scale * 1.3f)), nullptr));
+        auto const firstSwipe = kGatherCutStart - gap / 2.0f;
+        actions->addObject(CCSpawn::create(CCEaseSineInOut::create(CCMoveTo::create(firstSwipe - kGatherLift, a)),
+            CCRotateTo::create(firstSwipe - kGatherLift, -20.0f), nullptr));
+        for (std::size_t k = 0; k < n; ++k) {
+            auto const forward = k % 2 == 0;
+            actions->addObject(CCSpawn::create(CCMoveTo::create(gap, forward ? b : a),
+                CCRotateTo::create(gap, forward ? 24.0f : -24.0f), nullptr));
+        }
+        actions->addObject(CCDelayTime::create(0.15f));
+        actions->addObject(CCSpawn::create(CCEaseSineInOut::create(CCMoveTo::create(kGatherReturn, executor.home)),
+            CCRotateTo::create(kGatherReturn, 0.0f), CCScaleTo::create(kGatherReturn, scale), nullptr));
+        actions->addObject(CallFuncExt::create([home]() mutable { if (home) if (auto node = home->lock()) node->setVisible(true); }));
+        actions->addObject(CCRemoveSelf::create());
+        ghost->runAction(CCSequence::create(actions));
+    }
+    stage->runAction(CCSequence::create(CCDelayTime::create(sliceGatherSeconds(n) + 0.7f), CCRemoveSelf::create(), nullptr));
 }
 
-void scheduleSliceCut(CCNode* host, std::function<void()> cut) {
-    if (!host) return;
-    host->runAction(CCSequence::create(CCDelayTime::create(kSliceCutDelay), CallFuncExt::create(std::move(cut)), nullptr));
-}
 
 void playEliminationFx(EliminationEffect effect, EliminationFxTarget const& target, float fall, CCPoint executor) {
     if (!target.slot || !target.host) return;

@@ -23,6 +23,8 @@ public:
     void getUserInfoFinished(GJUserScore* score) override;
     void getUserInfoFailed(int accountId) override;
     void userInfoChanged(GJUserScore* score) override;
+    // Paint the icon gold (Slice executor); survives a late remote icon load.
+    void setGold(bool gold);
 
 private:
     bool initLocal();
@@ -37,6 +39,8 @@ private:
     SimplePlayer* m_icon = nullptr;
     bool m_local = false;
     bool m_requestInFlight = false;
+    bool m_gold = false;
+    void applyGold();
 };
 
 } // namespace corum::ranked::ui

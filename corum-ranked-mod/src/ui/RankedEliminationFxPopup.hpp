@@ -41,6 +41,7 @@ private:
     cocos2d::CCNode* m_stage = nullptr;
     cocos2d::CCNode* m_world = nullptr;  // clipped preview contents (rebuilt per replay)
     cocos2d::CCPoint m_executorAt{};     // executor icon centre in m_world space
+    cocos2d::CCNode* m_executorIcon = nullptr; // the gold card's icon (hidden while it flies)
     std::vector<std::pair<cocos2d::CCNode*, cocos2d::CCNode*>> m_victims; // card, icon slot
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_request;
     std::array<bool, 5> m_unlocked{true, false, false, false, false};

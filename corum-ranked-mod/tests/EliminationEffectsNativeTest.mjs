@@ -59,7 +59,7 @@ test('elimination reveal: gold 1st card, executions from the completed round, cu
  assert.match(layer,/tile\.goldBackground->setVisible\(goldCard\)/);
  assert.match(layer,/m_eliminationExecutions=survivalEliminationExecutions\(effectPlayers,m_eliminationOrder\);/);
  assert.match(layer,/p\["eliminationEffect"\]/);assert.match(layer,/p\["lp"\]/);
- assert.match(layer,/execution\.effect!=EliminationEffect::Default && !execution\.executorId\.empty\(\)\)\{playExecution/);
+ assert.match(layer,/execution\.effect!=EliminationEffect::Default && execution\.effect!=EliminationEffect::Slice && !execution\.executorId\.empty\(\)\)\{playExecution/);
  assert.match(fx,/float eliminationFxSeconds\(\) \{ return SurvivalEliminationFallMilliseconds \/ 1000\.0f; \}/);
  assert.doesNotMatch(fx,/drawDot|drawSegment/);
  assert.match(popup,/addEliminationFxButton\(\{23,18\}\);/);
@@ -86,18 +86,33 @@ test('achievement grade emblem opens the ladder; effect picker previews the sele
  assert.match(picker,/schedule\(schedule_selector\(RankedEliminationFxPopup::previewTick\), kPreviewLoop\)/);
  assert.match(picker,/survivalEliminationStarts\(m_victims\.size\(\)\)/);
  // Every victim owns its cut: moving the ghost on to the next victim never cancels it.
- assert.match(picker,/scheduleSliceCut\(card, \[target, fall, mirrored\]\(\)/);assert.match(picker,/runSliceRoute\(ghost, stops, m_executorAt\);/);
- assert.match(layer,/ui::scheduleSliceCut\(tile\.root,slice\);/);
- // Several victims: one planned route per executor, planned once per presentation, swipes alternating.
- assert.match(layer,/if\(m_slicePlanned\.insert\(execution\.executorId\)\.second\)planSliceRoute\(/);
- assert.match(layer,/\(m_eliminationStarts\[i\]-base\)\/1000\.0f\+ui::kSliceCutDelay,i%2==1/);
- assert.match(layer,/m_eliminationExecutions=survivalEliminationExecutions\(effectPlayers,m_eliminationOrder\);m_slicePlanned\.clear\(\);/);
+ // Slice "gather and cut" (game and preview share runSliceGathering).
+ assert.match(picker,/runSliceGathering\(m_world, executor, victims,/);assert.match(picker,/executor\.slot = m_executorIcon;/);
+ assert.match(layer,/ui::runSliceGathering\(this,executor,victims,\{pileX,size\.height\*\.46f\},size\.height\*\.6f\);/);
+ // Held cards turn red only when their icon leaves for the pile.
+ assert.match(layer,/if\(m_sliceHeld\.contains\(id\)\)return;/);
+ assert.match(layer,/owner->m_sliceHeld\.erase\(id\);owner->m_eliminationRevealed\.insert\(id\);/);
+ assert.match(layer,/if\(!m_slicePlanned\.insert\(executorId\)\.second\)return;/);
+ assert.match(layer,/m_slicePlanned\.clear\(\);m_sliceHeld\.clear\(\);/);
+ // Two tied executors: a pile each.
+ assert.match(layer,/pileX=executors\.front\(\)==executorId\?size\.width\*\.36f:size\.width\*\.64f;/);
  const fx=readFileSync(join(root,'src/ui/SurvivalEliminationFx.cpp'),'utf8');
- const route=fx.slice(fx.indexOf('void runSliceRoute'),fx.indexOf('void scheduleSliceCut'));
- assert.match(route,/auto const arrive = std::max\(now \+ 0\.03f, stop\.at - 0\.03f\);/);assert.doesNotMatch(route,/CallFuncExt/);
+ const gather=fx.slice(fx.indexOf('void runSliceGathering'),fx.indexOf('void playEliminationFx'));
+ // Gold executor, staggered departures over 0.4 s, first cut at 1.0 s, cut gap clamped 0.035..0.12 s, home again.
+ assert.match(gather,/player->setGold\(true\)/);assert.match(fx,/constexpr float kGatherSpread = 0\.40f;/);assert.match(fx,/constexpr float kGatherCutStart = 1\.0f;/);
+ assert.match(fx,/std::clamp\(0\.9f \/ static_cast<float>\(std::max<std::size_t>\(1, victims\)\), 0\.035f, 0\.12f\)/);
+ assert.match(gather,/CCMoveTo::create\(kGatherReturn, executor\.home\)/);
  // Simplified bolt: short (46 before icon scale), thin, four sparks, no scale-up bump.
  assert.match(fx,/auto const top = 46\.0f;/);assert.match(fx,/sparks\(target\.host, target\.center, 4,/);assert.doesNotMatch(fx,/CCScaleTo::create\(0\.1f, 1\.25f\)/);
  // Season note under the list; the both-modes requirement wording.
  assert.match(picker,/elim-fx-season-note/);
  assert.match(layer,/ui::playDefaultFall\(tile\.icon,static_cast<int>\(order\),getContentSize\(\)\.height\);/);
+});
+
+test('Slice gathering for a 64-player round fits the elimination window plus the hold',()=>{
+ // 24 eliminated: 1.0 s to the first cut, 24 cuts 0.0375 s apart, 0.15 s + 0.35 s home.
+ const gap=Math.min(0.12,Math.max(0.035,0.9/24));const total=1.0+gap*24+0.15+0.35;
+ assert.ok(Math.abs(total-2.4)<1e-9);assert.ok(total<=1.55+2.0);
+ // 48 eliminated (the worst 64-player case): still inside.
+ const gap48=Math.min(0.12,Math.max(0.035,0.9/48));assert.ok(1.0+gap48*48+0.5<=3.55);
 });

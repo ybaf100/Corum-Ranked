@@ -249,7 +249,8 @@ void RankedEliminationFxPopup::buildStage() {
     auto const executorSize = CCSize{std::min(96.0f, size.width * 0.5f), 34};
     auto* executor = surface(executorSize, {6 + executorSize.width / 2, size.height - 6 - executorSize.height / 2}, Gold, {48, 36, 6}, 250, true);
     m_world->addChild(executor, 2);
-    if (auto* me = PlayerIcon::createLocal()) { me->setScale(kIconScale); me->setPosition({17, 17}); executor->addChild(me, 5); }
+    m_executorIcon = nullptr;
+    if (auto* me = PlayerIcon::createLocal()) { me->setScale(kIconScale); me->setPosition({17, 17}); executor->addChild(me, 5); m_executorIcon = me; }
     auto const first = i18n::isKorean() ? fmt::format(fmt::runtime(i18n::text("player-rank", "{}")), 1) : std::string("1st");
     caption(executor, first, {executorSize.width - 8, 17}, 0.26f, executorSize.width - 40, Gold, FontWeight::Black, 1.0f);
     m_executorAt = m_world->convertToNodeSpace(executor->convertToWorldSpace({17, 17}));
@@ -277,44 +278,46 @@ void RankedEliminationFxPopup::playPreview() {
     }
 }
 
-void RankedEliminationFxPopup::executeVictim(std::size_t index) {
-    if (!m_world || index >= m_victims.size()) return;
-    auto [card, slot] = m_victims[index];
-    // The card turns red as its effect starts.
+namespace {
+void redCard(CCNode* card) {
     auto* red = CCLayerColor::create({255, 82, 105, 0}, card->getContentSize().width, card->getContentSize().height);
     card->addChild(red, 4);
     red->runAction(CCFadeTo::create(0.18f, 120));
+}
+} // namespace
+
+void RankedEliminationFxPopup::executeVictim(std::size_t index) {
+    if (!m_world || index >= m_victims.size()) return;
+    auto [card, slot] = m_victims[index];
     auto const fall = m_world->getContentSize().height;
+    if (m_selected == EliminationEffect::Slice) {
+        // Gather and cut: the first reveal runs the whole choreography; each
+        // card turns red as its icon leaves for the pile.
+        if (index != 0) return;
+        std::vector<SliceGatherVictim> victims;
+        for (std::size_t i = 0; i < m_victims.size(); ++i) {
+            auto [victimCard, victimSlot] = m_victims[i];
+            auto const bot = static_cast<int>(i) + 1;
+            victims.push_back({victimSlot, m_world->convertToNodeSpace(victimCard->convertToWorldSpace(victimSlot->getPosition())),
+                [bot]() -> CCNode* { return PlayerIcon::createBot(bot); }, kIconScale,
+                [weakCard = WeakRef<CCNode>(victimCard)]() mutable { if (auto node = weakCard.lock()) redCard(node.data()); }});
+        }
+        SliceGatherExecutor executor;
+        executor.slot = m_executorIcon;
+        executor.home = m_executorAt;
+        executor.icon = []() -> CCNode* { return PlayerIcon::createLocal(); };
+        executor.iconScale = kIconScale;
+        auto const size = m_world->getContentSize();
+        runSliceGathering(m_world, executor, victims, {size.width * 0.62f, size.height * 0.55f}, fall);
+        return;
+    }
+    // The card turns red as its effect starts.
+    redCard(card);
     auto const order = static_cast<int>(index);
     EliminationFxTarget target{slot, card, slot->getPosition(), kIconScale,
         [order]() -> CCNode* { return PlayerIcon::createBot(order + 1); }, order};
-    switch (m_selected) {
-    case EliminationEffect::Default: playDefaultFall(slot, order, fall); break;
-    case EliminationEffect::Slice: {
-        // Each card owns its cut; the swipe alternates direction per card.
-        auto const mirrored = index % 2 == 1;
-        scheduleSliceCut(card, [target, fall, mirrored]() { playSliceFx(target, fall, sliceSwipe(mirrored)); });
-        // The first card plans the executor's route through all three.
-        if (index != 0) break;
-        auto* ghost = PlayerIcon::createLocal();
-        if (!ghost) break;
-        ghost->setScale(kIconScale * 1.15f);
-        ghost->setPosition(m_executorAt);
-        m_world->addChild(ghost, 30);
-        auto const starts = survivalEliminationStarts(m_victims.size());
-        std::vector<SliceStop> stops;
-        for (std::size_t i = 0; i < m_victims.size() && i < starts.size(); ++i) {
-            auto const [stopCard, stopSlot] = m_victims[i];
-            stops.push_back({m_world->convertToNodeSpace(stopCard->convertToWorldSpace(stopSlot->getPosition())),
-                (starts[i] - starts[0]) / 1000.0f + kSliceCutDelay, i % 2 == 1});
-        }
-        runSliceRoute(ghost, stops, m_executorAt);
-        break;
-    }
-    default:
-        playEliminationFx(m_selected, target, fall, card->convertToNodeSpace(m_world->convertToWorldSpace(m_executorAt)));
-        break;
-    }
+    if (m_selected == EliminationEffect::Default) playDefaultFall(slot, order, fall);
+    else playEliminationFx(m_selected, target, fall, card->convertToNodeSpace(m_world->convertToWorldSpace(m_executorAt)));
 }
 
 void RankedEliminationFxPopup::previewTick(float) {

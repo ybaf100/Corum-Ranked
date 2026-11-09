@@ -94,6 +94,19 @@ void PlayerIcon::applyLocalCosmetics() {
     } else {
         m_icon->disableGlowOutline();
     }
+    applyGold();
+}
+
+void PlayerIcon::setGold(bool gold) {
+    m_gold = gold;
+    if (gold) applyGold();
+    else if (m_local) applyLocalCosmetics();
+}
+
+void PlayerIcon::applyGold() {
+    if (!m_gold || !m_icon) return;
+    m_icon->setColors({255, 207, 74}, {255, 246, 200});
+    m_icon->setGlowOutline({255, 236, 150});
 }
 
 void PlayerIcon::applyRemoteCosmetics(GJUserScore* score) {
@@ -108,6 +121,7 @@ void PlayerIcon::applyRemoteCosmetics(GJUserScore* score) {
     } else {
         m_icon->disableGlowOutline();
     }
+    applyGold();
     m_requestInFlight = false;
     unschedule(schedule_selector(PlayerIcon::resolveRemote));
     releaseDelegate();

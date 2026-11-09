@@ -30,22 +30,27 @@ void playEliminationFx(EliminationEffect effect, EliminationFxTarget const& targ
 void playSliceFx(EliminationFxTarget const& target, float fall, cocos2d::CCPoint swipe);
 // The default fall (move, spin, shrink, hide) of a card icon `slot`.
 void playDefaultFall(cocos2d::CCNode* slot, int order, float fall);
-// Slice executor. With several victims the 1st place icon flies one planned
-// route: it swoops through each card in elimination order, arriving as that
-// card's cut lands, and the swipe alternates direction (an X rhythm) before
-// it returns home. The cuts are scheduled per card (scheduleSliceCut), so the
-// route never has to wait for or cancel one.
-struct SliceStop {
-    cocos2d::CCPoint victim;  // icon centre in the ghost's parent space
-    float at = 0.0f;          // seconds from now when this card's cut lands
-    bool mirrored = false;    // swipe top-right -> bottom-left instead
+// Slice ("gather and cut"): the executor's icon turns gold and leaves its
+// card; the victims' icons leave their cards one after another (each card
+// turns red as its icon leaves) and gather in one pile; the gold icon then
+// cuts the pile one icon at a time, quickly, swiping back and forth, and
+// flies back to its card. Everything runs on one stage node in `layer`.
+struct SliceGatherVictim {
+    cocos2d::CCNode* slot = nullptr;        // card icon, hidden as it leaves (held weakly)
+    cocos2d::CCPoint from;                  // icon centre in layer space
+    EliminationIconFactory icon;            // a copy of the icon
+    float iconScale = 1.0f;
+    std::function<void()> detach;           // the card turns red
 };
-inline constexpr float kSliceCutDelay = 0.1f; // reveal -> cut
-cocos2d::CCPoint sliceEnter(bool mirrored);
-cocos2d::CCPoint sliceLeave(bool mirrored);
-cocos2d::CCPoint sliceSwipe(bool mirrored);
-void runSliceRoute(cocos2d::CCNode* ghost, std::vector<SliceStop> const& stops, cocos2d::CCPoint home);
-// Runs `cut` on `host` after kSliceCutDelay (the host owns the pending cut).
-void scheduleSliceCut(cocos2d::CCNode* host, std::function<void()> cut);
+struct SliceGatherExecutor {
+    cocos2d::CCNode* slot = nullptr;        // the executor's card icon, hidden while away (held weakly)
+    cocos2d::CCPoint home;                  // its centre in layer space
+    EliminationIconFactory icon;
+    float iconScale = 1.0f;
+};
+// Seconds from the start until the gold icon is back home.
+float sliceGatherSeconds(std::size_t victims);
+void runSliceGathering(cocos2d::CCNode* layer, SliceGatherExecutor const& executor,
+    std::vector<SliceGatherVictim> const& victims, cocos2d::CCPoint pile, float fall);
 
 } // namespace corum::ranked::ui
