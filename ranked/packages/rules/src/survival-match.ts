@@ -110,6 +110,34 @@ export const SURVIVAL_READY_HOLD_MS = 5_000;
 export const SURVIVAL_INTRO_MS = 6_000;
 /** Minimum round-result presentation (client: 1.95 s roster, 1.55 s sequential eliminations, 2.0 s hold). */
 export const SURVIVAL_RESULT_MS = 5_500;
+/** Uniform roster before the elimination window opens. */
+export const SURVIVAL_RESULT_BEFORE_MS = 1_950;
+/** After a Slice executor's icon is back on its card (plus start skew). */
+export const SURVIVAL_SLICE_HOLD_MS = 1_100;
+/** Slice ("musou"): ms from the elimination window start until the executor's
+ * icon is back on its card. The victims scatter (1.3 s), are cut one per dash
+ * (2 s shared, 50-100 ms per flash-like dash), then the last one gets the finale (wind-up,
+ * hit-stop, follow-through and the flight home: 1.52 s). Mirrors the client
+ * (corum-ranked-mod/src/domain/SurvivalSlicePlan.hpp). */
+export function survivalSliceMs(victims:number):number{
+  if(victims<=0)return 0;
+  const regular=victims-1,dash=regular>0?Math.min(100,Math.max(50,Math.round(2000/regular))):0;
+  return 1300+regular*dash+1520;
+}
+/** Round-result presentation length: 5.5 s, longer when a 1st place executor
+ * (one, or one of two tied) uses Slice, so the screen moves on only after its
+ * icon has returned to its card. With two tied executors each takes every
+ * other victim; the larger half bounds the wait. */
+export function survivalResultMs(match:SurvivalMatch,round:SurvivalRound):number{
+  const rows=round.players.map(p=>({p,e:match.players.find(e=>e.participantId===p.participantId)}));
+  const winners=rows.filter(({p,e})=>(p.rank??e?.finalRank??null)===1);
+  if(winners.length===0||winners.length>2)return SURVIVAL_RESULT_MS;
+  if(!winners.some(({e})=>e?.kind==="HUMAN"&&normalizeEliminationEffect(e.eliminationEffect)==="SLICE"))return SURVIVAL_RESULT_MS;
+  const victims=rows.filter(({p})=>!(p.qualified&&!p.forfeited)).length;
+  const own=winners.length===2?Math.ceil(victims/2):victims;
+  if(own===0)return SURVIVAL_RESULT_MS;
+  return Math.max(SURVIVAL_RESULT_MS,SURVIVAL_RESULT_BEFORE_MS+survivalSliceMs(own)+SURVIVAL_SLICE_HOLD_MS);
+}
 const survivalPhases=(capacity:number):readonly SurvivalMapPhase[]=>capacity===64?
   ["ROUND_1","ROUND_2","ROUND_3","ROUND_4","FINAL"]:["ROUND_1","ROUND_2","ROUND_3","FINAL"];
 export function survivalInitialPhase(count:number,capacity=16):SurvivalMapPhase {
@@ -380,7 +408,7 @@ function advanceTimers(match: SurvivalMatch, now: number): void {
   const round=survivalCurrentRound(match);
   if(match.difficultyVote && match.difficultyVote.resolvedAt===null && now>=match.difficultyVote.closesAt)resolveVote(match,match.difficultyVote.closesAt);
   if(match.presentationGate==="INTRO" && now>=survivalIntroEndsAt(match))match.presentationGate=null;
-  if(match.presentationGate==="ROUND_RESULT" && round.finishedAt!==null && now>=round.finishedAt+SURVIVAL_RESULT_MS)match.presentationGate=null;
+  if(match.presentationGate==="ROUND_RESULT" && round.finishedAt!==null && now>=round.finishedAt+survivalResultMs(match,round))match.presentationGate=null;
   if(match.state==="MAP_SELECTION" && round.map && match.presentationGate!=="INTRO"){
     round.preparationStartedAt=now;transition(match,"PREPARING",now,"PREFETCHED_INTRO_MAP_READY");
   }
@@ -449,7 +477,7 @@ export function reduceSurvivalMatch(before: SurvivalMatch, command: SurvivalComm
       if(!match.presentationControlled || !match.players.some(p=>p.participantId===command.participantId && p.kind==="HUMAN" && p.eliminationStage===null))
         conflict("Invalid presentation owner");
       if(match.presentationGate==="INTRO" && match.state==="MAP_SELECTION" && now>=survivalIntroEndsAt(match))match.presentationGate=null;
-      else if(match.presentationGate==="ROUND_RESULT" && match.state==="ROUND_RESULT" && round.finishedAt!==null && now>=round.finishedAt+SURVIVAL_RESULT_MS)
+      else if(match.presentationGate==="ROUND_RESULT" && match.state==="ROUND_RESULT" && round.finishedAt!==null && now>=round.finishedAt+survivalResultMs(match,round))
         match.presentationGate=null;
       else if(match.presentationGate!==null)conflict("Presentation barrier is not complete");
     } else if(command.type==="DIFFICULTY_VOTE") {
@@ -614,7 +642,7 @@ export function survivalLiveView(match: SurvivalMatch, now: number, participantI
   // Survives the next tick/round, so a client missing the brief ROUND_RESULT
   // state can still present the authoritative eliminations exactly once.
   const completedRound=completed?{key:completed.key,ordinal:completed.ordinal,displayRoundNumber:survivalDisplayRoundNumber(completed),phase:completed.phase,
-    mapGeneration:completed.mapGeneration,finishedAt:new Date(completed.finishedAt!).toISOString(),
+    mapGeneration:completed.mapGeneration,finishedAt:new Date(completed.finishedAt!).toISOString(),presentationMs:survivalResultMs(match,completed),
     players:completed.players.map(p=>{
       const entrant=match.players.find(v=>v.participantId===p.participantId)!;
       return {participantId:p.participantId,name:entrant.name,kind:entrant.kind,gdAccountId:entrant.gdAccountId??null,

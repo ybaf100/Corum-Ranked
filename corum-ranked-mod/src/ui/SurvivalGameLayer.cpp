@@ -18,6 +18,7 @@
 #include "RankBadgeAssets.hpp"
 #include "SurvivalEliminationFx.hpp"
 #include "../domain/SurvivalEliminationEffects.hpp"
+#include "../domain/SurvivalSlicePlan.hpp"
 #include "../domain/CompetitiveHudLayout.hpp"
 #include "../domain/ScoreDisplay.hpp"
 #include "../domain/SurvivalRoundMenuPolicy.hpp"
@@ -31,6 +32,7 @@
 #include <Geode/binding/PlayLayer.hpp>
 #include <Geode/ui/LoadingSpinner.hpp>
 #include <Geode/cocos/actions/CCActionEase.h>
+#include <map>
 #include <set>
 #include <unordered_map>
 
@@ -409,11 +411,12 @@ class SurvivalGameLayer final : public CCLayerColor {
         auto const executor=executorWorld(execution.executorId);
         ui::playEliminationFx(execution.effect,target,fall,tile.root->convertToNodeSpace(executor));
     }
-    // Slice ("gather and cut"): at the executor's first reveal, every card it
-    // executes this round (visible page) is held; its gold icon leaves its
-    // card, the victims' icons gather in one pile (each card turns red as its
-    // icon leaves), the pile is cut one icon at a time and the gold icon
-    // flies home. Two tied executors use a pile each, left and right.
+    // Slice ("musou"): at the executor's first reveal, every card it executes
+    // this round (visible page) is held; its gold icon leaves its card, the
+    // victims' icons scatter over a wide field (each card turns red as its
+    // icon leaves), the gold icon dashes through them in all directions, one
+    // cut per dash, and flies home. Two tied executors use a field each, left
+    // and right. The presentation waits for the return (eliminationHold).
     void startSliceGathering(std::string const& executorId) {
         if(!m_slicePlanned.insert(executorId).second)return;
         std::vector<ui::SliceGatherVictim> victims;
@@ -441,15 +444,15 @@ class SurvivalGameLayer final : public CCLayerColor {
         }else executor.iconScale=victims.front().iconScale;
         executor.home=convertToNodeSpace(executorWorld(executorId));
         executor.icon=[weak=WeakRef(this),executorId]()->CCNode*{auto owner=weak.lock();return owner?owner->iconFor(executorId):nullptr;};
-        // One pile in the middle; with two tied executors, one pile each.
+        // One field in the middle; with two tied executors, one field each.
         std::vector<std::string> executors;
         for(auto const& execution:m_eliminationExecutions)
             if(execution.effect==EliminationEffect::Slice&&!execution.executorId.empty()&&std::find(executors.begin(),executors.end(),execution.executorId)==executors.end())
                 executors.push_back(execution.executorId);
         auto const size=getContentSize();
-        auto pileX=size.width/2;
-        if(executors.size()>1)pileX=executors.front()==executorId?size.width*.36f:size.width*.64f;
-        ui::runSliceGathering(this,executor,victims,{pileX,size.height*.46f},size.height*.6f,m_grid);
+        auto centerX=size.width/2;auto spread=CCSize{size.width*.31f,size.height*.24f};
+        if(executors.size()>1){centerX=executors.front()==executorId?size.width*.29f:size.width*.71f;spread.width=size.width*.17f;}
+        ui::runSliceGathering(this,executor,victims,{centerX,size.height*.45f},spread,size.height*.6f,m_grid);
     }
     void stepEliminations(std::chrono::steady_clock::time_point now) {
         auto const elapsed=std::chrono::duration_cast<std::chrono::milliseconds>(now-m_eliminationStart).count()-SurvivalBeforeEliminationMilliseconds;
@@ -461,6 +464,20 @@ class SurvivalGameLayer final : public CCLayerColor {
         for(auto const& p:view.completedRound["players"].asArray().unwrapOr(std::vector<matjson::Value>{}))
             if(p["participantId"].asString().unwrapOr("")==view.ownId)return !p["qualified"].asBool().unwrapOr(false);
         return false;
+    }
+    struct EliminationHold { int animation=0; int total=SurvivalRosterMilliseconds; };
+    // The longest Slice executor (victims it cuts) sets the wait; the server's
+    // presentationMs (same formula, all victims) is respected when present.
+    EliminationHold eliminationHold(matjson::Value const& completed) const {
+        std::map<std::string,std::size_t> slices;
+        for(auto const& execution:m_eliminationExecutions)
+            if(execution.effect==EliminationEffect::Slice&&!execution.executorId.empty())++slices[execution.executorId];
+        std::size_t most=0;for(auto const& entry:slices)most=std::max(most,entry.second);
+        EliminationHold hold;
+        if(most>0){hold.animation=sliceMusouMilliseconds(most);hold.total=sliceResultMilliseconds(most);}
+        auto const server=static_cast<int>(completed["presentationMs"].asInt().unwrapOr(0));
+        hold.total=std::clamp(std::max(hold.total,server),SurvivalRosterMilliseconds,15000);
+        return hold;
     }
     bool presentEliminations(SurvivalMatchView const& view) {
         auto const now=std::chrono::steady_clock::now();
@@ -506,8 +523,11 @@ class SurvivalGameLayer final : public CCLayerColor {
         auto const phase=preview.phase=="TIEBREAK"?std::string("DEATH MATCH"):preview.phase=="FINAL"?std::string("FINAL"):
             "ROUND "+std::to_string(completed["ordinal"].asInt().unwrapOr(1));
         m_heading->setString(fmt::format("SURVIVAL · {} · {}",phase,text("result","RESULT")).c_str());
-        m_eliminationUntil=now+std::chrono::milliseconds(alreadyPresented?0:SurvivalBeforeEliminationMilliseconds+SurvivalEliminationMilliseconds);
-        m_nextMapAt=now+std::chrono::milliseconds(SurvivalRosterMilliseconds);return true;
+        // Slice holds the result until its icon is home (the server's
+        // presentationMs bounds the same wait from every victim).
+        auto const hold=eliminationHold(completed);
+        m_eliminationUntil=now+std::chrono::milliseconds(alreadyPresented?0:SurvivalBeforeEliminationMilliseconds+std::max(SurvivalEliminationMilliseconds,hold.animation));
+        m_nextMapAt=now+std::chrono::milliseconds(alreadyPresented?SurvivalRosterMilliseconds:hold.total);return true;
     }
     void scoreMotion(ScoreAnimationInput input,std::string context) {
         auto const weak=WeakRef<SurvivalGameLayer>(this);

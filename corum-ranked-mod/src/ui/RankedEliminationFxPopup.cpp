@@ -7,6 +7,7 @@
 #include "SurvivalEliminationFx.hpp"
 #include <Geode/cocos/draw_nodes/CCDrawNode.h>
 #include <Geode/cocos/misc_nodes/CCClippingNode.h>
+#include <algorithm>
 #include <cmath>
 
 using namespace geode::prelude;
@@ -17,9 +18,13 @@ namespace {
 constexpr float kListWidth = 300.0f;
 constexpr float kRow = 42.0f;
 constexpr float kIconScale = 0.5f;
-// The preview replays the whole 1.55 s elimination window, then waits.
+// The preview replays the whole 1.55 s elimination window, then waits; Slice
+// loops after its icon is home (plus a beat).
 constexpr float kPreviewLead = 0.3f;
 constexpr float kPreviewLoop = 3.0f;
+float previewLoop(EliminationEffect effect) {
+    return effect == EliminationEffect::Slice ? std::max(kPreviewLoop, kPreviewLead + sliceGatherSeconds(3) + 0.9f) : kPreviewLoop;
+}
 
 std::size_t effectIndex(EliminationEffect effect) {
     for (std::size_t i = 0; i < kEliminationEffects.size(); ++i) if (kEliminationEffects[i] == effect) return i;
@@ -226,7 +231,7 @@ void RankedEliminationFxPopup::render() {
     menu->addChild(equipButton);
     playPreview();
     unschedule(schedule_selector(RankedEliminationFxPopup::previewTick));
-    schedule(schedule_selector(RankedEliminationFxPopup::previewTick), kPreviewLoop);
+    schedule(schedule_selector(RankedEliminationFxPopup::previewTick), previewLoop(m_selected));
 }
 
 // A clipped miniature of the result board: the local player as the gold 1st
@@ -291,8 +296,8 @@ void RankedEliminationFxPopup::executeVictim(std::size_t index) {
     auto [card, slot] = m_victims[index];
     auto const fall = m_world->getContentSize().height;
     if (m_selected == EliminationEffect::Slice) {
-        // Gather and cut: the first reveal runs the whole choreography; each
-        // card turns red as its icon leaves for the pile.
+        // Musou: the first reveal runs the whole choreography; each card
+        // turns red as its icon leaves for the field.
         if (index != 0) return;
         std::vector<SliceGatherVictim> victims;
         for (std::size_t i = 0; i < m_victims.size(); ++i) {
@@ -308,7 +313,7 @@ void RankedEliminationFxPopup::executeVictim(std::size_t index) {
         executor.icon = []() -> CCNode* { return PlayerIcon::createLocal(); };
         executor.iconScale = kIconScale;
         auto const size = m_world->getContentSize();
-        runSliceGathering(m_world, executor, victims, {size.width * 0.62f, size.height * 0.55f}, fall, m_world);
+        runSliceGathering(m_world, executor, victims, {size.width * 0.56f, size.height * 0.5f}, {size.width * 0.3f, size.height * 0.2f}, fall, m_world);
         return;
     }
     // The card turns red as its effect starts.
@@ -342,7 +347,7 @@ void RankedEliminationFxPopup::onReplay(CCObject*) {
     if (m_closed) return;
     playPreview();
     unschedule(schedule_selector(RankedEliminationFxPopup::previewTick));
-    schedule(schedule_selector(RankedEliminationFxPopup::previewTick), kPreviewLoop);
+    schedule(schedule_selector(RankedEliminationFxPopup::previewTick), previewLoop(m_selected));
 }
 
 void RankedEliminationFxPopup::onRetry(CCObject*) { fetch(); }

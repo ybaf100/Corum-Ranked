@@ -6,7 +6,7 @@ import {survivalResultRoster,survivalSeriesResult} from "./survival-result-roste
 import { SurvivalConfigService } from "../config/survival-config.service.js";
 import { survivalQueueView } from "./survival-queue.view.js";
 import { BadRequestException,ConflictException,ForbiddenException,Inject,Injectable,Logger,type OnApplicationBootstrap,type OnApplicationShutdown } from "@nestjs/common";
-import { SURVIVAL_RESULT_MS, reduceSurvivalMatch,survivalCurrentRound,survivalLiveView,survivalMarkAbsent,survivalSettlementInputs,survivalEntryDeadlineAt,
+import { survivalResultMs, reduceSurvivalMatch,survivalCurrentRound,survivalLiveView,survivalMarkAbsent,survivalSettlementInputs,survivalEntryDeadlineAt,
   RankedDomainError,type SurvivalBotDriverState,type SurvivalMatch,type SurvivalCommand,type SurvivalRatingProfile,type SurvivalPromotionSeries } from "@corum-ranked/rules";
 import { DATABASE,type DatabasePort,type SqlExecutor } from "../database/database.port.js";
 import { SERVER_CLOCK,type ServerClock } from "../common/runtime.module.js";
@@ -61,10 +61,10 @@ export class SurvivalOnlineService implements OnApplicationBootstrap,OnApplicati
     if(!row)return before;let match=before;let round=survivalCurrentRound(match);
     // Roster/result presentations belong to the shared server clock; a
     // disconnected or eliminated client cannot hold all other players at a
-    // presentation barrier. The 5.5 s result window is also the window in
+    // presentation barrier. The result window (5.5 s, longer for Slice) is also the window in
     // which the prefetched next map (nextMap) is already downloading.
     const barrierStart=match.presentationGate==="INTRO"?match.createdAt:round.finishedAt;
-    if(match.presentationGate && barrierStart!==null && now>=barrierStart+(match.presentationGate==="INTRO"?6000:SURVIVAL_RESULT_MS)){
+    if(match.presentationGate && barrierStart!==null && now>=barrierStart+(match.presentationGate==="INTRO"?6000:survivalResultMs(match,round))){
       const owner=match.players.find(p=>p.kind==="HUMAN"&&p.eliminationStage===null);
       if(owner)match=reduceSurvivalMatch(match,{type:"PRESENTATION_COMPLETE",roundKey:round.key,mapGeneration:round.mapGeneration,participantId:owner.participantId},now);
     }
