@@ -1014,7 +1014,7 @@ int main() {
     assert.match(main,/\{66.0f, 66.0f\}/);
     assert.match(main,/addRankStatus\(profile,\{colX,leftCenter.y \+ 24.0f\}/);
     assert.match(main,/rankValue->setID\("ranked-profile-standing"_spr\)/);
-    assert(-82+96<50-66/2); // the status line ends left of the trophy
+    assert(-82+96<50-66/2&&-54+68<50-66/2); // the status line ends left of the trophy in both halves
 });
 
 test('division grades skip promotion assembly; Gold goals use title cutoffs and Champion uses rank',()=>{

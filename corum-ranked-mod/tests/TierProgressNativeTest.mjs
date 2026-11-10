@@ -95,7 +95,7 @@ test('lobby mode card shows a compact tier bar (bar and caption) where it has ro
  const card=popup.slice(popup.indexOf('    void renderModeCard('),popup.indexOf('    struct SeenScore {'));
  assert.match(card,/auto const cardBar = !placement && !profile\.promotion\.active && \(survival \? source\.survival\.loaded : view\.profileScoreVisible\)/);
  assert.match(card,/cardBarKind != corum::ranked::TierProgressKind::Promotion/);
- assert.match(card,/if \(cardBar\) addTierProgress\(source, survival, \{leftCenter\.x - 4\.0f, barY \+ 2\.0f\}, 164\.0f, true\);/);
+ assert.match(card,/if \(cardBar\) addTierProgress\(source, survival, \{barX, barY \+ 2\.0f\}, 150\.0f, true\);/);
  assert.match(card,/leftCenter\.y - \(hasTitle \? 73\.0f : 64\.0f\)/);
  const bar=readFileSync(join(root,'src/ui/TierProgressBar.cpp'),'utf8');
  assert.match(bar,/auto const row = m_compact \? -11\.0f : -14\.0f;/);assert.match(bar,/if \(!m_compact\) \{/);
