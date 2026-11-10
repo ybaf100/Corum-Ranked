@@ -482,6 +482,7 @@ class CorumRankedLayer final : public CCLayerColor {
     CCMenu* m_queueMenu = nullptr;
     CCLabelBMFont *m_queuePlayers = nullptr, *m_queueWait = nullptr, *m_queueMinimum = nullptr, *m_queueHint = nullptr, *m_queueHeading = nullptr;
     std::vector<CCLayerColor*> m_queueSlots;
+    CCLayerColor* m_queueFillBar = nullptr; float m_queueFillWidth = 0.0f;
     // Queue arena: radar ring (cyan while searching, gold on MATCH FOUND) and
     // the anonymous opponent slot. Names and icons appear only in the intro.
     CCNode *m_queueRingCyan = nullptr, *m_queueRingGold = nullptr, *m_queueSweep = nullptr;
@@ -1273,7 +1274,7 @@ class CorumRankedLayer final : public CCLayerColor {
         m_queueContents = nullptr; m_queueMenu = nullptr; m_queuePlayers = m_queueWait = m_queueMinimum = m_queueHint = m_queueHeading = nullptr;
         m_queueRingCyan = m_queueRingGold = m_queueSweep = m_queueOpponentBox = nullptr; m_queueCenter = m_queueOpponentMark = m_queueOpponentLabel = nullptr;
         m_queueRadar = nullptr; m_queueRangeLabel = nullptr;
-        m_queueSlots.clear(); m_queueLeave = m_queueFill = nullptr; m_queueShown = m_queueAnimating = false;
+        m_queueSlots.clear(); m_queueFillBar = nullptr; m_queueLeave = m_queueFill = nullptr; m_queueShown = m_queueAnimating = false;
         resetDynamicUiPointers();
         corum::ranked::ui::cancelMenuTouch(m_menu);
         cancelNestedMenuTouches(m_root);
@@ -3155,7 +3156,7 @@ class CorumRankedLayer final : public CCLayerColor {
         if (m_queueContents) m_queueContents->removeFromParentAndCleanup(true);
         m_queueSlots.clear(); m_queuePlayers = m_queueWait = m_queueMinimum = m_queueHint = m_queueHeading = nullptr; m_queueLeave = m_queueFill = nullptr;
         m_queueRingCyan = m_queueRingGold = m_queueSweep = m_queueOpponentBox = nullptr; m_queueCenter = m_queueOpponentMark = m_queueOpponentLabel = nullptr;
-        m_queueRadar = nullptr; m_queueRangeLabel = nullptr;
+        m_queueRadar = nullptr; m_queueRangeLabel = nullptr; m_queueFillBar = nullptr;
         auto const cx = queueCenterX();
         // The queue occupies the widened area right of the divider (which sits
         // in the old gap), centred in it rather than on the hidden action card.
@@ -3192,21 +3193,42 @@ class CorumRankedLayer final : public CCLayerColor {
         m_queueSurvivalArena = mode == corum::ranked::RankedMode::Survival;
         m_radarBlips.clear(); m_queueSweepAngle = 0.0f; m_radarFrameAt = {};
         if (mode == corum::ranked::RankedMode::Survival) {
-            // Seats sit on the ring around the player count; the minimum is gold.
+            // L5: the player count, wait and minimum on one row, a fill bar, and
+            // a grid of seats. A joining player appears as a plain white
+            // default cube named "PLAYER n" that fades in; open seats show
+            // their number. Seats inside the minimum carry a gold top edge.
+            m_queueRadar->setVisible(false);
             auto const maximum = std::clamp(corum::ranked::SurvivalRuntime::get().queue().maximumPlayers,2,64);
-            auto const seat = maximum > 16 ? 4.0f : 6.0f;
-            for (int index = 0; index < maximum; ++index) {
-                auto const angle = 6.28318530718f * static_cast<float>(index) / static_cast<float>(maximum) - 1.57079632679f;
-                // Colour-only seats: opacity stays with the fade, not the seat state.
-                auto* slot = CCLayerColor::create({45, 49, 63,255},seat,seat);
-                slot->setPosition({ring.x + std::cos(angle) * (ringRadius + 6.0f) - seat / 2.0f, ring.y - std::sin(angle) * (ringRadius + 6.0f) - seat / 2.0f});
+            auto const left = qx - half + 10.0f, width = half * 2.0f - 20.0f;
+            auto* caption = makeLabel(tr("survival-queue-players","PLAYERS"),0.17f,{left,70.0f},corum::ranked::ui::TextMuted,"semibold",{0.0f,0.5f});
+            m_queueContents->addChild(caption,5);
+            m_queuePlayers = makeLabel("",0.46f,{left,57.0f},corum::ranked::ui::Text,"black",{0.0f,0.5f}); m_queueContents->addChild(m_queuePlayers,5);
+            m_queueWait = makeLabel("",0.26f,{qx + 6.0f,57.0f},kGold,"semibold"); m_queueContents->addChild(m_queueWait,5);
+            m_queueMinimum = makeLabel("",0.19f,{left + width,57.0f},corum::ranked::ui::TextMuted,"semibold",{1.0f,0.5f}); m_queueContents->addChild(m_queueMinimum,5);
+            auto* track = CCLayerColor::create({45,49,63,255},width,4.0f); track->setPosition({left,44.0f}); m_queueContents->addChild(track,4);
+            m_queueFillBar = CCLayerColor::create({corum::ranked::ui::Accent.r,corum::ranked::ui::Accent.g,corum::ranked::ui::Accent.b,255},0.0f,4.0f);
+            m_queueFillBar->setPosition({left,44.0f}); m_queueFillBar->setID("survival-queue-fill-bar"_spr); m_queueContents->addChild(m_queueFillBar,5);
+            m_queueFillWidth = width;
+            auto const seats = std::min(maximum,16);
+            constexpr int columns = 4; constexpr float gap = 3.0f, tileH = 18.0f;
+            auto const tileW = (width - gap * (columns - 1)) / columns;
+            for (int index = 0; index < seats; ++index) {
+                auto const col = index % columns, row = index / columns;
+                auto* slot = CCLayerColor::create({23,25,34,255},tileW,tileH);
+                slot->ignoreAnchorPointForPosition(false); slot->setAnchorPoint({0.5f,0.5f});
+                slot->setPosition({left + col * (tileW + gap) + tileW / 2.0f, 28.0f - row * (tileH + gap)});
+                if (index < corum::ranked::SurvivalRuntime::get().queue().minimumPlayers) {
+                    auto* edge = CCLayerColor::create({kGold.r,kGold.g,kGold.b,150},tileW,1.0f); edge->setPosition({0.0f,tileH - 1.0f}); slot->addChild(edge,1);
+                }
+                auto* icon = SimplePlayer::create(1);
+                icon->setColors({255,255,255},{255,255,255}); icon->setScale(0.30f);
+                icon->setCascadeOpacityEnabled(true); icon->setPosition({9.0f,tileH / 2.0f}); icon->setVisible(false); icon->setTag(11);
+                slot->addChild(icon,3);
+                auto* name = makeLabel(fmt::format(fmt::runtime(tr("survival-queue-seat","PLAYER {}")),index + 1),0.14f,{18.0f,tileH / 2.0f},corum::ranked::ui::Text,"semibold",{0.0f,0.5f});
+                corum::ranked::ui::fitMenuLabelWidth(name,tileW - 21.0f,0.14f,0.09f); name->setVisible(false); name->setTag(12); slot->addChild(name,3);
+                auto* number = makeLabel(std::to_string(index + 1),0.16f,{tileW / 2.0f,tileH / 2.0f},ccc3(90,96,114),"black"); number->setTag(13); slot->addChild(number,3);
                 m_queueContents->addChild(slot,4); m_queueSlots.push_back(slot);
             }
-            auto* caption = makeLabel(tr("survival-queue-players","PLAYERS"),0.20f,{ring.x,ring.y + 14.0f},corum::ranked::ui::TextMuted,"semibold");
-            m_queueContents->addChild(caption,5);
-            m_queuePlayers = makeLabel("",0.46f,{ring.x,ring.y - 2.0f},corum::ranked::ui::Text,"black"); m_queueContents->addChild(m_queuePlayers,5);
-            m_queueWait = makeLabel("",0.27f,{qx,-30.0f},kGold,"semibold"); m_queueContents->addChild(m_queueWait,5);
-            m_queueMinimum = makeLabel("",0.21f,{qx,-44.0f},corum::ranked::ui::TextMuted,"semibold"); m_queueContents->addChild(m_queueMinimum,5);
             m_queueHint = makeLabel("",0.17f,{qx,-56.0f},corum::ranked::ui::TextMuted,"semibold"); m_queueContents->addChild(m_queueHint,5);
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
             m_queueLeave = queueButton(tr("leave-queue","LEAVE QUEUE"),{qx - 44.0f,-74.0f},menu_selector(CorumRankedLayer::onSurvivalLeaveQueue),kRed,84);
@@ -3233,9 +3255,16 @@ class CorumRankedLayer final : public CCLayerColor {
             // Both centre lines fit inside the radar hub (radius 23).
             corum::ranked::ui::fitMenuLabelWidth(m_queueCenter,36.0f,0.24f,0.12f); m_queueContents->addChild(m_queueCenter,5);
             m_queueWait = makeLabel("",0.40f,{ring.x,ring.y - 6.0f},corum::ranked::ui::Text,"black"); m_queueContents->addChild(m_queueWait,5);
-            auto* hint = makeLabel(tr("find-match","FIND A 1V1 MATCH"),0.21f,{qx,-38.0f},corum::ranked::ui::TextMuted,"semibold");
+            auto* hint = makeLabel(tr("find-match","FIND A 1V1 MATCH"),0.21f,{qx,-34.0f},corum::ranked::ui::TextMuted,"semibold");
             corum::ranked::ui::fitMenuLabelWidth(hint,half * 2.0f - 16.0f,0.21f,0.15f); m_queueContents->addChild(hint,5);
-            m_queueLeave = queueButton(tr("leave-queue","LEAVE QUEUE"),{qx,-74.0f},menu_selector(CorumRankedLayer::onLeave),kRed,120);
+            // L4: the widening search range as a bar under the hint.
+            auto const barW = std::min(150.0f, half * 2.0f - 24.0f), barX = qx - barW / 2.0f;
+            m_queueContents->addChild(makeLabel(tr("search-range","SEARCH RANGE"),0.15f,{barX,-48.0f},corum::ranked::ui::TextMuted,"semibold",{0.0f,0.5f}),5);
+            auto* track = CCLayerColor::create({45,49,63,255},barW,3.0f); track->setPosition({barX,-57.0f}); m_queueContents->addChild(track,4);
+            m_queueFillBar = CCLayerColor::create({corum::ranked::ui::Accent.r,corum::ranked::ui::Accent.g,corum::ranked::ui::Accent.b,255},0.0f,3.0f);
+            m_queueFillBar->setPosition({barX,-57.0f}); m_queueFillBar->setID("ranked-queue-range-bar"_spr); m_queueContents->addChild(m_queueFillBar,5);
+            m_queueFillWidth = barW;
+            m_queueLeave = queueButton(tr("leave-queue","LEAVE QUEUE"),{qx,-76.0f},menu_selector(CorumRankedLayer::onLeave),kRed,120);
         }
         m_root = savedRoot;
         setLobbyNodeInput(m_queueMenu,false);
@@ -3365,7 +3394,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 }
             }
             if (found) {
-                for (auto* slot : m_queueSlots) slot->setColor(kGold);
+                for (auto* slot : m_queueSlots) slot->setColor(slot->getTag() == 1 ? ccc3(110,90,30) : ccc3(50,44,24));
                 if (m_queueWait) m_queueWait->setString(tr("match-found","MATCH FOUND").c_str());
                 if (m_queueLeave) m_queueLeave->setEnabled(false);
                 if (m_queueFill) m_queueFill->setEnabled(false);
@@ -3374,19 +3403,28 @@ class CorumRankedLayer final : public CCLayerColor {
             if (m_queuePlayers) {
                 m_queuePlayers->setString(fmt::format("{} / {}",queue.players,queue.maximumPlayers).c_str());
                 m_queuePlayers->setColor(queue.players >= queue.minimumPlayers ? corum::ranked::ui::Green : corum::ranked::ui::Text);
-                corum::ranked::ui::fitMenuLabelWidth(m_queuePlayers,62,0.46f,0.24f);
+                corum::ranked::ui::fitMenuLabelWidth(m_queuePlayers,58,0.46f,0.24f);
             }
+            if (m_queueFillBar) m_queueFillBar->setContentSize({m_queueFillWidth * std::clamp(static_cast<float>(queue.players) / static_cast<float>(std::max(1,queue.maximumPlayers)),0.0f,1.0f),4.0f});
             for (std::size_t index = 0; index < m_queueSlots.size(); ++index) {
                 auto* slot = m_queueSlots[index];
                 auto const filled = static_cast<int>(index) < queue.players;
-                slot->setColor(filled
-                    ? (static_cast<int>(index) < queue.minimumPlayers ? kGold : kAccent)
-                    : (static_cast<int>(index) < queue.minimumPlayers ? ccc3(70,60,30) : ccc3(45, 49, 63)));
-                // A joining player's seat pops in; scale only, opacity follows the panel fade.
+                slot->setColor(filled ? ccc3(43,47,60) : ccc3(23,25,34));
+                // A joining player's white cube and name fade in (their own
+                // opacity, under the panel's); the open seat number hides.
+                auto* icon = slot->getChildByTag(11); auto* name = slot->getChildByTag(12); auto* number = slot->getChildByTag(13);
                 if (filled && slot->getTag() != 1) {
-                    slot->setTag(1); slot->stopAllActions(); slot->setScale(0.1f);
-                    slot->runAction(CCEaseBackOut::create(CCScaleTo::create(0.28f, 1.0f)));
-                } else if (!filled && slot->getTag() == 1) { slot->setTag(0); slot->stopAllActions(); slot->setScale(1.0f); }
+                    slot->setTag(1);
+                    for (auto* part : {icon, name}) if (auto* rgba = dynamic_cast<CCRGBAProtocol*>(part)) {
+                        part->setVisible(true); part->stopAllActions(); rgba->setOpacity(0); part->runAction(CCFadeTo::create(0.35f,255));
+                    } else if (part) part->setVisible(true);
+                    if (number) number->setVisible(false);
+                } else if (!filled && slot->getTag() == 1) {
+                    slot->setTag(0);
+                    if (icon) icon->setVisible(false);
+                    if (name) name->setVisible(false);
+                    if (number) number->setVisible(true);
+                }
             }
             if (m_queueWait) m_queueWait->setString(fmt::format("{}: {:02}:{:02}",tr("waiting","WAITING"),waiting / 60,waiting % 60).c_str());
             if (m_queueMinimum) m_queueMinimum->setString(fmt::format("{}: {}",tr("survival-queue-minimum","MINIMUM PLAYERS"),queue.minimumPlayers).c_str());
@@ -3418,6 +3456,12 @@ class CorumRankedLayer final : public CCLayerColor {
             if (m_queueOpponentMark) m_queueOpponentMark->setColor(found ? kGold : corum::ranked::ui::TextMuted);
             if (m_queueOpponentLabel) m_queueOpponentLabel->setColor(found ? kGold : corum::ranked::ui::TextMuted);
             if (m_queueWait) { m_queueWait->setString(fmt::format("{:02}:{:02}",waiting / 60,waiting % 60).c_str()); corum::ranked::ui::fitMenuLabelWidth(m_queueWait,40.0f,0.40f,0.26f); }
+            if (m_queueFillBar) {
+                auto const& radar = RankedRuntime::get().view().queueRadar;
+                auto const share = radar.maximumRange > 0 ? std::clamp(static_cast<float>(radar.searchRange) / static_cast<float>(radar.maximumRange),0.0f,1.0f) : 0.0f;
+                m_queueFillBar->setContentSize({m_queueFillWidth * (found ? 1.0f : share),3.0f});
+                m_queueFillBar->setColor(found ? kGold : corum::ranked::ui::Accent);
+            }
             if (m_queueLeave) m_queueLeave->setEnabled(!found && RankedRuntime::get().view().stage == RuntimeStage::Queued);
         }
     }
@@ -3447,7 +3491,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 // pointers survived into the next open's syncQueueRings().
                 self->m_queueRingCyan = self->m_queueRingGold = self->m_queueSweep = self->m_queueOpponentBox = nullptr;
                 self->m_queueCenter = self->m_queueOpponentMark = self->m_queueOpponentLabel = nullptr;
-                self->m_queueRadar = nullptr; self->m_queueRangeLabel = nullptr;
+                self->m_queueRadar = nullptr; self->m_queueRangeLabel = nullptr; self->m_queueFillBar = nullptr;
             }
             self->syncLobbyInput(); self->placeLobbyFooter(); self->refreshLobbyHover();
         };

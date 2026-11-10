@@ -32,8 +32,8 @@ int main(){
 `));
 test('tier bar is wired under both start buttons and fades with the panel',()=>{
  const popup=readFileSync(join(root,'src/RankedPopup.cpp'),'utf8'),bar=readFileSync(join(root,'src/ui/TierProgressBar.cpp'),'utf8');
- assert.match(popup,/addTierProgress\(view, false, \{rightCenter\.x, rightCenter\.y - 80\.0f\}\)/);
- assert.match(popup,/addTierProgress\(view, true, \{94, -80\.0f\}\)/);
+ assert.match(popup,/addTierProgress\(view, survival, \{rightCenter\.x, rightCenter\.y \+ 33\.0f\}\)/);assert.match(popup,/if \(!view\.placement\.required\) addLadder\(false\)/);
+ assert.match(popup,/if \(!retry\) addLadder\(true\)/);
  assert.match(bar,/getDisplayedOpacity\(\)/);assert.match(bar,/achievementPastelAt\(position, seconds\)/);assert.match(bar,/RankBadgeDisplay::Matched/);
 });
 test('Survival promotion plays its tier motion first: promotion -> podium -> score -> result',()=>{

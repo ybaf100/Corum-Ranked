@@ -51,7 +51,7 @@ test('map pool is its own lobby page; map info is a popup; VIEW LEVEL reuses the
  const visuals=readFileSync(join(root,'src/ui/MapPoolVisuals.hpp'),'utf8');
  const runtime=readFileSync(join(root,'src/RankedRuntime.cpp'),'utf8');
  // Mirrors the UI editor (+71) on the left side of the start button.
- assert.match(popup,/addMapPoolButton\(\{rightCenter\.x - 71\.0f, rightCenter\.y \+ 18\.0f\}\)/);
+ assert.match(popup,/addMapPoolButton\(\{rightCenter\.x - 56\.0f, rightCenter\.y - 78\.0f\}\)/);
  // A separate screen like match history, rendered once (it redraws itself).
  assert.match(popup,/m_page = Page::MapPool;/);assert.match(popup,/if \(m_page == Page::MapPool\) return "map-pool";/);
  assert.match(popup,/RankedMapPoolView::create\(size\)/);

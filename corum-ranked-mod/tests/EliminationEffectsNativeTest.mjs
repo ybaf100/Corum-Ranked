@@ -62,7 +62,7 @@ test('elimination reveal: gold 1st card, executions from the completed round, cu
  assert.match(layer,/execution\.effect!=EliminationEffect::Default && execution\.effect!=EliminationEffect::Slice && !execution\.executorId\.empty\(\)\)\{playExecution/);
  assert.match(fx,/float eliminationFxSeconds\(\) \{ return SurvivalEliminationFallMilliseconds \/ 1000\.0f; \}/);
  assert.doesNotMatch(fx,/drawDot|drawSegment/);
- assert.match(popup,/addEliminationFxButton\(\{23,18\}\);/);
+ assert.match(popup,/addEliminationFxButton\(\{66,-78\}\);/);
  assert.match(popup,/if \(m_eliminationFx\) if \(auto popup = m_eliminationFx->lock\(\)\) popup->dismiss\(\);/);
  assert.match(popup,/auto const grade = corum::ranked::achievementApGrade\(totalAp\);/);
 });
