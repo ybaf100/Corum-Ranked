@@ -181,6 +181,14 @@ public:
                     auto* label=playerNameLabel(it->name,.26f,{width/2,14},tint,FontWeight::Black);fitFullMenuLabel(label,width-8,16,.26f);face->addChild(label,5);
                     auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(SurvivalOutcomePanel::onAction));item->setTag(100+static_cast<int>(it-m_profiles.begin()));item->setPosition({x,base+h+36});m_menu->addChild(item);
                     auto* place=menuLabel(survivalOrdinal(rank),.28f,{x,base-13},tint,FontWeight::Black);addChild(place,5);
+                    // S5: the own pedestal also names the promotion state the server sent for us.
+                    if(it->id==view.ownId){auto const& r=view.result;std::string state;ccColor3B tone=Text;
+                        if(r["promotionSucceeded"].asBool().unwrapOr(false)||r["promoted"].asBool().unwrapOr(false)){state=i18n::text("promoted","PROMOTED");tone=Green;}
+                        else if(r["promotionFailed"].asBool().unwrapOr(false)){state=i18n::text("promotion-failed","PROMOTION FAILED");tone=Red;}
+                        else if(r["promotionStarted"].asBool().unwrapOr(false)){state=i18n::text("promotion-match","PROMOTION MATCH");tone=ccc3(145,255,125);}
+                        else if(r["demoted"].asBool().unwrapOr(false)){state=i18n::text("demoted","DEMOTED");tone=Red;}
+                        if(!state.empty()){auto* chip=menuLabel(state,.17f,{x,base-27},tone,FontWeight::ExtraBold);fitFullMenuLabel(chip,width-8,12,.17f);chip->setID("survival-podium-own-state"_spr);addChild(chip,5);}
+                    }
                     CCNode* glow=nullptr;
                     if(rank==1){glow=createRankAmbientFx("GOLD",{68,68},RankBadgeDisplay::Matched);glow->setPosition({x,base+h+46});glow->setID("survival-podium-gold-ambient"_spr);addChild(glow,4);m_halo=glow;}
                     m_stages.push_back({pedestal,item,stamp,place,glow,x,base,h,rank});
