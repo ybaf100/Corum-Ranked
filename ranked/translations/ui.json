@@ -3486,5 +3486,9 @@
   "search-range": {
     "en": "SEARCH RANGE",
     "ko": "검색 범위"
+  },
+  "stage-grade-short": {
+    "en": "GRADE",
+    "ko": "등급"
   }
 }

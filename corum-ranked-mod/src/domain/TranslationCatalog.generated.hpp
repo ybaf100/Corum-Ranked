@@ -806,6 +806,7 @@ inline constexpr std::array kTranslations {
     CatalogTranslation{"spectator-waiting", "WAITING...", "대기 중..."},
     CatalogTranslation{"spectator-world-desync", "WORLD DESYNC · WAITING FOR NEXT ATTEMPT", "맵 상태 불일치 · 다음 시도 대기"},
     CatalogTranslation{"stage-grade", "STAGE GRADE", "STAGE 등급"},
+    CatalogTranslation{"stage-grade-short", "GRADE", "등급"},
     CatalogTranslation{"start", "START", "시작"},
     CatalogTranslation{"start-muted", "START MUTED", "음소거로 시작"},
     CatalogTranslation{"start-placement", "START PLACEMENT", "배치 시작"},
