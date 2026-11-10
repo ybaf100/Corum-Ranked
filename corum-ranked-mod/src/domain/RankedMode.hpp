@@ -70,9 +70,10 @@ inline ModeLobbyFrame modeLobbyFrame(ModeLobbyLayout const& layout, RankedMode m
         return {layout.leftX,mix(layout.rightX,layout.leftX,move),layout.rightX,
             opacity(1-out),255,opacity(fade(ModeLobbyFadeInStart,1)),opacity(1-out)};
     }
-    // Survival stays: Solo and the entry controls fade out in place, then the
-    // menu fades in where Solo was.
-    auto const out = fade(0,ModeLobbySurvivalOutEnd);
-    return {layout.leftX,layout.rightX,layout.rightX,255,opacity(1-out),opacity(fade(ModeLobbySurvivalInStart,1)),opacity(1-out)};
+    // Survival stays: the menu emerges from behind the stationary Survival
+    // card and covers Solo on the right (restored pre-beta.183 motion).
+    // Reverse uses exactly the same positions and opacity.
+    return {layout.leftX,layout.rightX,mix(layout.leftX,layout.rightX,p),255,opacity(1-fade(0.4f,0.95f)),255,
+        opacity(1-fade(0,0.25f))};
 }
 } // namespace corum::ranked

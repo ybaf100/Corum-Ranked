@@ -178,16 +178,19 @@ int main(){using namespace corum::ranked;
   o.step(.25f);float quarterX=o.solo.position.x,quarterSurvivalX=o.survival.position.x,quarterPanelX=o.panel.position.x;
   int quarterSurvivalAlpha=o.survival.real,quarterMenuAlpha=o.panel.real;
   // Fade out first: nothing has moved yet, the leaving card is fading in place, the menu is not shown.
-  assert(o.panel.sx==l.scale&&std::abs(o.panel.position.x-(l.rightX-94*l.scale))<.001f&&o.panel.real==0);
-  if(mode==RankedMode::SoloRanked)assert(o.survival.position.x==l.leftX&&o.survival.real>0&&o.survival.real<255);
-  else assert(o.survival.position.x==l.leftX&&o.survival.real==255&&o.solo.real>0&&o.solo.real<255);
+  if(mode==RankedMode::SoloRanked){assert(o.panel.sx==l.scale&&std::abs(o.panel.position.x-(l.rightX-94*l.scale))<.001f&&o.panel.real==0);
+   assert(o.survival.position.x==l.leftX&&o.survival.real>0&&o.survival.real<255);}
+  // Survival: the menu emerges from behind the Survival card, fully opaque, while Solo still shows.
+  else assert(o.survival.position.x==l.leftX&&o.survival.real==255&&o.solo.real==255&&o.panel.real==255&&
+   std::abs(o.panel.position.x-(l.leftX+(l.rightX-l.leftX)*.25f-94*l.scale))<.001f);
   assert(quarterX==l.rightX);
   assert(!o.m_modeTransition.back()&&!o.m_modeTransition.select(mode));
   o.step(.5f);assert(!o.panelMenu.touch);
   // Then the move: the leaving card is gone and the menu has not appeared; Solo slides.
   if(mode==RankedMode::SoloRanked)assert(o.solo.position.x>l.leftX&&o.solo.position.x<l.rightX&&o.survival.real==0&&o.panel.real==0);
-  else assert(o.solo.real==0&&o.panel.real==0);
-  o.step(.85f);assert(o.panel.real>0&&o.panel.real<255&&std::abs(o.panel.position.x-(l.rightX-94*l.scale))<.001f);
+  else assert(o.solo.real>0&&o.solo.real<255&&o.panel.real==255&&o.panel.position.x<l.rightX-94*l.scale);
+  if(mode==RankedMode::SoloRanked){o.step(.85f);assert(o.panel.real>0&&o.panel.real<255&&std::abs(o.panel.position.x-(l.rightX-94*l.scale))<.001f);}
+  else{o.step(.85f);assert(o.panel.real==255&&o.solo.real<255&&o.panel.position.x>l.leftX-94*l.scale&&o.panel.position.x<l.rightX-94*l.scale);}
   if(mode==RankedMode::SoloRanked)assert(o.solo.position.x==l.leftX);
   o.step(1);
   assert(!o.m_modeTransition.moving()&&o.menu.touch&&o.panelMenu.touch&&!o.survivalMenu.touch&&!o.soloMenu.touch);

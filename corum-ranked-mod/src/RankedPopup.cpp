@@ -3273,24 +3273,31 @@ class CorumRankedLayer final : public CCLayerColor {
             m_queueFillBar = CCLayerColor::create({corum::ranked::ui::Accent.r,corum::ranked::ui::Accent.g,corum::ranked::ui::Accent.b,255},0.0f,4.0f);
             m_queueFillBar->setPosition({left,44.0f}); m_queueFillBar->setID("survival-queue-fill-bar"_spr); m_queueContents->addChild(m_queueFillBar,5);
             m_queueFillWidth = width;
-            auto const seats = std::min(maximum,16);
-            constexpr int columns = 4; constexpr float gap = 3.0f, tileH = 18.0f;
-            auto const tileW = (width - gap * (columns - 1)) / columns;
+            // Up to 16 seats show names (4 per row); larger fields (up to 64)
+            // use compact seats, 16 per row, with the cube only.
+            auto const seats = maximum;
+            auto const compact = seats > 16;
+            auto const columns = compact ? 16 : 4;
+            auto const gap = compact ? 2.0f : 3.0f;
+            auto const tileW = (width - gap * static_cast<float>(columns - 1)) / static_cast<float>(columns);
+            auto const tileH = compact ? std::min(tileW, 72.0f / static_cast<float>((seats + columns - 1) / columns) - gap) : 18.0f;
             for (int index = 0; index < seats; ++index) {
                 auto const col = index % columns, row = index / columns;
                 auto* slot = CCLayerColor::create({23,25,34,255},tileW,tileH);
                 slot->ignoreAnchorPointForPosition(false); slot->setAnchorPoint({0.5f,0.5f});
-                slot->setPosition({left + col * (tileW + gap) + tileW / 2.0f, 28.0f - row * (tileH + gap)});
+                slot->setPosition({left + col * (tileW + gap) + tileW / 2.0f, (compact ? 32.0f : 28.0f) - row * (tileH + gap)});
                 if (index < corum::ranked::SurvivalRuntime::get().queue().minimumPlayers) {
                     auto* edge = CCLayerColor::create({kGold.r,kGold.g,kGold.b,150},tileW,1.0f); edge->setPosition({0.0f,tileH - 1.0f}); slot->addChild(edge,1);
                 }
                 auto* icon = SimplePlayer::create(1);
-                icon->setColors({255,255,255},{255,255,255}); icon->setScale(0.30f);
-                icon->setCascadeOpacityEnabled(true); icon->setPosition({9.0f,tileH / 2.0f}); icon->setVisible(false); icon->setTag(11);
+                icon->setColors({255,255,255},{255,255,255}); icon->setScale(compact ? std::min(0.30f, tileH / 34.0f) : 0.30f);
+                icon->setCascadeOpacityEnabled(true); icon->setPosition({compact ? tileW / 2.0f : 9.0f,tileH / 2.0f}); icon->setVisible(false); icon->setTag(11);
                 slot->addChild(icon,3);
-                auto* name = makeLabel(fmt::format(fmt::runtime(tr("survival-queue-seat","PLAYER {}")),index + 1),0.14f,{18.0f,tileH / 2.0f},corum::ranked::ui::Text,"semibold",{0.0f,0.5f});
-                corum::ranked::ui::fitMenuLabelWidth(name,tileW - 21.0f,0.14f,0.09f); name->setVisible(false); name->setTag(12); slot->addChild(name,3);
-                auto* number = makeLabel(std::to_string(index + 1),0.16f,{tileW / 2.0f,tileH / 2.0f},ccc3(90,96,114),"black"); number->setTag(13); slot->addChild(number,3);
+                if (!compact) {
+                    auto* name = makeLabel(fmt::format(fmt::runtime(tr("survival-queue-seat","PLAYER {}")),index + 1),0.14f,{18.0f,tileH / 2.0f},corum::ranked::ui::Text,"semibold",{0.0f,0.5f});
+                    corum::ranked::ui::fitMenuLabelWidth(name,tileW - 21.0f,0.14f,0.09f); name->setVisible(false); name->setTag(12); slot->addChild(name,3);
+                    auto* number = makeLabel(std::to_string(index + 1),0.16f,{tileW / 2.0f,tileH / 2.0f},ccc3(90,96,114),"black"); number->setTag(13); slot->addChild(number,3);
+                }
                 m_queueContents->addChild(slot,4); m_queueSlots.push_back(slot);
             }
             m_queueHint = makeLabel("",0.17f,{qx,-56.0f},corum::ranked::ui::TextMuted,"semibold"); m_queueContents->addChild(m_queueHint,5);
