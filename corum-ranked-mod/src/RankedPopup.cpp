@@ -74,6 +74,7 @@
 #include <Geode/binding/LevelInfoLayer.hpp>
 #include <Geode/binding/MusicDownloadManager.hpp>
 #include <Geode/ui/ScrollLayer.hpp>
+#include <Geode/ui/Notification.hpp>
 #include <Geode/binding/SimplePlayer.hpp>
 #include <Geode/ui/LoadingSpinner.hpp>
 
@@ -354,6 +355,35 @@ CCLabelBMFont* makeLabel(
     if (result) result->setAnchorPoint(anchor);
     return result;
 }
+
+// Q11: free play while the mod update downloads. The player leaves Ranked;
+// this watcher keeps polling outside any scene and restarts the game, as
+// the update screen announced, once the new package is installed.
+class ModUpdateRestartWatcher final : public CCObject {
+    bool m_fired = false;
+    double m_waited = 0.0;
+public:
+    static void arm() {
+        static ModUpdateRestartWatcher* armed = nullptr;
+        if (armed) return;
+        armed = new ModUpdateRestartWatcher();
+        CCDirector::sharedDirector()->getScheduler()->scheduleSelector(
+            schedule_selector(ModUpdateRestartWatcher::tick), armed, 0.25f, false);
+    }
+    void tick(float dt) {
+        using corum::ranked::ui::ModUpdateState;
+        auto& manager = corum::ranked::ui::RankedModUpdateManager::get();
+        if (manager.view().state != ModUpdateState::RestartRequired) return;
+        if (!m_fired) {
+            m_fired = true;
+            Notification::create(corum::ranked::i18n::text("mod-update-installed-restart", "Update installed. Restarting now..."),
+                NotificationIcon::Success, 1.5f)->show();
+            return;
+        }
+        m_waited += dt;
+        if (m_waited >= 1.25) manager.restart();
+    }
+};
 
 CCNode* makePanel(CCSize size, CCPoint position, ccColor3B color = kPanelColor, GLubyte opacity = 235) {
     return corum::ranked::ui::surface(size, position, color, kDeepPanel2, opacity, false);
@@ -2027,6 +2057,11 @@ class CorumRankedLayer final : public CCLayerColor {
         if (busy) {
             m_resourceProgressLabel = makeLabel(fmt::format("{}%", static_cast<int>(update.progress * 100)),
                 0.35f, {center.x, center.y - 33}, kGold, "black"); m_root->addChild(m_resourceProgressLabel, 4);
+            // Free play while it downloads: leave Ranked and keep playing; the
+            // watcher restarts the game as soon as the install completes.
+            auto* freePlay = addButton(tr("mod-update-free-play", "FREE PLAY WHILE DOWNLOADING"), {center.x + 48, center.y - 60},
+                menu_selector(CorumRankedLayer::onModUpdateFreePlay), false, 0.56f, true);
+            freePlay->setID("ranked-mod-update-free-play"_spr);
         } else {
             auto const canDownload = corum::ranked::ui::RankedModUpdateManager::get().canDownload();
             addButton(restart ? tr("restart", "RESTART") : canDownload ? tr("mod-update-download", "DOWNLOAD UPDATE") : tr("retry", "RETRY"),
@@ -2050,6 +2085,10 @@ class CorumRankedLayer final : public CCLayerColor {
         })){m_updateChannelPopup.emplace(popup);popup->show();}
     }
     void onDownloadModUpdate(CCObject*) { corum::ranked::ui::RankedModUpdateManager::get().download(); }
+    void onModUpdateFreePlay(CCObject* sender) {
+        ModUpdateRestartWatcher::arm();
+        onCloseLayer(sender);
+    }
     void onRestartModUpdate(CCObject*) { corum::ranked::ui::RankedModUpdateManager::get().restart(); }
 
     void renderResources() {

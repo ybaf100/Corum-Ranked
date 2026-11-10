@@ -3452,8 +3452,8 @@
     "ko": "경기는 계속 진행 중입니다. 공식 기록 없이 이 맵을 이어서 플레이할 수 있습니다."
   },
   "mod-update-auto-restart": {
-    "en": "The game restarts as soon as the download finishes.",
-    "ko": "다운로드가 끝나면 즉시 재시작됩니다."
+    "en": "The game restarts as soon as the download finishes. You can play freely meanwhile.",
+    "ko": "다운로드가 끝나면 게임이 바로 재시작됩니다. 그동안 자유 플레이를 할 수 있습니다."
   },
   "equipped-title": {
     "en": "EQUIPPED TITLE",
@@ -3494,5 +3494,13 @@
   "title-equipped-chip": {
     "en": "EQUIPPED",
     "ko": "장착 중"
+  },
+  "mod-update-free-play": {
+    "en": "FREE PLAY WHILE DOWNLOADING",
+    "ko": "다운로드 중 자유 플레이"
+  },
+  "mod-update-installed-restart": {
+    "en": "Update installed. Restarting now...",
+    "ko": "업데이트 설치 완료 · 바로 재시작합니다"
   }
 }
