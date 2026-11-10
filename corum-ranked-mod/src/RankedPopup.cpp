@@ -3221,23 +3221,37 @@ class CorumRankedLayer final : public CCLayerColor {
         m_queueSlots.clear(); m_queuePlayers = m_queueWait = m_queueMinimum = m_queueHint = m_queueHeading = nullptr; m_queueLeave = m_queueFill = nullptr;
         m_queueRingCyan = m_queueRingGold = m_queueSweep = m_queueOpponentBox = nullptr; m_queueCenter = m_queueOpponentMark = m_queueOpponentLabel = nullptr;
         m_queueRadar = nullptr; m_queueRangeLabel = nullptr; m_queueFillBar = nullptr;
-        auto const cx = queueCenterX();
-        // The queue occupies the widened area right of the divider (which sits
-        // in the old gap), centred in it rather than on the hidden action card.
-        auto const dividerX = cx / 2.0f, rightEdge = cx + 94.0f;
-        auto const qx = (dividerX + rightEdge) / 2.0f, half = (rightEdge - dividerX) / 2.0f;
+        // L4/L5: the queue is its own full-screen page over the lobby. Its root
+        // sits at the lobby centre line, so the queue rows keep their offsets;
+        // x is screen x. Header row, profile on the left, queue area right.
+        auto const win = CCDirector::sharedDirector()->getWinSize();
+        auto const centerY = corum::ranked::modeLobbyLayout(win.width, win.height).centerY;
+        auto const areaLeft = 186.0f, areaRight = win.width - 16.0f;
+        auto const qx = (areaLeft + areaRight) / 2.0f, half = (areaRight - areaLeft) / 2.0f;
+        auto const headerY = win.height - centerY - 62.0f;
         m_queueContents = CCLayerColor::create({0,0,0,255},0,0);
-        m_queueContents->setCascadeOpacityEnabled(true);
-        m_queueContents->setID("ranked-queue-contents"_spr); card->addChild(m_queueContents,9);
+        m_queueContents->setCascadeOpacityEnabled(true); m_queueContents->setPosition({0.0f, centerY});
+        m_queueContents->setID("ranked-queue-contents"_spr); m_root->addChild(m_queueContents,12);
+        (void)card;
         m_queueMenu = CCMenu::create(); m_queueMenu->setPosition(CCPointZero); m_queueMenu->setID("ranked-queue-menu"_spr);
         m_queueContents->addChild(m_queueMenu,20);
         auto* savedRoot = m_root; m_root = m_queueContents;
-        auto* divider = CCLayerColor::create({kAccent.r,kAccent.g,kAccent.b,70},1.0f,176.0f);
-        divider->setPosition({dividerX - 0.5f,-88.0f}); m_queueContents->addChild(divider,2);
-        auto* heading = makeLabel(tr("matchmaking","MATCHMAKING"),0.34f,{qx - 8.0f,80.0f},kAccent,"semibold");
+        // Opaque page ground over the lobby; the screen header strip (back,
+        // title, language) stays uncovered and the footer toolbar (z 20,
+        // FREE PLAY) stays on top.
+        auto* ground = CCLayerColor::create({corum::ranked::ui::Ink.r,corum::ranked::ui::Ink.g,corum::ranked::ui::Ink.b,255},win.width,win.height - 46.0f);
+        ground->setPosition({0.0f,-centerY}); ground->setID("ranked-queue-page-ground"_spr); m_queueContents->addChild(ground,0);
+        auto const survivalMode = mode == corum::ranked::RankedMode::Survival;
+        // Header: number chip, leaning mode name, MATCHMAKING / MATCH FOUND.
+        auto* chip = CCLayerColor::create({corum::ranked::ui::Accent.r,corum::ranked::ui::Accent.g,corum::ranked::ui::Accent.b,255},20.0f,13.0f);
+        chip->setPosition({16.0f,headerY - 6.5f}); m_queueContents->addChild(chip,5);
+        m_queueContents->addChild(makeLabel(survivalMode ? "01" : "02",0.22f,{26.0f,headerY},corum::ranked::ui::AccentInk,"black"),6);
+        auto* modeName = makeLabel(survivalMode ? "SURVIVAL" : "SOLO RANKED",0.50f,{44.0f,headerY},corum::ranked::ui::Text,"black",{0.0f,0.5f});
+        corum::ranked::ui::leanLabel(modeName); corum::ranked::ui::fitMenuLabelWidth(modeName,170.0f,0.50f,0.3f); m_queueContents->addChild(modeName,5);
+        auto* heading = makeLabel(tr("matchmaking","MATCHMAKING"),0.34f,{44.0f + modeName->getScaledContentSize().width + 70.0f,headerY},kAccent,"semibold");
         corum::ranked::ui::fitMenuLabelWidth(heading,116,0.34f,0.24f); m_queueContents->addChild(heading,5); m_queueHeading = heading;
         auto* pulse = CCLayerColor::create({kAccent.r,kAccent.g,kAccent.b,255},4.0f,4.0f);
-        pulse->setPosition({qx - 8.0f - heading->getScaledContentSize().width / 2.0f - 10.0f,78.0f});
+        pulse->setPosition({heading->getPositionX() - heading->getScaledContentSize().width / 2.0f - 10.0f,headerY - 2.0f});
         pulse->runAction(CCRepeatForever::create(CCSequence::create(CCFadeTo::create(0.6f,60),CCFadeTo::create(0.6f,255),nullptr)));
         m_queueContents->addChild(pulse,5);
         auto* face = corum::ranked::ui::surface({30,30},{},kGold,kDeepPanel2,250,true);
@@ -3245,7 +3259,25 @@ class CorumRankedLayer final : public CCLayerColor {
             corum::ranked::ui::fitRankSprite(icon,{24,24}); icon->setPosition({15,15}); face->addChild(icon,5);
         }
         auto* leaderboard = CCMenuItemSpriteExtra::create(face,this,menu_selector(CorumRankedLayer::onLeaderboard));
-        leaderboard->setPosition({qx + half - 22.0f,78.0f}); leaderboard->setID("ranked-queue-leaderboard"_spr); m_queueMenu->addChild(leaderboard);
+        leaderboard->setPosition({win.width - 30.0f,headerY}); leaderboard->setID("ranked-queue-leaderboard"_spr); m_queueMenu->addChild(leaderboard);
+        // Left: the player's profile for this mode.
+        {
+            auto const& live = RankedRuntime::get().view();
+            auto const tier = survivalMode ? (live.survival.loaded ? live.survival.profile.displayedTier : std::string("UNRANKED")) : live.profileTier;
+            auto const lp = survivalMode ? live.survival.profile.visibleRankedScore.value_or(0) : live.profileScore;
+            auto const tone = tierColor(upper(tier));
+            m_queueContents->addChild(makeNeonPanel({156.0f,196.0f},{94.0f,-4.0f},tone,kDeepPanel,246),1);
+            if (auto* badge = corum::ranked::ui::createAnimatedRankBadge(tier,{70.0f,70.0f},corum::ranked::ui::RankBadgeDisplay::Large)) {
+                badge->setPosition({94.0f,44.0f}); m_queueContents->addChild(badge,4);
+            }
+            auto* account = GJAccountManager::get();
+            auto* name = makeLabel(account ? std::string(account->m_username) : std::string(),0.34f,{94.0f,-6.0f},corum::ranked::ui::Text,"black");
+            corum::ranked::ui::fitMenuLabelWidth(name,140.0f,0.34f,0.2f); m_queueContents->addChild(name,4);
+            auto* tierLabel = makeLabel(corum::ranked::rankTierDisplay(upper(tier)),0.34f,{94.0f,-26.0f},tone,"black");
+            corum::ranked::ui::leanLabel(tierLabel); corum::ranked::ui::fitMenuLabelWidth(tierLabel,140.0f,0.34f,0.2f); m_queueContents->addChild(tierLabel,4);
+            auto* lpLabel = makeLabel(fmt::format("{} LP",lp),0.30f,{94.0f,-46.0f},corum::ranked::ui::TextMuted,"black");
+            corum::ranked::ui::fitMenuLabelWidth(lpLabel,140.0f,0.30f,0.2f); m_queueContents->addChild(lpLabel,4);
+        }
         // Radar ring shared by both modes, centred in the queue area.
         CCPoint const ring {qx, 22.0f};
         constexpr float ringRadius = 40.0f;
@@ -3302,10 +3334,10 @@ class CorumRankedLayer final : public CCLayerColor {
             }
             m_queueHint = makeLabel("",0.17f,{qx,-56.0f},corum::ranked::ui::TextMuted,"semibold"); m_queueContents->addChild(m_queueHint,5);
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
-            m_queueLeave = queueButton(tr("leave-queue","LEAVE QUEUE"),{qx - 44.0f,-74.0f},menu_selector(CorumRankedLayer::onSurvivalLeaveQueue),kRed,84);
-            m_queueFill = queueButton(tr("survival-fill-bots","FILL WITH BOTS"),{qx + 44.0f,-74.0f},menu_selector(CorumRankedLayer::onSurvivalFillBots),kSteel,84);
+            m_queueLeave = queueButton(tr("leave-queue","LEAVE QUEUE"),{qx - 44.0f,-82.0f},menu_selector(CorumRankedLayer::onSurvivalLeaveQueue),kRed,84);
+            m_queueFill = queueButton(tr("survival-fill-bots","FILL WITH BOTS"),{qx + 44.0f,-82.0f},menu_selector(CorumRankedLayer::onSurvivalFillBots),kSteel,84);
 #else
-            m_queueLeave = queueButton(tr("leave-queue","LEAVE QUEUE"),{qx,-74.0f},menu_selector(CorumRankedLayer::onSurvivalLeaveQueue),kRed,120);
+            m_queueLeave = queueButton(tr("leave-queue","LEAVE QUEUE"),{qx,-82.0f},menu_selector(CorumRankedLayer::onSurvivalLeaveQueue),kRed,120);
 #endif
         } else {
             // YOU on the left of the radar, an anonymous OPPONENT on the right:
@@ -3335,7 +3367,7 @@ class CorumRankedLayer final : public CCLayerColor {
             m_queueFillBar = CCLayerColor::create({corum::ranked::ui::Accent.r,corum::ranked::ui::Accent.g,corum::ranked::ui::Accent.b,255},0.0f,3.0f);
             m_queueFillBar->setPosition({barX,-57.0f}); m_queueFillBar->setID("ranked-queue-range-bar"_spr); m_queueContents->addChild(m_queueFillBar,5);
             m_queueFillWidth = barW;
-            m_queueLeave = queueButton(tr("leave-queue","LEAVE QUEUE"),{qx,-76.0f},menu_selector(CorumRankedLayer::onLeave),kRed,120);
+            m_queueLeave = queueButton(tr("leave-queue","LEAVE QUEUE"),{qx,-82.0f},menu_selector(CorumRankedLayer::onLeave),kRed,120);
         }
         m_root = savedRoot;
         setLobbyNodeInput(m_queueMenu,false);
@@ -3544,7 +3576,6 @@ class CorumRankedLayer final : public CCLayerColor {
         auto* card = selectedLobbyCard();
         auto const selected = m_modeTransition.selected();
         if (!card || !selected || !m_lobbyPanel) return;
-        auto const full = queueExpandedWidth();
         auto const mode = *selected;
         m_queueAnimating = true; m_queueShown = open;
         syncLobbyInput(); placeLobbyFooter();
@@ -3566,10 +3597,6 @@ class CorumRankedLayer final : public CCLayerColor {
             }
             self->syncLobbyInput(); self->placeLobbyFooter(); self->refreshLobbyHover();
         };
-        // The tween runs on the card itself, so the card outlives it.
-        auto widen = [card](float from, float to) {
-            return [card, from, to](float t) { resizeLobbyCard(card, from + (to - from) * t); };
-        };
         if (open) {
             buildQueueContents(mode,card); updateQueuePanel();
             m_queueContents->setVisible(false);
@@ -3579,9 +3606,9 @@ class CorumRankedLayer final : public CCLayerColor {
             corum::ranked::ui::fadeModeLobbySurfaces(panel,0.20f,false);
             panel->runAction(CCSequence::create(corum::ranked::ui::ModeLobbyFade::create(0.20f,0,corum::ranked::ui::ModeLobbyEase::SineIn),
                 CallFuncExt::create([panel] { panel->setVisible(false); }),nullptr));
+            // The queue is its own page: it fades in over the lobby (no widening).
             card->runAction(CCSequence::create(
                 CCDelayTime::create(0.22f),
-                CCEaseOut::create(corum::ranked::ui::ModeLobbyTween::create(0.50f,widen(188.0f,full)),3.0f),
                 CallFuncExt::create([contents, finish] {
                     corum::ranked::ui::setModeLobbyOpacity(contents,0); contents->setVisible(true); contents->setPositionY(-6.0f);
                     corum::ranked::ui::fadeModeLobbySurfaces(contents,0.28f,true);
@@ -3593,7 +3620,7 @@ class CorumRankedLayer final : public CCLayerColor {
         } else {
             auto* contents = m_queueContents;
             auto collapse = CCSequence::create(
-                CCEaseOut::create(corum::ranked::ui::ModeLobbyTween::create(0.44f,widen(full,188.0f)),3.0f),
+                CCDelayTime::create(0.02f),
                 CallFuncExt::create([weak, mode, finish] {
                     auto self = weak.lock(); if (!self || !self->m_lobbyPanel) return;
                     // Rebuild the action card so its chrome fades in from its own opacities.
@@ -3702,7 +3729,6 @@ class CorumRankedLayer final : public CCLayerColor {
             card->setZOrder(5); m_lobbyPanel->setZOrder(4);
             m_queueShown = lobbyQueueActive();
             if (m_queueShown) {
-                setLobbyCardWidth(card,queueExpandedWidth());
                 buildQueueContents(*selected,card);
                 corum::ranked::ui::setModeLobbyOpacity(m_lobbyPanel,0); m_lobbyPanel->setVisible(false);
                 updateQueuePanel();
