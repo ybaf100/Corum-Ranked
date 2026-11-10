@@ -22,7 +22,7 @@ inline void drawLobbyCardShine(CCDrawNode* node,float elapsed) {
     auto const head=std::min(1.0f,elapsed/.66f)*796;
     auto const fade=std::clamp((.76f-elapsed)/.10f,0.0f,1.0f);
     for(int i=0;i<22;i++)node->drawSegment(lobbyCardPerimeter(head-i*3.0f),lobbyCardPerimeter(head-i*3.0f+2.5f),
-        .45f,{1,.90f,.45f,fade*(1-i/22.0f)});
+        .7f,{.78f,1,.18f,fade*(1-i/22.0f)});
 }
 // Tap feedback owns a card action, not the hover controller's input lifetime:
 // it finishes once even when the card immediately begins its channel slide.

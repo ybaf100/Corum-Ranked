@@ -75,16 +75,20 @@ class ButtonFx final : public CCNode {
             }
         }
         m_item = WeakRef(found);
+        bool leaned = false;
         // Button-shaped faces lean like every other slab, captions included.
         // Rows, cards and square icon buttons keep their rectangle.
         if (m_kind == ButtonFxKind::Standard && m_skew == 0.0f && face->getSkewX() == 0.0f &&
-            size.height <= 40.0f && size.width <= 200.0f && size.width >= size.height * 1.6f)
+            size.height <= 40.0f && size.width <= 200.0f && size.width >= size.height * 1.6f) {
             face->setSkewX(SlabSkew);
+            leaned = true;
+        }
         m_glow = CCLayerColor::create({255, 255, 255, 0});
         m_glow->setContentSize(size);
         m_glow->setSkewX(m_skew);
         this->addChild(m_glow, 1);
-        auto const lean = m_skew > 0.0f ? m_skew : 16.0f;
+        // The shine leans with a slab; on a rectangle it cuts across at an angle.
+        auto const lean = m_skew > 0.0f ? m_skew : leaned ? SlabSkew : 16.0f;
         auto const overhang = m_skew > 0.0f ? 0.0f : std::tan(lean * 0.01745329f) * size.height * 0.5f;
         auto const bar = std::clamp(size.width * 0.14f, 5.0f, 24.0f);
         m_sweep = CCLayerColor::create({255, 255, 255, 0});
@@ -169,7 +173,7 @@ public:
         m_pressed = pressed;
         m_hover = hover;
 
-        auto const target = pressed ? (hero ? 78.0f : 54.0f) : hover ? (hero ? 40.0f : 26.0f) : 0.0f;
+        auto const target = pressed ? (hero ? 84.0f : 66.0f) : hover ? (hero ? 44.0f : 34.0f) : 0.0f;
         m_glowAlpha += (target - m_glowAlpha) * std::min(1.0f, dt * 14.0f);
         auto const glow = static_cast<GLubyte>(std::lround(std::clamp(m_glowAlpha, 0.0f, 255.0f)));
         if (m_glow->getOpacity() != glow) m_glow->setOpacity(glow);

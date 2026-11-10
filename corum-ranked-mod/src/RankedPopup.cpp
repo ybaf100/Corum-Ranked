@@ -2503,7 +2503,8 @@ class CorumRankedLayer final : public CCLayerColor {
         // Separate seasons: each card carries its own timer under the mode name.
         auto const& cardSeason = survival ? source.survivalSeason : source.soloSeason;
         auto const perCardTimer = !seasonShared(source) && cardSeason.targetAtMs.has_value();
-        auto* modeName = makeLabel(survival ? "SURVIVAL" : "SOLO RANKED",0.35f,{0,perCardTimer ? 128.0f : 115.0f},survival ? kAccent : kGold,"black");
+        auto* modeName = makeLabel(survival ? "SURVIVAL" : "SOLO RANKED",0.35f,{0,perCardTimer ? 128.0f : 115.0f},corum::ranked::ui::Text,"black");
+        corum::ranked::ui::leanLabel(modeName);
         if (perCardTimer) if (auto* timer = corum::ranked::ui::SeasonTimer::create(true)) {
             timer->setPosition({0, 113}); m_root->addChild(timer, 8);
             if (survival) m_seasonSurvival = timer; else m_seasonSolo = timer;

@@ -320,6 +320,16 @@ inline constexpr int SurfaceBorderTag = 8030;
 inline constexpr int SurfaceRuleTag = 8031;
 inline constexpr int SurfaceTabTag = 8032;
 
+// A frame is the neutral line colour pulled towards its accent: the signal
+// colour stays on the rule and the tab, so a screen full of panels stays calm.
+inline ccColor3B surfaceEdge(ccColor3B accent, bool strong) {
+    auto const pull = strong ? 0.45f : 0.25f;
+    auto const mix = [pull](GLubyte from, GLubyte to) {
+        return static_cast<GLubyte>(std::lround(static_cast<float>(from) + (static_cast<float>(to) - static_cast<float>(from)) * pull));
+    };
+    return {mix(SurfaceSoft.r, accent.r), mix(SurfaceSoft.g, accent.g), mix(SurfaceSoft.b, accent.b)};
+}
+
 // Places a surface's chrome for `size`. surface() builds through this and the
 // lobby card widens through it, so both always agree on the geometry.
 inline void layoutSurface(CCNode* root, CCSize size) {
@@ -377,7 +387,8 @@ inline CCNode* surface(
     shadow->setTag(SurfaceShadowTag);
     root->addChild(shadow, -2);
 
-    auto* border = CCLayerColor::create({accent.r, accent.g, accent.b, static_cast<GLubyte>(strong ? 150 : 80)});
+    auto const edge = surfaceEdge(accent, strong);
+    auto* border = CCLayerColor::create({edge.r, edge.g, edge.b, 255});
     border->setTag(SurfaceBorderTag);
     root->addChild(border, 0);
 
@@ -408,7 +419,9 @@ inline CCNode* surface(
 // Recolor only static border/highlight layers; keep fill, children and actions.
 inline void setSurfaceAccent(CCNode* panel,ccColor3B color) {
     if(!panel)return;
-    for(int tag:{SurfaceBorderTag,SurfaceRuleTag,SurfaceTabTag})if(auto* layer=typeinfo_cast<CCLayerColor*>(panel->getChildByTag(tag)))layer->setColor(color);
+    auto const strong=panel->getChildByTag(SurfaceTabTag)!=nullptr;
+    if(auto* border=typeinfo_cast<CCLayerColor*>(panel->getChildByTag(SurfaceBorderTag)))border->setColor(surfaceEdge(color,strong));
+    for(int tag:{SurfaceRuleTag,SurfaceTabTag})if(auto* layer=typeinfo_cast<CCLayerColor*>(panel->getChildByTag(tag)))layer->setColor(color);
 }
 
 // A slanted slab: the face of an action. Filled, it is the primary action in
