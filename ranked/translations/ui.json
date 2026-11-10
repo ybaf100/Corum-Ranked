@@ -3458,5 +3458,17 @@
   "equipped-title": {
     "en": "EQUIPPED TITLE",
     "ko": "장착 칭호"
+  },
+  "stat-tier": {
+    "en": "TIER",
+    "ko": "티어"
+  },
+  "stat-lp": {
+    "en": "LP",
+    "ko": "LP"
+  },
+  "stat-rank": {
+    "en": "RANK",
+    "ko": "순위"
   }
 }
