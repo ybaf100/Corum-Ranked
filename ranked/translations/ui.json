@@ -1284,8 +1284,8 @@
     "ko": "3회 또는 5회를 선택하세요. 시작 후에는 변경할 수 없습니다."
   },
   "placement-five-stage-info": {
-    "en": "5 STAGES · 10 MAPS · FULL PLACEMENT RANGE · CANNOT CHANGE AFTER START.",
-    "ko": "5회 · 10개 맵 · 전체 배치 범위 · 시작 후 변경할 수 없습니다."
+    "en": "5 STAGES · 10 MAPS · MAX PLACEMENT BRONZE · CANNOT CHANGE AFTER START.",
+    "ko": "5회 · 10개 맵 · 최대 배치는 BRONZE · 시작 후 변경할 수 없습니다."
   },
   "placement-map-live": {
     "en": "MAP LIVE · SCORE + GRADE UPDATE IN REAL TIME",
@@ -3438,5 +3438,25 @@
   "elim-fx-season-note": {
     "en": "Once unlocked, usable for the season (achievement grade unlocks excepted).",
     "ko": "한번 해금시, 시즌동안 사용 가능합니다. (도전과제 등급 해금은 예외)"
+  },
+  "score-diff": {
+    "en": "SCORE DIFF",
+    "ko": "점수 차"
+  },
+  "survival-continue-play": {
+    "en": "KEEP PLAYING",
+    "ko": "이어서 플레이"
+  },
+  "survival-continue-detail": {
+    "en": "The match goes on. Keep playing this map without official records.",
+    "ko": "경기는 계속 진행 중입니다. 공식 기록 없이 이 맵을 이어서 플레이할 수 있습니다."
+  },
+  "mod-update-auto-restart": {
+    "en": "The game restarts as soon as the download finishes.",
+    "ko": "다운로드가 끝나면 즉시 재시작됩니다."
+  },
+  "equipped-title": {
+    "en": "EQUIPPED TITLE",
+    "ko": "장착 칭호"
   }
 }

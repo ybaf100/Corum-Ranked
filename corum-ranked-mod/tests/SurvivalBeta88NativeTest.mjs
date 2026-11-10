@@ -92,7 +92,7 @@ test('leaderboard cards share the native scroll owner without a swallowing row m
 test('result settlement animation starts automatically once, waits for real settlement and survives reopened result screens',()=>{
  const src=read('src/ui/SurvivalGameLayer.cpp');
  assert.match(src,/if\(stage==SurvivalFlowStage::ScoreAnimation\)beginResultMotion\(\)/);
- const panel=read('src/ui/SurvivalOutcomePanel.hpp');assert.doesNotMatch(panel,/LP DETAILS/);assert.match(panel,/if\(choice\)button\(i18n::text\("survival-view-board"/);
+ const panel=read('src/ui/SurvivalOutcomePanel.hpp');assert.doesNotMatch(panel,/LP DETAILS/);assert.match(panel,/m_freeChoice=button\(i18n::text\("survival-continue-play"/);assert.doesNotMatch(panel,/if\(choice\)button\(i18n::text\("survival-view-board"/);
  run(`
 #include <cassert>
 #include <functional>

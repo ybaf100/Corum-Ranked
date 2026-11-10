@@ -153,11 +153,10 @@ public:
             m_menu=CCMenu::create();m_menu->setPosition(CCPointZero);addChild(m_menu,20);
             auto heading=menuLabel(i18n::text(choice?"survival-eliminated":ceremony?"survival-podium":"survival-personal-result",choice?"ELIMINATED":ceremony?"FINAL PODIUM":"PERSONAL RESULT"),.60f,{size.width/2,size.height-30},ceremony?Gold:Accent,FontWeight::Black);fitFullMenuLabel(heading,size.width-30,28,.60f);addChild(heading,5);
             if(choice){
-                auto* detail=menuLabel(i18n::text("survival-spectator-choices","Play locally or view the standings."),.25f,{size.width/2,size.height*.57f},TextMuted,FontWeight::SemiBold);fitFullMenuLabel(detail,size.width-40,40,.25f);addChild(detail,5);
-                auto const width=std::min(180.f,(size.width-36)/2);
-                m_freeChoice=button(i18n::text("survival-free-play","FREE PLAY"),{size.width/2-width/2-5,size.height*.37f},width,18,Green);
+                auto* detail=menuLabel(i18n::text("survival-continue-detail","The match goes on. Keep playing this map without official records."),.25f,{size.width/2,size.height*.57f},TextMuted,FontWeight::SemiBold);fitFullMenuLabel(detail,size.width-40,40,.25f);addChild(detail,5);
+                auto const width=std::min(220.f,size.width-36);
+                m_freeChoice=button(i18n::text("survival-continue-play","KEEP PLAYING"),{size.width/2,size.height*.37f},width,18,Green);
                 if(settled)button(i18n::text("survival-personal-result","PERSONAL RESULT"),{size.width/2,size.height*.20f},180,21,Gold);
-                m_resultChoice=button(i18n::text("survival-view-board","STANDINGS"),{size.width/2+width/2+5,size.height*.37f},width,14,Accent);
             }else if(ceremony){
                 std::array<int,3> ranks{2,1,3};auto const width=std::min(138.f,(size.width-48)/3),base=80.f;
                 for(int n=0;n<3;++n){int rank=ranks[n];auto it=std::find_if(m_profiles.begin(),m_profiles.end(),[&](auto const& p){return p.rank==rank;});if(it==m_profiles.end())continue;
@@ -220,8 +219,7 @@ public:
                     button(">",{center+56,68},28,32,Steel,22)->setEnabled(page.page+1<page.pages);
                 }
             }
-            if(choice)button(i18n::text("survival-view-board","VIEW STATUS"),{size.width/2,24},140,11,Steel);
-            else if(stage!=SurvivalFlowStage::ScoreAnimation)button(i18n::text(ceremony?"continue":"close",ceremony?"CONTINUE":"CLOSE"),{size.width/2,24},132,ceremony?20:1,Steel)->setEnabled(settled);
+            if(!choice && stage!=SurvivalFlowStage::ScoreAnimation)button(i18n::text(ceremony?"continue":"close",ceremony?"CONTINUE":"CLOSE"),{size.width/2,24},132,ceremony?20:1,Steel)->setEnabled(settled);
         }
         m_elapsed+=std::max(0.f,dt);
         for(std::size_t i=0;i<m_badges.size();++i){auto const frame=survivalBadgeMotion(i,m_elapsed);m_badges[i]->setScale(static_cast<float>(frame.scale));propagateModeOpacity(m_badges[i],static_cast<GLubyte>(frame.opacity*255));}

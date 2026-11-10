@@ -211,14 +211,23 @@ void RankTransitionLayer::createBackground() {
     m_backgroundRoot->setPosition(CCPointZero);
     addChild(m_backgroundRoot, 1);
 
-    if (auto* backdrop = rankResourceSprite("rank-transition-background.png")) {
-        coverRankSprite(backdrop, size);
-        backdrop->setPosition({size.width / 2.0f, size.height / 2.0f});
-        m_backgroundRoot->addChild(backdrop, 0);
-    } else {
-        auto* fallback = CCLayerColor::create({12, 13, 17, 255});
-        fallback->setContentSize(size);
-        m_backgroundRoot->addChild(fallback, 0);
+    // Broadcast ground behind the unchanged transition motion: ink, fine
+    // hatching and three slanted light bands in the new tier's colour.
+    auto* ground = CCLayerColor::create({13, 14, 18, 255});
+    ground->setContentSize(size);
+    m_backgroundRoot->addChild(ground, 0);
+    auto* hatch = CCDrawNode::create();
+    auto const lean = size.height * 0.2867f;
+    for (float x = -lean; x < size.width; x += 14.0f)
+        hatch->drawSegment({x, 0.0f}, {x + lean, size.height}, 0.3f, {1.0f, 1.0f, 1.0f, 0.03f});
+    m_backgroundRoot->addChild(hatch, 0);
+    struct Band { float x, width; GLubyte alpha; };
+    for (auto const band : {Band{0.26f, 0.10f, 18}, Band{0.40f, 0.20f, 30}, Band{0.63f, 0.06f, 18}}) {
+        auto* ray = CCLayerColor::create({profile.color.r, profile.color.g, profile.color.b, band.alpha});
+        ray->setContentSize({size.width * band.width, size.height * 1.3f});
+        ray->setPosition({size.width * band.x, -size.height * 0.15f});
+        ray->setSkewX(14.0f);
+        m_backgroundRoot->addChild(ray, 1);
     }
     if (auto* geometry = rankResourceSprite("rank-transition-geometry-overlay.png")) {
         coverRankSprite(geometry, size);
