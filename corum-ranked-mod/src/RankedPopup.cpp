@@ -4232,6 +4232,7 @@ class CorumRankedLayer final : public CCLayerColor {
         );
 
         auto* versus = makeLabel("VS", 0.40f, {size.width / 2.0f, size.height / 2.0f + 61.0f}, kGold, "display");
+        corum::ranked::ui::leanLabel(versus);
         m_root->addChild(versus, 5);
         if (animate) {
             versus->setScale(0.0f);
@@ -5373,8 +5374,11 @@ class CorumRankedLayer final : public CCLayerColor {
         addSoloHeader(match, perfect ? std::string("PERFECT WIN") : tr("match-complete", "MATCH COMPLETE"),
             ownA ? match.roundWinsA : match.roundWinsB, ownA ? match.roundWinsB : match.roundWinsA, false);
         auto const verdictColor = ownWon ? kGold : kSideRed;
-        m_root->addChild(makeNeonPanel({67.0f, 47.0f}, {size.width - 43.5f, size.height - 35.0f}, verdictColor, {22, 24, 31}, 248), 2);
-        auto* verdict = makeLabel(ownWon ? tr("win", "WIN") : tr("lose", "LOSE"), 0.46f, {size.width - 43.5f, size.height - 35.0f}, verdictColor, "black");
+        // M6: the verdict is a solid slab, lime for a win and red for a loss.
+        auto* verdictSlab = corum::ranked::ui::slab({62.0f, 40.0f}, {size.width - 43.5f, size.height - 35.0f}, ownWon ? corum::ranked::ui::AccentFill : kSideRed);
+        verdictSlab->setID("ranked-result-verdict-slab"_spr); m_root->addChild(verdictSlab, 2);
+        (void)verdictColor;
+        auto* verdict = makeLabel(ownWon ? tr("win", "WIN") : tr("lose", "LOSE"), 0.46f, {size.width - 43.5f, size.height - 35.0f}, ownWon ? corum::ranked::ui::AccentInk : corum::ranked::ui::Text, "black");
         corum::ranked::ui::fitMenuLabelWidth(verdict, 58.0f, 0.46f, 0.26f); m_root->addChild(verdict, 5);
 
         auto const cardHalf = 75.0f;
@@ -5399,7 +5403,9 @@ class CorumRankedLayer final : public CCLayerColor {
         // Centre: each round's map and both scores from the player's side.
         auto const centerWidth = std::clamp(rightX - leftX - 2.0f * cardHalf - 16.0f, 120.0f, 225.0f);
         auto const rows = std::max<std::size_t>(1, match.rounds.size() + match.deathmatches.size());
-        auto const panelTop = cardY + 92.0f, panelHeight = std::min(210.0f, 36.0f + 30.0f * static_cast<float>(rows));
+        // M6: up to 3.5 rows show; with more, the list scrolls inside the panel.
+        auto const visibleRows = std::min(3.5f, static_cast<float>(rows));
+        auto const panelTop = cardY + 92.0f, panelHeight = 36.0f + 30.0f * visibleRows;
         m_root->addChild(makeNeonPanel({centerWidth, panelHeight}, {size.width / 2.0f, panelTop - panelHeight / 2.0f}, perfect ? kGold : kSteel, kDeepPanel2, 236), 1);
         auto* roundsCaption = makeLabel("ROUNDS", 0.21f, {size.width / 2.0f, panelTop - 13.0f}, kAccent, "semibold");
         m_root->addChild(roundsCaption, 5);
@@ -5416,13 +5422,26 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const holdRows = overlayActive && m_resultMotionKey != resultKey;
         int rowIndex = 0;
         auto* rowsRoot = m_root;
+        auto xShift = 0.0f;
+        if (rows > 3) {
+            auto const viewW = centerWidth, viewH = 30.0f * visibleRows, contentH = 30.0f * static_cast<float>(rows);
+            auto* scroll = ScrollLayer::create({0.0f, 0.0f, viewW, viewH});
+            scroll->setPosition({size.width / 2.0f - viewW / 2.0f, panelTop - 19.0f - viewH});
+            scroll->setID("ranked-result-rounds-scroll"_spr);
+            scroll->m_contentLayer->setContentSize({viewW, contentH});
+            m_root->addChild(scroll, 4);
+            scroll->scrollToTop();
+            m_root = scroll->m_contentLayer;
+            xShift = size.width / 2.0f - viewW / 2.0f;
+            y = contentH - 15.0f;
+        }
         auto addRow = [&](std::string const& label, std::string const& map, double ownScore, double oppScore, std::string const& winner, bool deathmatch) {
             auto* rowGroup = makeMotionGroup();
             auto* outer = m_root; m_root = rowGroup;
             auto const draw = winner == "DRAW" || winner.empty();
             auto const won = !draw && winner == (ownA ? "A" : "B");
             auto const accent = draw ? corum::ranked::ui::TextMuted : won ? kGold : kSideRed;
-            auto const left = size.width / 2.0f - centerWidth / 2.0f + 9.0f, right = size.width / 2.0f + centerWidth / 2.0f - 9.0f;
+            auto const left = size.width / 2.0f - centerWidth / 2.0f + 9.0f - xShift, right = size.width / 2.0f + centerWidth / 2.0f - 9.0f - xShift;
             auto* chip = CCLayerColor::create({accent.r, accent.g, accent.b, 255}, 3.0f, 20.0f); chip->setPosition({left, y - 10.0f}); m_root->addChild(chip, 4);
             auto* name = makeLabel(label, 0.21f, {left + 8.0f, y + 4.0f}, corum::ranked::ui::Text, "black");
             name->setAnchorPoint({0, 0.5f}); m_root->addChild(name, 5);
@@ -5443,7 +5462,7 @@ class CorumRankedLayer final : public CCLayerColor {
             addRow(fmt::format("DEATH MATCH {}", deathmatch.sequence), deathmatch.mapTitle, ownA ? deathmatch.scoreA : deathmatch.scoreB,
                 ownA ? deathmatch.scoreB : deathmatch.scoreA, deathmatch.winnerSide, true);
 
-        (void)rowsRoot;
+        m_root = rowsRoot;
         // Big verdict stamp on each card (both together, after the last row).
         auto const stampDelay = 0.35f + 0.28f * static_cast<float>(rowIndex) + 0.15f;
         if (animateRows) holdForMotion(stampDelay + 0.45f);
