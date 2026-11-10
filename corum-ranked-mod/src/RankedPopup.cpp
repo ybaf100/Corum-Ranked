@@ -4417,6 +4417,13 @@ class CorumRankedLayer final : public CCLayerColor {
         auto* versus = makeLabel("VS", 0.40f, {size.width / 2.0f, size.height / 2.0f + 61.0f}, kGold, "display");
         corum::ranked::ui::leanLabel(versus);
         m_root->addChild(versus, 5);
+        // M1: the mode chip under VS.
+        {
+            auto* chip = corum::ranked::ui::slab({96.0f, 13.0f}, {size.width / 2.0f, size.height / 2.0f + 41.0f}, corum::ranked::ui::AccentFill);
+            chip->setID("ranked-versus-mode-chip"_spr); m_root->addChild(chip, 5);
+            auto* chipText = makeLabel("SOLO RANKED · BO3", 0.17f, {size.width / 2.0f, size.height / 2.0f + 41.0f}, corum::ranked::ui::AccentInk, "black");
+            corum::ranked::ui::fitMenuLabelWidth(chipText, 88.0f, 0.17f, 0.11f); m_root->addChild(chipText, 6);
+        }
         if (animate) {
             versus->setScale(0.0f);
             versus->runAction(CCSequence::create(CCDelayTime::create(lead + 0.35f), CCEaseBackOut::create(CCScaleTo::create(0.32f, 0.40f)), nullptr));
@@ -5200,9 +5207,34 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const titleText = !known ? std::string(deathmatch ? "DEATH MATCH RESULT" : "ROUND RESULT") : draw ? std::string("ROUND DRAW") : ownWin ? std::string("ROUND WON") : std::string("ROUND LOST");
         auto* title = makeLabel(titleText, 0.86f, {size.width / 2.0f, size.height - 98.0f}, !known || draw ? corum::ranked::ui::Text : ownWin ? kGold : kSideRed, "black");
         corum::ranked::ui::fitMenuLabelWidth(title, size.width - 120.0f, 0.86f, 0.4f);
+        corum::ranked::ui::leanLabel(title);
         m_root->addChild(title, 6);
+        // M5: a row of round chips under the cards (R1 W, R2 L, R3 ..., DM).
+        {
+            std::vector<std::pair<std::string, std::string>> chips;
+            for (int number = 1; number <= 3; ++number) {
+                std::string outcome;
+                for (auto const& round : match.rounds) if (round.roundNumber == number) outcome = round.result;
+                chips.push_back({fmt::format("R{}", number), outcome});
+            }
+            for (auto const& dm : match.deathmatches) chips.push_back({"DM", dm.winnerSide});
+            constexpr float chipW = 46.0f, gap = 6.0f;
+            auto const totalW = chipW * static_cast<float>(chips.size()) + gap * static_cast<float>(chips.size() - 1);
+            for (std::size_t index = 0; index < chips.size(); ++index) {
+                auto const& [label, outcome] = chips[index];
+                auto const played = !outcome.empty();
+                auto const rowDraw = outcome == "DRAW";
+                auto const won = played && !rowDraw && (outcome == "A") == ownA;
+                auto const color = !played ? corum::ranked::ui::Surface : rowDraw ? corum::ranked::ui::SurfaceSoft : won ? corum::ranked::ui::AccentFill : kSideRed;
+                auto const x = size.width / 2.0f - totalW / 2.0f + chipW / 2.0f + static_cast<float>(index) * (chipW + gap);
+                m_root->addChild(corum::ranked::ui::slab({chipW, 16.0f}, {x, size.height / 2.0f - 92.0f}, color), 4);
+                auto const text = !played ? label : fmt::format("{} {}", label, rowDraw ? tr("draw-short", "D") : won ? tr("win-short", "W") : tr("lose-short", "L"));
+                auto* chipText = makeLabel(text, 0.18f, {x, size.height / 2.0f - 92.0f}, won ? corum::ranked::ui::AccentInk : played ? corum::ranked::ui::Text : corum::ranked::ui::TextMuted, "black");
+                corum::ranked::ui::fitMenuLabelWidth(chipText, chipW - 6.0f, 0.18f, 0.11f); m_root->addChild(chipText, 5);
+            }
+        }
         if (!mapTitle.empty()) {
-            auto* sub = makeLabel(mapTitle, 0.25f, {size.width / 2.0f, size.height - 124.0f}, corum::ranked::ui::TextMuted, "semibold");
+            auto* sub = makeLabel(fmt::format("{} · {}", soloRoundTitle(match), mapTitle), 0.25f, {size.width / 2.0f, size.height - 124.0f}, corum::ranked::ui::TextMuted, "semibold");
             corum::ranked::ui::fitMenuLabelWidth(sub, size.width - 140.0f, 0.25f, 0.16f); m_root->addChild(sub, 6);
         }
         auto const cardWidth = std::min(170.0f, (size.width - 60.0f) / 2.0f);
@@ -6819,7 +6851,7 @@ class CorumRankedLayer final : public CCLayerColor {
                     return;
                 }
                 auto const pick = ids[static_cast<std::size_t>(std::rand()) % ids.size()];
-                showHistoryLevel(pick);
+                corum::ranked::showHistoryLevel(pick);
             });
         });
     }
