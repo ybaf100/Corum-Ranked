@@ -529,7 +529,7 @@ class CorumRankedLayer final : public CCLayerColor {
     CCMenu* m_queueMenu = nullptr;
     CCLabelBMFont *m_queuePlayers = nullptr, *m_queueWait = nullptr, *m_queueMinimum = nullptr, *m_queueHint = nullptr, *m_queueHeading = nullptr;
     std::vector<CCLayerColor*> m_queueSlots;
-    CCLayerColor* m_queueFillBar = nullptr; float m_queueFillWidth = 0.0f;
+    CCLayerColor* m_queueFillBar = nullptr; float m_queueFillWidth = 0.0f; int m_queueSeatMaximum = 0;
     // Queue arena: radar ring (cyan while searching, gold on MATCH FOUND) and
     // the anonymous opponent slot. Names and icons appear only in the intro.
     CCNode *m_queueRingCyan = nullptr, *m_queueRingGold = nullptr, *m_queueSweep = nullptr;
@@ -3328,6 +3328,7 @@ class CorumRankedLayer final : public CCLayerColor {
             // their number. Seats inside the minimum carry a gold top edge.
             m_queueRadar->setVisible(false);
             auto const maximum = std::clamp(corum::ranked::SurvivalRuntime::get().queue().maximumPlayers,2,64);
+            m_queueSeatMaximum = maximum;
             auto const left = qx - half + 10.0f, width = half * 2.0f - 20.0f;
             auto* caption = makeLabel(tr("survival-queue-players","PLAYERS"),0.17f,{left,70.0f},corum::ranked::ui::TextMuted,"semibold",{0.0f,0.5f});
             m_queueContents->addChild(caption,5);
@@ -3518,6 +3519,17 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const& survival = corum::ranked::SurvivalRuntime::get();
         if (selected == corum::ranked::RankedMode::Survival) {
             auto const& queue = survival.queue();
+            // The seat grid follows the field size the server reports (up to 64);
+            // the page may have been built before the first queue snapshot.
+            if (!m_queueAnimating && m_queueSeatMaximum != std::clamp(queue.maximumPlayers,2,64)) {
+                if (auto* card = selectedLobbyCard()) {
+                    auto const visible = m_queueContents->isVisible();
+                    buildQueueContents(corum::ranked::RankedMode::Survival, card);
+                    m_queueContents->setVisible(visible);
+                    setLobbyNodeInput(m_queueMenu, true);
+                    syncLobbyInput();
+                }
+            }
             auto const waiting = survival.queueWaitingSeconds();
             // MATCH FOUND holds here for a second before the roster intro opens.
             auto const found = survival.matchFoundHold();
@@ -3643,11 +3655,13 @@ class CorumRankedLayer final : public CCLayerColor {
             card->runAction(CCSequence::create(
                 CCDelayTime::create(0.22f),
                 CallFuncExt::create([contents, finish] {
-                    corum::ranked::ui::setModeLobbyOpacity(contents,0); contents->setVisible(true); contents->setPositionY(-6.0f);
+                    // The page root sits on the lobby centre line; it rises 6 points into it.
+                    auto const restY = contents->getPositionY();
+                    corum::ranked::ui::setModeLobbyOpacity(contents,0); contents->setVisible(true); contents->setPositionY(restY - 6.0f);
                     corum::ranked::ui::fadeModeLobbySurfaces(contents,0.28f,true);
                     contents->runAction(CCSequence::create(
                         CCSpawn::create(corum::ranked::ui::ModeLobbyFade::create(0.28f,255,corum::ranked::ui::ModeLobbyEase::SineOut),
-                            CCEaseSineOut::create(CCMoveTo::create(0.28f,{0,0})),nullptr),
+                            CCEaseSineOut::create(CCMoveTo::create(0.28f,{0.0f,restY})),nullptr),
                         CallFuncExt::create(finish),nullptr));
                 }),nullptr));
         } else {
