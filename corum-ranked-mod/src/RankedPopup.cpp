@@ -385,6 +385,23 @@ public:
     }
 };
 
+// Q12: free play while resources download. Downloads belong to their
+// managers and continue outside Ranked; this watcher says when all are ready.
+class ResourceReadyWatcher final : public CCObject {
+public:
+    static void arm() {
+        static ResourceReadyWatcher* armed = nullptr;
+        if (!armed) armed = new ResourceReadyWatcher();
+        CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(schedule_selector(ResourceReadyWatcher::tick), armed);
+        CCDirector::sharedDirector()->getScheduler()->scheduleSelector(schedule_selector(ResourceReadyWatcher::tick), armed, 0.5f, false);
+    }
+    void tick(float) {
+        if (!RankedAudioManager::get().resourcesReady() || corum::ranked::ui::RankAssetPackManager::get().requiresDownload()) return;
+        CCDirector::sharedDirector()->getScheduler()->unscheduleSelector(schedule_selector(ResourceReadyWatcher::tick), this);
+        Notification::create(corum::ranked::i18n::text("all-resources-ready", "ALL RESOURCES READY"), NotificationIcon::Success, 2.0f)->show();
+    }
+};
+
 CCNode* makePanel(CCSize size, CCPoint position, ccColor3B color = kPanelColor, GLubyte opacity = 235) {
     return corum::ranked::ui::surface(size, position, color, kDeepPanel2, opacity, false);
 }
@@ -2152,7 +2169,10 @@ class CorumRankedLayer final : public CCLayerColor {
         m_root->addChild(m_resourceProgressFill, 4);
         if (downloading) {
             m_resourceProgressLabel = makeLabel(fmt::format("{}%", static_cast<int>(std::round(resourceProgress() * 100))),
-                0.23f, {center.x, center.y - 70}, kGold); m_root->addChild(m_resourceProgressLabel, 4);
+                0.23f, {center.x, center.y - 62}, kGold); m_root->addChild(m_resourceProgressLabel, 4);
+            auto* freePlay = addButton(tr("mod-update-free-play", "FREE PLAY WHILE DOWNLOADING"), {center.x, center.y - 88},
+                menu_selector(CorumRankedLayer::onResourceFreePlay), false, 0.52f, true);
+            freePlay->setID("ranked-resources-free-play"_spr);
         } else if (complete) {
             addButton(tr("continue", "CONTINUE"), {center.x, center.y - 83}, menu_selector(CorumRankedLayer::onContinueResources), false, 0.72f);
         } else {
@@ -6594,6 +6614,11 @@ class CorumRankedLayer final : public CCLayerColor {
         auto& assets = corum::ranked::ui::RankAssetPackManager::get();
         if (assets.view().state == corum::ranked::ui::RankAssetPackState::Failed) assets.retry();
         else assets.prepare();
+    }
+
+    void onResourceFreePlay(CCObject* sender) {
+        ResourceReadyWatcher::arm();
+        onCloseLayer(sender);
     }
 
     void onContinueResources(CCObject*) {
