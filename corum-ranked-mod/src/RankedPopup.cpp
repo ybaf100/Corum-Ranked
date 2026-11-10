@@ -4603,6 +4603,30 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const clearSyncPending = !deathmatch && runtime.localDisplayClears() >= 3 && runtime.hasLocalAttemptInFlight();
         auto* savedRoot = m_root; auto* savedMenu = m_menu;
         std::array<CCLayerColor*, 3> columns{};
+        // M3: while preparing, the map panel sits left and a PLAYERS / RULES
+        // column right (the board's prepare page). Live rounds keep the
+        // three-column board (own card, map, opponent card).
+        auto const prepareLayout = prepareState || match.state == "ROUND_ENTERING" || match.state == "DEATHMATCH_ENTERING";
+        if (prepareLayout) {
+            auto const total = (225.0f + 14.0f + 200.0f) * layout.scale;
+            auto const start = size.width / 2.0f - total / 2.0f;
+            auto const xs = std::array<float, 3>{start + 112.5f * layout.scale, start + (225.0f + 14.0f + 100.0f) * layout.scale, size.width / 2.0f};
+            for (int i = 0; i < 3; ++i) {
+                columns[i] = makeSoloColumn({xs[i], layout.centerY}, layout.scale);
+                m_root = columns[i]; m_menu = typeinfo_cast<CCMenu*>(columns[i]->getChildByID("ranked-solo-column-menu"_spr));
+                if (i == 0) addSoloMapColumn(match, clearSyncPending);
+                else if (i == 1) addPrepareInfoColumn(match, ownA, deathmatch);
+                m_root = savedRoot; m_menu = savedMenu;
+            }
+            ccColor3B accent = kGold;
+            auto const footer = soloFooterText(match, accent);
+            auto* footerPlate = makeTextPlate(footer, {225.0f * layout.scale, 22.0f}, {size.width / 2.0f, 18.0f}, accent, 0.27f,
+                ccc3(245, 248, 255), "black", &m_prepareFooterLabel);
+            m_soloFooterPlate = footerPlate;
+            m_root->addChild(footerPlate, 3);
+            if (intro) startSoloIntro(match, columns, layout);
+            return;
+        }
         auto const xs = std::array<float, 3>{size.width / 2.0f - layout.sideOffset, size.width / 2.0f, size.width / 2.0f + layout.sideOffset};
         for (int i = 0; i < 3; ++i) {
             columns[i] = makeSoloColumn({xs[i], layout.centerY}, layout.scale);
@@ -4624,6 +4648,43 @@ class CorumRankedLayer final : public CCLayerColor {
         m_soloFooterPlate = footerPlate;
         m_root->addChild(footerPlate, 3);
         if (intro) startSoloIntro(match, columns, layout);
+    }
+
+    // M3 right column: PLAYERS (ready state of both) and RULES panels.
+    void addPrepareInfoColumn(MatchView const& match, bool ownA, bool deathmatch) {
+        auto const panel = [&](float top, float height, std::string const& caption) {
+            m_root->addChild(makeNeonPanel({200.0f, height}, {0.0f, top - height / 2.0f}, kSteel, kDeepPanel2, 236), 1);
+            auto* label = makeLabel(caption, 0.20f, {-90.0f, top - 11.0f}, kAccent, "semibold", {0.0f, 0.5f});
+            corum::ranked::ui::fitMenuLabelWidth(label, 120.0f, 0.20f, 0.14f); m_root->addChild(label, 5);
+        };
+        panel(105.0f, 96.0f, tr("prepare-players", "PLAYERS"));
+        for (int row = 0; row < 2; ++row) {
+            auto const own = row == 0;
+            auto const sideA = own == ownA;
+            auto const y = 105.0f - 38.0f - 28.0f * static_cast<float>(row);
+            auto const ready = sideA ? match.readyA : match.readyB;
+            auto const accountId = sideA ? match.playerAAccountId : match.playerBAccountId;
+            CCNode* icon = own ? static_cast<CCNode*>(corum::ranked::ui::PlayerIcon::createLocal()) : static_cast<CCNode*>(corum::ranked::ui::PlayerIcon::createRemote(accountId));
+            if (icon) { icon->setScale(0.42f); icon->setPosition({-80.0f, y}); m_root->addChild(icon, 5); }
+            auto* name = makeLabel(sideA ? match.playerAName : match.playerBName, 0.26f, {-66.0f, y}, own ? kAccent : corum::ranked::ui::Text, "black", {0.0f, 0.5f});
+            corum::ranked::ui::fitMenuLabelWidth(name, 96.0f, 0.26f, 0.16f); m_root->addChild(name, 5);
+            auto* chip = corum::ranked::ui::slab({52.0f, 13.0f}, {66.0f, y}, ready ? corum::ranked::ui::AccentFill : corum::ranked::ui::SurfaceSoft);
+            m_root->addChild(chip, 5);
+            auto* state = makeLabel(ready ? tr("prepare-ready", "READY") : tr("prepare-preparing", "PREPARING"), 0.17f, {66.0f, y},
+                ready ? corum::ranked::ui::AccentInk : corum::ranked::ui::TextMuted, "black");
+            corum::ranked::ui::fitMenuLabelWidth(state, 44.0f, 0.17f, 0.11f); m_root->addChild(state, 6);
+        }
+        panel(1.0f, 106.0f, tr("prepare-rules", "RULES"));
+        std::array<std::string, 2> rules = deathmatch
+            ? std::array<std::string, 2>{tr("rule-deathmatch-progress", "DEATH MATCH: BEST PROGRESS WINS"), tr("rule-deathmatch-attempts", "3 ATTEMPTS")}
+            : std::array<std::string, 2>{tr("rule-round-score", "SCORE MATCH · 3 CLEARS WIN THE ROUND"), tr("rule-round-draw", "A DRAW GOES TO A DEATH MATCH (BEST PROGRESS)")};
+        for (std::size_t index = 0; index < rules.size(); ++index) {
+            auto* bullet = CCLayerColor::create({kAccent.r, kAccent.g, kAccent.b, 255}, 3.0f, 3.0f);
+            auto const y = 1.0f - 34.0f - 24.0f * static_cast<float>(index);
+            bullet->setPosition({-90.0f, y - 1.5f}); m_root->addChild(bullet, 5);
+            auto* line = makeLabel(rules[index], 0.19f, {-82.0f, y}, corum::ranked::ui::Text, "semibold", {0.0f, 0.5f});
+            corum::ranked::ui::fitMenuLabelWidth(line, 170.0f, 0.19f, 0.11f); m_root->addChild(line, 5);
+        }
     }
 
     void startSoloIntro(MatchView const& match, std::array<CCLayerColor*, 3> const& columns, SoloLayout const& layout) {

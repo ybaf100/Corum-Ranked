@@ -3502,5 +3502,37 @@
   "mod-update-installed-restart": {
     "en": "Update installed. Restarting now...",
     "ko": "업데이트 설치 완료 · 바로 재시작합니다"
+  },
+  "prepare-players": {
+    "en": "PLAYERS",
+    "ko": "참가자 상태"
+  },
+  "prepare-ready": {
+    "en": "READY",
+    "ko": "준비 완료"
+  },
+  "prepare-preparing": {
+    "en": "PREPARING",
+    "ko": "준비 중"
+  },
+  "prepare-rules": {
+    "en": "RULES",
+    "ko": "규칙"
+  },
+  "rule-deathmatch-progress": {
+    "en": "DEATH MATCH: BEST PROGRESS WINS",
+    "ko": "데스매치: 최고 진행도 승부"
+  },
+  "rule-deathmatch-attempts": {
+    "en": "3 ATTEMPTS",
+    "ko": "시도 3회"
+  },
+  "rule-round-score": {
+    "en": "SCORE MATCH · 3 CLEARS WIN THE ROUND",
+    "ko": "점수 승부 · 3회 클리어 시 클리어 승리"
+  },
+  "rule-round-draw": {
+    "en": "A DRAW GOES TO A DEATH MATCH (BEST PROGRESS)",
+    "ko": "무승부가 나면 데스매치 (최고 진행도 승부)"
   }
 }
