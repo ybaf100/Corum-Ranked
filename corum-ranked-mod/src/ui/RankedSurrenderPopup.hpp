@@ -43,7 +43,7 @@ class RankedSurrenderPopup final : public Popup {
     }
     void render() {
         if (m_contents) m_contents->removeFromParentAndCleanup(true);
-        m_contents = surface({370, 235}, {185, 117.5f}, Cyan, Surface, 255, true);
+        m_contents = surface({370, 235}, {185, 117.5f}, Accent, Surface, 255, true);
         m_mainLayer->addChild(m_contents, 10);
         auto title = m_placement ? i18n::text("placement-skip-map", "SKIP MAP") : i18n::text(m_confirmation ? "surrender-confirm" : "surrender",
             m_confirmation ? "CONFIRM SURRENDER" : "SURRENDER");
@@ -69,7 +69,7 @@ class RankedSurrenderPopup final : public Popup {
             action(menu, i18n::text("surrender-match", "MATCH"), {257, 72}, Red,
                 menu_selector(RankedSurrenderPopup::onMatch));
         }
-        action(menu, i18n::text("cancel", "CANCEL"), {185, 29}, Blue,
+        action(menu, i18n::text("cancel", "CANCEL"), {185, 29}, Steel,
             menu_selector(RankedSurrenderPopup::onCancel), 275);
     }
     bool sameRound() const {

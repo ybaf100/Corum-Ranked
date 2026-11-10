@@ -339,7 +339,7 @@ CCLabelBMFont* gateLabel(std::string const& text, float scale, CCPoint position,
     return corum::ranked::ui::label(text, scale, position, color, weight);
 }
 
-CCNode* gatePanel(CCSize size, CCPoint position, ccColor3B accent = {52, 214, 255}) {
+CCNode* gatePanel(CCSize size, CCPoint position, ccColor3B accent = {200, 255, 46}) {
     return corum::ranked::ui::surface(
         size,
         position,
@@ -716,7 +716,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         m_fields->gateOverlay->setZOrder(1001);
         addChild(m_fields->gateOverlay, 1001);
 
-        m_fields->gateTitle = gateLabel(rankedGateTitle(), 0.20f, {100.0f, 62.0f}, corum::ranked::ui::Cyan);
+        m_fields->gateTitle = gateLabel(rankedGateTitle(), 0.20f, {100.0f, 62.0f}, corum::ranked::ui::Accent);
         corum::ranked::ui::fitLabelWidth(m_fields->gateTitle, 184.0f, 0.20f, 0.14f);
         m_fields->gateOverlay->addChild(m_fields->gateTitle, 3);
         m_fields->gateCountdown = gateLabel(tr("starts-in", "STARTS IN") + "  10", 0.31f, {100.0f, 46.0f}, corum::ranked::ui::Gold);
@@ -727,11 +727,11 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
         m_fields->gateOverlay->addChild(m_fields->gateStatus, 3);
 
         constexpr float compactProgressWidth = 154.0f;
-        auto* compactProgressBack = CCLayerColor::create({5, 12, 25, 245});
+        auto* compactProgressBack = CCLayerColor::create({16, 17, 22, 245});
         compactProgressBack->setContentSize({compactProgressWidth, 8.0f});
         compactProgressBack->setPosition({11.0f, 8.0f});
         m_fields->gateOverlay->addChild(compactProgressBack, 3);
-        m_fields->gateProgressFill = CCLayerColor::create({64, 224, 255, 245});
+        m_fields->gateProgressFill = CCLayerColor::create({200, 255, 46, 245});
         m_fields->gateProgressFill->setContentSize({compactProgressWidth * 0.30f, 8.0f});
         m_fields->gateProgressFill->setPosition(compactProgressBack->getPosition());
         m_fields->gateProgressWidth = compactProgressWidth;
@@ -743,7 +743,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             m_fields->countdownEndsAt - SteadyClock::now()
         ).count();
         if (remainingAtOpen > 5.0) {
-            m_fields->gateIntroCover = CCLayerColor::create({5, 10, 22, 255});
+            m_fields->gateIntroCover = CCLayerColor::create({14, 15, 20, 255});
             m_fields->gateIntroCover->setContentSize(size);
             m_fields->gateIntroCover->setPosition(CCPointZero);
             m_fields->gateIntroCover->setCascadeOpacityEnabled(true);
@@ -762,10 +762,10 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             m_fields->gateIntroPanel->addChild(gatePanel(
                 introPanelSize,
                 {introPanelSize.width / 2.0f, introPanelSize.height / 2.0f},
-                corum::ranked::ui::Cyan
+                corum::ranked::ui::Accent
             ));
 
-            m_fields->introTitle = gateLabel(rankedGateTitle(), 0.31f, {143.0f, 139.0f}, corum::ranked::ui::Cyan);
+            m_fields->introTitle = gateLabel(rankedGateTitle(), 0.31f, {143.0f, 139.0f}, corum::ranked::ui::Accent);
             corum::ranked::ui::fitLabelWidth(m_fields->introTitle, 264.0f, 0.31f, 0.21f);
             m_fields->gateIntroPanel->addChild(m_fields->introTitle, 4);
             m_fields->introMap = gateLabel(
@@ -784,16 +784,16 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
             m_fields->gateIntroPanel->addChild(m_fields->introCreator, 4);
             m_fields->introCountdown = gateLabel(tr("starts-in", "STARTS IN") + "  10", 0.30f, {143.0f, 71.0f}, corum::ranked::ui::Gold);
             m_fields->gateIntroPanel->addChild(m_fields->introCountdown, 4);
-            m_fields->introStatus = gateLabel(tr("preparing-map", "PREPARING MAP..."), 0.19f, {143.0f, 51.0f}, corum::ranked::ui::Cyan);
+            m_fields->introStatus = gateLabel(tr("preparing-map", "PREPARING MAP..."), 0.19f, {143.0f, 51.0f}, corum::ranked::ui::Accent);
             corum::ranked::ui::fitLabelWidth(m_fields->introStatus, 256.0f, 0.19f, 0.13f);
             m_fields->gateIntroPanel->addChild(m_fields->introStatus, 4);
 
             constexpr float introProgressWidth = 220.0f;
-            auto* introProgressBack = CCLayerColor::create({5, 12, 25, 245});
+            auto* introProgressBack = CCLayerColor::create({16, 17, 22, 245});
             introProgressBack->setContentSize({introProgressWidth, 10.0f});
             introProgressBack->setPosition({18.0f, 26.0f});
             m_fields->gateIntroPanel->addChild(introProgressBack, 3);
-            m_fields->introProgressFill = CCLayerColor::create({64, 224, 255, 245});
+            m_fields->introProgressFill = CCLayerColor::create({200, 255, 46, 245});
             m_fields->introProgressFill->setContentSize({introProgressWidth * 0.30f, 10.0f});
             m_fields->introProgressFill->setPosition(introProgressBack->getPosition());
             m_fields->introProgressWidth = introProgressWidth;
@@ -1014,7 +1014,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
                     ? tr("updating-map", "UPDATING MAP...")
                     : tr("downloading-map", "DOWNLOADING MAP...");
                 m_fields->gateStatus->setString(statusText.c_str());
-                m_fields->gateStatus->setColor({95, 180, 255});
+                m_fields->gateStatus->setColor({200, 255, 46});
             }
 
             if (m_fields->mapDownloadStartedAt == SteadyClock::time_point{}) {
@@ -1060,7 +1060,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
                 }
             } else if (m_fields->gateStatus) {
                 m_fields->gateStatus->setString(tr("song-download-only", "ONLY SONG DOWNLOAD IS AVAILABLE").c_str());
-                m_fields->gateStatus->setColor({95, 180, 255});
+                m_fields->gateStatus->setColor({200, 255, 46});
             }
         }
 
@@ -1508,7 +1508,7 @@ class $modify(CorumRankedLevelInfoLayer, LevelInfoLayer) {
                 : tr("play-failed", "PLAY FAILED - RETRYING");
             m_fields->gateCountdown->setString(retryText.c_str());
             m_fields->gateCountdown->setColor(
-                updateRequired ? ccColor3B{95, 180, 255} : ccColor3B{255, 92, 92}
+                updateRequired ? ccColor3B{200, 255, 46} : ccColor3B{255, 92, 92}
             );
         }
 

@@ -92,7 +92,7 @@ class SurvivalGameLayer final : public CCLayerColor {
     std::optional<RankedAudioMode> m_audioMode;
     bool m_closed=false,m_motion=false;float m_frameDelta=0;
     static std::string text(char const* key,char const* fallback) {return i18n::text(key,fallback);}
-    CCMenuItemSpriteExtra* button(CCMenu* menu,std::string const& caption,CCPoint position,float width,int tag,ccColor3B color=ui::Blue,CCLabelBMFont** saved=nullptr) {
+    CCMenuItemSpriteExtra* button(CCMenu* menu,std::string const& caption,CCPoint position,float width,int tag,ccColor3B color=ui::Steel,CCLabelBMFont** saved=nullptr) {
         auto* face=ui::surface({width,28},{},color,ui::SurfaceRaised,255,true);
         auto* label=ui::menuLabel(caption,.29f,{width/2,14},ui::Text,ui::FontWeight::SemiBold);
         ui::fitMenuLabelWidth(label,width-12,.29f,.20f);face->addChild(label,5);if(saved)*saved=label;
@@ -101,8 +101,8 @@ class SurvivalGameLayer final : public CCLayerColor {
     bool init() override {
         if(!CCLayerColor::initWithColor({0,0,0,255}))return false;setID("survival-game-coordinator"_spr);setKeypadEnabled(true);
         auto const size=CCDirector::sharedDirector()->getWinSize();setContentSize(size);
-        m_heading=ui::menuLabel("SURVIVAL",.60f,{size.width/2,size.height-29},ui::Cyan,ui::FontWeight::Black);addChild(m_heading);
-        m_boardClock=ui::menuLabel("",.28f,{size.width-12,size.height-22},ui::Cyan,ui::FontWeight::ExtraBold);
+        m_heading=ui::menuLabel("SURVIVAL",.60f,{size.width/2,size.height-29},ui::Accent,ui::FontWeight::Black);addChild(m_heading);
+        m_boardClock=ui::menuLabel("",.28f,{size.width-12,size.height-22},ui::Accent,ui::FontWeight::ExtraBold);
         m_boardClock->setAnchorPoint({1,.5f});m_boardClock->setID("survival-board-clock"_spr);addChild(m_boardClock,10);
         m_map=ui::menuLabel("",.27f,{size.width/2,size.height-48},ui::TextMuted,ui::FontWeight::SemiBold);addChild(m_map);
         m_status=ui::menuLabel("",.28f,{size.width/2,80},ui::TextMuted,ui::FontWeight::SemiBold);addChild(m_status);
@@ -116,14 +116,14 @@ class SurvivalGameLayer final : public CCLayerColor {
         auto* pageMenu=CCMenu::create();pageMenu->setPosition(CCPointZero);m_pager->addChild(pageMenu);
         button(pageMenu,"<",{size.width/2-70,58},48,16);button(pageMenu,">",{size.width/2+70,58},48,17);
         m_pageLabel=ui::menuLabel("",.24f,{size.width/2,58},ui::TextMuted);m_pager->addChild(m_pageLabel);
-        m_resume=button(menu,text("survival-reenter","RE-ENTER"),{size.width/2,22},132,15,ui::Cyan);
+        m_resume=button(menu,text("survival-reenter","RE-ENTER"),{size.width/2,22},132,15,ui::Accent);
         m_continue=button(menu,text("close","CLOSE"),{size.width/2,22},132,1);
         m_surrender=button(menu,text("surrender","SURRENDER"),{size.width-68,22},116,2,ui::Red,&m_surrenderText);
         m_freePlay=button(menu,text("survival-free-play","FREE PLAY"),{68,22},116,7,ui::Green);
-        m_liveWatch=button(menu,text("survival-watch","WATCH"),{size.width/2,22},132,19,ui::Cyan);m_liveWatch->setVisible(false);
+        m_liveWatch=button(menu,text("survival-watch","WATCH"),{size.width/2,22},132,19,ui::Accent);m_liveWatch->setVisible(false);
         m_freePlay->setVisible(false);
-        m_backToMap=button(menu,text("survival-back-map","BACK TO MAP"),{size.width/2,22},132,8,ui::Cyan);
-        m_viewBoard=button(menu,text("survival-view-board","VIEW STATUS"),{68,22},116,9,ui::Blue);
+        m_backToMap=button(menu,text("survival-back-map","BACK TO MAP"),{size.width/2,22},132,8,ui::Accent);
+        m_viewBoard=button(menu,text("survival-view-board","VIEW STATUS"),{68,22},116,9,ui::Steel);
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
         m_force=button(menu,"Force n",{68,22},116,3,ui::Red);
         // Debug builds: end the live round from the standings board.
@@ -263,8 +263,8 @@ class SurvivalGameLayer final : public CCLayerColor {
             auto const& value=players[i];auto found=m_tiles.find(value.id);auto const cell=i-first;
             auto const destination=CCPoint{left+(cell%columns)*width,top-(cell/columns)*height};
             if(found==m_tiles.end()){
-                auto* root=ui::surface({card.width,card.height},{},ui::Blue,ui::SurfaceRaised,230,true);root->setPosition(destination);m_grid->addChild(root);
-                auto* nickname=ui::playerNameLabel(value.name,rankedMenuTextScale(.25f),{card.titleX,card.titleY},value.id==view.ownId?ui::Cyan:ui::Text,ui::FontWeight::Black);
+                auto* root=ui::surface({card.width,card.height},{},ui::Steel,ui::SurfaceRaised,230,true);root->setPosition(destination);m_grid->addChild(root);
+                auto* nickname=ui::playerNameLabel(value.name,rankedMenuTextScale(.25f),{card.titleX,card.titleY},value.id==view.ownId?ui::Accent:ui::Text,ui::FontWeight::Black);
                 ui::fitSingleLineMenuLabel(nickname,card.titleWidth,card.titleHeight,.25f);root->addChild(nickname,5);
                 int index=1;auto dash=value.id.rfind('-');if(dash!=std::string::npos)index=numFromString<int>(value.id.substr(dash+1)).unwrapOr(1);
                 auto* avatarSlot=CCNode::create();avatarSlot->setPosition({card.avatarX,card.avatarY});root->addChild(avatarSlot,5);
@@ -307,7 +307,7 @@ class SurvivalGameLayer final : public CCLayerColor {
             if(tile.goldBackground)tile.goldBackground->setVisible(goldCard);
             if(compact){
                 if(tile.titleText!=value.name){tile.titleText=value.name;tile.name->setString(value.name.c_str());ui::fitSingleLineMenuLabel(tile.name,card.titleWidth,card.titleHeight,.25f);}
-                tile.name->setColor(value.eliminated||revealed?ui::Red:goldCard?ui::Gold:value.id==view.ownId?ui::Cyan:ui::Text);
+                tile.name->setColor(value.eliminated||revealed?ui::Red:goldCard?ui::Gold:value.id==view.ownId?ui::Accent:ui::Text);
             }else if(result){int delta=0;for(auto const& p:view.result["standings"].asArray().unwrapOr(std::vector<matjson::Value>{}))if(p["participantId"].asString().unwrapOr("")==value.id)delta=static_cast<int>(p["delta"].asInt().unwrapOr(0));
                 if(value.id==view.ownId)delta=static_cast<int>(view.result["actualDelta"].asInt().unwrapOr(delta));
                 record=value.rank>0?fmt::format("{} · {:+} LP",rank,delta):text("waiting","WAITING");color=value.rank>0?survivalResultRankColor(value.rank,delta):survivalRankColor(10,true);
@@ -318,7 +318,7 @@ class SurvivalGameLayer final : public CCLayerColor {
                     fmt::format("BEST {}% · {}",rankedScoreText(tile.progress.best.displayed,view.phase=="TIEBREAK"),status);
                 auto const title=compact?value.name:fmt::format("{} {}",rank,value.name);
                 if(tile.titleText!=title){tile.titleText=title;tile.name->setString(title.c_str());ui::fitSingleLineMenuLabel(tile.name,card.titleWidth,card.titleHeight,.25f);}
-                tile.name->setColor(value.eliminated||revealed?ui::Red:goldCard?ui::Gold:value.id==view.ownId?ui::Cyan:ui::Text);
+                tile.name->setColor(value.eliminated||revealed?ui::Red:goldCard?ui::Gold:value.id==view.ownId?ui::Accent:ui::Text);
             }
             auto const tint=completed?(revealed?survivalRankColor(value.rank,false):goldCard?SurvivalHudColor{255,211,78}:SurvivalHudColor{77,135,255}):value.eliminated?survivalRankColor(value.rank,false):
                 (result||view.state=="PLAYING")&&value.rank>0?survivalRankColor(value.rank,result||value.passing):SurvivalHudColor{77,135,255};

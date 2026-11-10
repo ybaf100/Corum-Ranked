@@ -19,8 +19,8 @@ class SurvivalDebugPopup final : public Popup {
     bool init(bool forceOnly) {
         if(!Popup::init(340,312))return false;m_forceOnly=forceOnly;
         m_bgSprite->setVisible(false);setID("survival-debug-config"_spr);
-        auto* panel=ui::surface({340,312},{170,156},ui::Cyan,ui::Surface,255,true);m_mainLayer->addChild(panel);
-        panel->addChild(ui::menuLabel(forceOnly?"SURVIVAL · Force n":"SURVIVAL DEBUG",.46f,{170,285},ui::Cyan,ui::FontWeight::Black));
+        auto* panel=ui::surface({340,312},{170,156},ui::Accent,ui::Surface,255,true);m_mainLayer->addChild(panel);
+        panel->addChild(ui::menuLabel(forceOnly?"SURVIVAL · Force n":"SURVIVAL DEBUG",.46f,{170,285},ui::Accent,ui::FontWeight::Black));
         auto* warning=ui::menuLabel(i18n::text("survival-debug-rating","DEBUG RESULTS AFFECT YOUR SURVIVAL LP"),.23f,{170,261},ui::Red,ui::FontWeight::SemiBold);
         ui::fitMenuLabelWidth(warning,312,.23f,.18f);panel->addChild(warning);
         m_password=TextInput::create(240,"Debug password");m_password->setPasswordMode(true);m_password->setMaxCharCount(128);m_password->setPosition({170,225});panel->addChild(m_password,10);
@@ -37,17 +37,17 @@ class SurvivalDebugPopup final : public Popup {
         auto* deathMatchLabel=ui::menuLabel(i18n::text("survival-force-death-match","Force Death Match"),.28f,{83,108},ui::Text,ui::FontWeight::SemiBold);
         deathMatchLabel->setAnchorPoint({0,.5f});ui::fitMenuLabelWidth(deathMatchLabel,226,.28f,.20f);deathMatchLabel->setVisible(!forceOnly);panel->addChild(deathMatchLabel);
         m_forceLabel=ui::menuLabel("",.29f,{70,15},ui::Text,ui::FontWeight::SemiBold);
-        auto* face=ui::surface({140,30},{},ui::Blue,ui::SurfaceRaised,255,true);face->addChild(m_forceLabel,5);
+        auto* face=ui::surface({140,30},{},ui::Steel,ui::SurfaceRaised,255,true);face->addChild(m_forceLabel,5);
         auto* scenario=CCMenuItemSpriteExtra::create(face,this,menu_selector(SurvivalDebugPopup::onChoice));scenario->setTag(1);scenario->setPosition({120,75});menu->addChild(scenario);
         m_rankInput=TextInput::create(82,forceOnly?fmt::format("1-{}",SurvivalRuntime::get().view().playerCount):"n");m_rankInput->setFilter("0123456789");m_rankInput->setMaxCharCount(2);m_rankInput->setString("1");m_rankInput->setPosition({243,75});panel->addChild(m_rankInput,10);
-        auto* startFace=ui::surface({240,30},{},ui::Cyan,ui::SurfaceRaised,255,true);
+        auto* startFace=ui::surface({240,30},{},ui::Accent,ui::SurfaceRaised,255,true);
         startFace->addChild(ui::menuLabel(i18n::text("start","START"),.34f,{120,15},ui::Text,ui::FontWeight::SemiBold),5);
         auto* start=CCMenuItemSpriteExtra::create(startFace,this,menu_selector(SurvivalDebugPopup::onChoice));start->setTag(2);start->setPosition({170,35});menu->addChild(start);
         m_status=ui::menuLabel("",.22f,{170,13},ui::Red,ui::FontWeight::SemiBold);panel->addChild(m_status,5);
         m_rank=forceOnly?1:0;refreshLabels();return true;
     }
     CCNode* groupFace(int index) {
-        constexpr char const* groups[]={"RED-BRONZE","SILVER","GOLD"};auto color=index==m_group?ui::Gold:ui::Blue;
+        constexpr char const* groups[]={"RED-BRONZE","SILVER","GOLD"};auto color=index==m_group?ui::Gold:ui::Steel;
         auto* face=ui::surface({98,28},{},color,ui::SurfaceRaised,255,true);
         auto* label=ui::menuLabel(groups[index],.24f,{49,14},index==m_group?ui::Gold:ui::Text,ui::FontWeight::SemiBold);
         ui::fitMenuLabelWidth(label,86,.24f,.18f);face->addChild(label,5);return face;

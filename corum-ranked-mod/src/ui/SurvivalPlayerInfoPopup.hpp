@@ -116,8 +116,8 @@ class SurvivalPlayerInfoPopup final:public Popup,public UserInfoDelegate {
         if(m_player.bot)m_player.accountId=0;
         if(m_player.accountId<=0)m_lookupFailed=m_forumFailed=true;
         m_bgSprite->setVisible(false);m_closeBtn->setVisible(false);setID("survival-player-info-popup"_spr);
-        m_panel=rankedPopupContent(m_mainLayer,m_buttonMenu,layout);m_panel->addChild(surface({300,354},{150,177},Cyan,Surface,255,true));
-        auto* face=surface({120,28},{},Blue,SurfaceRaised,255,true);auto* label=menuLabel(i18n::text("close","CLOSE"),.32f,{60,14},Text,FontWeight::ExtraBold);face->addChild(label,5);
+        m_panel=rankedPopupContent(m_mainLayer,m_buttonMenu,layout);m_panel->addChild(surface({300,354},{150,177},Accent,Surface,255,true));
+        auto* face=surface({120,28},{},Steel,SurfaceRaised,255,true);auto* label=menuLabel(i18n::text("close","CLOSE"),.32f,{60,14},Text,FontWeight::ExtraBold);face->addChild(label,5);
         auto* close=CCMenuItemSpriteExtra::create(face,this,menu_selector(SurvivalPlayerInfoPopup::onClose));close->setPosition({150,20});m_buttonMenu->addChild(close);
         m_deadline=std::chrono::steady_clock::now()+std::chrono::seconds(25);
         schedule(schedule_selector(SurvivalPlayerInfoPopup::refresh),.1f);render();return true;

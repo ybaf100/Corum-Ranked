@@ -35,7 +35,7 @@ class DebugAudioVolumePopup final : public Popup {
         return account && account->m_accountID>0 && std::string(account->m_username)=="hwanhee1";
     }
     CCMenuItemSpriteExtra* button(CCMenu* menu, std::string text, CCPoint point, float width, int tag) {
-        auto* face=ui::surface({width,28},{},ui::Blue,ui::SurfaceRaised,255,true);
+        auto* face=ui::surface({width,28},{},ui::Steel,ui::SurfaceRaised,255,true);
         auto* caption=ui::menuLabel(text,.36f,{width/2,14},ui::Text,ui::FontWeight::ExtraBold);
         ui::fitMenuLabelWidth(caption,width-12,.36f,.26f); face->addChild(caption,5);
         auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(DebugAudioVolumePopup::onSelect));
@@ -47,8 +47,8 @@ class DebugAudioVolumePopup final : public Popup {
         if (!Popup::init(384,280)) return false;
         m_password=std::move(password); m_session=runtime.spectatorLiveSessionToken();
         m_bgSprite->setVisible(false); setID("ranked-admin-audio-volume"_spr);
-        auto* panel=ui::surface({384,280},{192,140},ui::Cyan,ui::Surface,255,true); m_mainLayer->addChild(panel);
-        auto* title=ui::menuLabel(i18n::text("admin-audio-title","Song volume (all players)"),.46f,{192,257},ui::Cyan,ui::FontWeight::Black);
+        auto* panel=ui::surface({384,280},{192,140},ui::Accent,ui::Surface,255,true); m_mainLayer->addChild(panel);
+        auto* title=ui::menuLabel(i18n::text("admin-audio-title","Song volume (all players)"),.46f,{192,257},ui::Accent,ui::FontWeight::Black);
         ui::fitMenuLabelWidth(title,334,.46f,.34f); panel->addChild(title,10);
         auto* scope=ui::menuLabel(i18n::text("admin-audio-scope","Ranked menu BGM - saved on server"),.26f,{192,233},ui::TextMuted);
         ui::fitMenuLabelWidth(scope,350,.26f,.22f); panel->addChild(scope,10);
@@ -182,7 +182,7 @@ class DebugSurvivalModePopup final : public Popup {
     }
     CCNode* face(int count) {
         auto const selected=count==m_count;
-        auto* node=ui::surface({140,34},{},selected?ui::Gold:ui::Blue,ui::SurfaceRaised,255,true);
+        auto* node=ui::surface({140,34},{},selected?ui::Gold:ui::Steel,ui::SurfaceRaised,255,true);
         auto* caption=ui::menuLabel(fmt::format(fmt::runtime(i18n::text("survival-format-players","{} PLAYERS")),count),.32f,{70,17},selected?ui::Gold:ui::Text,ui::FontWeight::ExtraBold);
         ui::fitMenuLabelWidth(caption,126,.32f,.22f);node->addChild(caption,5);return node;
     }
@@ -195,8 +195,8 @@ class DebugSurvivalModePopup final : public Popup {
         m_session=RankedRuntime::get().spectatorLiveSessionToken();
         if(password.empty() || !authorized() || !Popup::init(360,220))return false;
         m_password=std::move(password);m_bgSprite->setVisible(false);setID("survival-operation-format"_spr);
-        auto* panel=ui::surface({360,220},{180,110},ui::Cyan,ui::Surface,255,true);m_mainLayer->addChild(panel);
-        auto* title=ui::menuLabel(i18n::text("admin-survival-format","Survival operating format"),.40f,{180,194},ui::Cyan,ui::FontWeight::Black);
+        auto* panel=ui::surface({360,220},{180,110},ui::Accent,ui::Surface,255,true);m_mainLayer->addChild(panel);
+        auto* title=ui::menuLabel(i18n::text("admin-survival-format","Survival operating format"),.40f,{180,194},ui::Accent,ui::FontWeight::Black);
         ui::fitMenuLabelWidth(title,324,.40f,.28f);panel->addChild(title);
         auto* hint=ui::menuLabel(i18n::text("survival-format-new-matches","Applies to new matches. Current games keep their rules."),.24f,{180,166},ui::TextMuted);
         ui::fitFullMenuLabel(hint,324,28,.24f);panel->addChild(hint);
@@ -204,7 +204,7 @@ class DebugSurvivalModePopup final : public Popup {
         m_sixteen=CCMenuItemSpriteExtra::create(face(16),this,menu_selector(DebugSurvivalModePopup::onAction));m_sixteen->setTag(16);m_sixteen->setPosition({98,126});menu->addChild(m_sixteen);
         m_sixtyFour=CCMenuItemSpriteExtra::create(face(64),this,menu_selector(DebugSurvivalModePopup::onAction));m_sixtyFour->setTag(64);m_sixtyFour->setPosition({262,126});menu->addChild(m_sixtyFour);
         m_schedule=ui::menuLabel("",.26f,{180,91},ui::Text);panel->addChild(m_schedule);
-        auto* reloadFace=ui::surface({140,28},{},ui::Blue,ui::SurfaceRaised,255,true);
+        auto* reloadFace=ui::surface({140,28},{},ui::Steel,ui::SurfaceRaised,255,true);
         reloadFace->addChild(ui::menuLabel(i18n::text("admin-audio-reload","Reload"),.28f,{70,14},ui::Text),5);
         m_reload=CCMenuItemSpriteExtra::create(reloadFace,this,menu_selector(DebugSurvivalModePopup::onAction));m_reload->setTag(0);m_reload->setPosition({180,57});menu->addChild(m_reload);
         m_status=ui::menuLabel("",.24f,{180,22},ui::TextMuted);panel->addChild(m_status);
@@ -260,7 +260,7 @@ class DebugSeasonPopup final : public Popup {
         return account && std::string(account->m_username)=="hwanhee1" && m_session==RankedRuntime::get().spectatorLiveSessionToken();
     }
     CCNode* preseasonFace() {
-        auto* node=ui::surface({120,30},{},m_isPreseason?ui::Gold:ui::Blue,ui::SurfaceRaised,255,true);
+        auto* node=ui::surface({120,30},{},m_isPreseason?ui::Gold:ui::Steel,ui::SurfaceRaised,255,true);
         auto* caption=ui::menuLabel(i18n::text("season-preseason","PRESEASON"),.28f,{60,15},m_isPreseason?ui::Gold:ui::Text,ui::FontWeight::ExtraBold);
         ui::fitMenuLabelWidth(caption,108,.28f,.2f);node->addChild(caption,5);return node;
     }
@@ -308,7 +308,7 @@ class DebugSeasonPopup final : public Popup {
         m_when=TextInput::create(300,"YYYY-MM-DD HH:MM");m_when->setPosition({180,140});m_when->setFilter("0123456789-: ");m_when->setMaxCharCount(16);panel->addChild(m_when,20);
         m_zone=ui::menuLabel(fmt::format("{} ({})",i18n::text("admin-season-time","End time (enabled) / start time (disabled), local time"),zoneText()),.20f,{180,112},ui::TextMuted);
         ui::fitFullMenuLabel(m_zone,330,24,.20f);panel->addChild(m_zone);
-        m_reload=button(menu,i18n::text("admin-audio-reload","Reload"),{98,74},0,ui::Blue);
+        m_reload=button(menu,i18n::text("admin-audio-reload","Reload"),{98,74},0,ui::Steel);
         m_save=button(menu,i18n::text("admin-season-save","Save"),{262,74},2,ui::Gold);
         m_status=ui::menuLabel("",.22f,{180,28},ui::TextMuted);panel->addChild(m_status);
         controls();schedule(schedule_selector(DebugSeasonPopup::refresh),.1f);request(false);return true;
@@ -405,7 +405,7 @@ class DebugAdminPopup final : public Popup {
         constexpr char const* labels[]={"Unlock all achievements","Set LP + tier","Set MMR","Set LP + MMR + tier","Delete all bots","Reset player data","Reset ranked database","Song volumes (all players)","Survival operating format"};
         for (int i=0;i<9;++i) {
             auto const danger=i==4 || i==5 || i==6;
-            auto* face=ui::surface({170,30},{},danger?ui::Red:ui::Blue,ui::SurfaceRaised,255,true);
+            auto* face=ui::surface({170,30},{},danger?ui::Red:ui::Steel,ui::SurfaceRaised,255,true);
             auto* caption=ui::menuLabel(i18n::text(keys[i],labels[i]),.32f,{85,15},danger?ui::Red:ui::Text,ui::FontWeight::ExtraBold);
             ui::fitMenuLabelWidth(caption,154,.32f,.24f); face->addChild(caption,5);
             auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(DebugAdminPopup::onAction));
@@ -422,7 +422,7 @@ class DebugAdminPopup final : public Popup {
     }
     CCNode* scopeFace(int index) {
         auto const selected=m_scope==index;
-        auto* face=ui::surface({120,28},{},selected?ui::Gold:ui::Blue,ui::SurfaceRaised,255,true);
+        auto* face=ui::surface({120,28},{},selected?ui::Gold:ui::Steel,ui::SurfaceRaised,255,true);
         auto text=index==0?i18n::text("solo-ranked","SOLO RANKED"):index==1?i18n::text("survival","SURVIVAL"):i18n::text("admin-scope-common","COMMON");
         auto* caption=ui::menuLabel(text,.26f,{60,14},selected?ui::Gold:ui::Text,ui::FontWeight::SemiBold);
         ui::fitMenuLabelWidth(caption,108,.26f,.20f);face->addChild(caption,5);return face;

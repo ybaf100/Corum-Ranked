@@ -47,7 +47,7 @@ namespace corum::ranked {
 struct SurvivalRuntime{std::string id="match";bool live=true;static auto& get(){static SurvivalRuntime r;return r;}bool active(){return live;}struct View{std::string id;};auto view(){return View{id};}};
 struct RankedRuntime{std::string session="session";static auto&get(){static RankedRuntime r;return r;}std::string spectatorLiveSessionToken(){return session;}};
 namespace i18n{bool isKorean(){return false;}std::string streak(int,bool){return "STREAK";}std::string text(char const*,char const*fallback){return fallback;}}
-namespace ui{enum class FontWeight{SemiBold,ExtraBold,Black};constexpr ccColor3B Cyan{1,2,3},Blue{1,2,3},Surface{1,2,3},SurfaceRaised{1,2,3},Text{1,2,3},TextMuted{1,2,3},Gold{1,2,3};
+namespace ui{enum class FontWeight{SemiBold,ExtraBold,Black};constexpr ccColor3B Accent{1,2,3},Steel{1,2,3},Surface{1,2,3},SurfaceRaised{1,2,3},Text{1,2,3},TextMuted{1,2,3},Gold{1,2,3};
 CCNode* surface(CCSize,CCPoint,ccColor3B,ccColor3B,int,bool){return new CCNode;}
 CCLabelBMFont* menuLabel(std::string const& s,float,CCPoint,ccColor3B,FontWeight){auto*n=new CCLabelBMFont;n->text=s;CCLabelBMFont::labels.push_back(s);return n;}
 CCLabelBMFont* playerNameLabel(std::string const&s,float scale,CCPoint p,ccColor3B c,FontWeight w){return menuLabel(s,scale,p,c,w);}

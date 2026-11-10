@@ -31,7 +31,7 @@ class RankedSettingsPopup final : public Popup {
     bool m_closed = false, m_exited = false, m_dirty = false;
 
     CCNode* refreshButtonFace(bool disabled) {
-        auto* face = surface({320, 32}, {}, Cyan, SurfaceRaised, 250, true);
+        auto* face = surface({320, 32}, {}, Accent, SurfaceRaised, 250, true);
         auto* caption = menuLabel(i18n::text("forum-refresh", "Refresh forum records"),
             0.34f, {160, 16}, Text, FontWeight::ExtraBold);
         fitFullMenuLabel(caption, 298, 22, 0.34f); face->addChild(caption, 5);
@@ -45,7 +45,7 @@ class RankedSettingsPopup final : public Popup {
         m_noElasticity=true;
         m_bgSprite->setVisible(false);m_closeBtn->setVisible(false);setID("ranked-settings-popup"_spr);
         auto* content=rankedPopupContent(m_mainLayer,m_buttonMenu,layout);
-        auto* panel=surface({360,346},{180,173},Cyan,Surface,255,true);content->addChild(panel,0);
+        auto* panel=surface({360,346},{180,173},Accent,Surface,255,true);content->addChild(panel,0);
         auto add=[&](std::string const& text,CCPoint position,CCSize bounds,float scale,ccColor3B color,FontWeight weight=FontWeight::ExtraBold){
             auto* label=menuLabel(text,scale,position,color,weight);fitFullMenuLabel(label,bounds.width,bounds.height,scale);panel->addChild(label,10);return label;
         };
@@ -55,7 +55,7 @@ class RankedSettingsPopup final : public Popup {
         m_volume->setID("ranked-volume-slider"_spr);m_volume->setPosition({94,278});m_volume->setValue(RankedVolumeControl::get().volume());panel->addChild(m_volume,20);
         m_percent=add("",{94,254},{146,18},.30f,Gold);updatePercent();
         add(i18n::text("ranked-volume-scope","Lobby, matchmaking and results BGM"),{94,230},{144,26},.20f,TextMuted,FontWeight::SemiBold);
-        add(i18n::text("survival-default-options","SURVIVAL DEFAULTS"),{266,304},{146,16},.24f,Cyan);
+        add(i18n::text("survival-default-options","SURVIVAL DEFAULTS"),{266,304},{146,16},.24f,Accent);
         // Use Popup's own menu: it already owns the modal input priority.
         auto* menu=m_buttonMenu;menu->setZOrder(20);
         auto const defaults=SurvivalOptionsPreferences::get().defaults();
@@ -77,19 +77,19 @@ class RankedSettingsPopup final : public Popup {
         m_forumStatus=add("",{180,66},{320,22},.20f,TextMuted,FontWeight::SemiBold);
         m_forumCooldown=add("",{180,46},{320,12},.23f,TextMuted);m_forumCooldown->setID("ranked-forum-refresh-cooldown"_spr);
         RankedRuntime::get().fetchForumRecords();schedule(schedule_selector(RankedSettingsPopup::updateForumStatus),.15f);updateForumStatus(0);
-        auto* face=surface({120,32},{},Blue,SurfaceRaised,250,true);
+        auto* face=surface({120,32},{},Steel,SurfaceRaised,250,true);
         auto* done=menuLabel(i18n::text("close","Close"),.32f,{60,16},Text,FontWeight::ExtraBold);fitFullMenuLabel(done,100,22,.32f);face->addChild(done,5);
         auto* close=CCMenuItemSpriteExtra::create(face,this,menu_selector(RankedSettingsPopup::onClose));close->setPosition({266,22});menu->addChild(close);
-        auto* creditsFace=surface({120,32},{},Cyan,SurfaceRaised,250,true);auto* creditsText=menuLabel("CREDITS",.30f,{60,16},Text,FontWeight::ExtraBold);creditsFace->addChild(creditsText,5);
+        auto* creditsFace=surface({120,32},{},Accent,SurfaceRaised,250,true);auto* creditsText=menuLabel("CREDITS",.30f,{60,16},Text,FontWeight::ExtraBold);creditsFace->addChild(creditsText,5);
         auto* credits=CCMenuItemSpriteExtra::create(creditsFace,this,menu_selector(RankedSettingsPopup::onCredits));credits->setID("ranked-credits-button"_spr);credits->setPosition({94,22});menu->addChild(credits);
         // Includes the one-time migration if this is the first Settings visit.
         m_dirty=true;return true;
     }
     static replay::ReplaySeekSpeed seekSpeed(){return replay::replaySeekSpeedFromInt(static_cast<int>(Mod::get()->getSavedValue<int64_t>("replay-seek-speed",1)));}
     static ccColor3B seekColor(replay::ReplaySeekSpeed speed){
-        switch(speed){case replay::ReplaySeekSpeed::Low:return Blue;case replay::ReplaySeekSpeed::Fast:return Gold;
+        switch(speed){case replay::ReplaySeekSpeed::Low:return Steel;case replay::ReplaySeekSpeed::Fast:return Gold;
             case replay::ReplaySeekSpeed::UltraFast:return Red;case replay::ReplaySeekSpeed::Normal:break;}
-        return Cyan;
+        return Accent;
     }
     static std::string seekName(replay::ReplaySeekSpeed speed){
         switch(speed){case replay::ReplaySeekSpeed::Low:return i18n::text("replay-seek-low","Low");

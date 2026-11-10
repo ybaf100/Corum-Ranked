@@ -33,7 +33,7 @@ inline cocos2d::CCNode* mapDifficultyBadge(int levelId, MapMetadata metadata, fl
     auto* row = CCNode::create(); row->setContentSize({width,height});
     auto const demon = info.kind == "DEMON";
     auto const extent = height - 2;
-    auto const fill = demon ? mapTierColor(info.gddlColor) : ccc3(36,56,78);
+    auto const fill = demon ? mapTierColor(info.gddlColor) : ccc3(60, 64, 84);
     auto* shape = CCDrawNode::create(); row->addChild(shape);
     std::array<CCPoint,48> polygon;
     if (demon) {

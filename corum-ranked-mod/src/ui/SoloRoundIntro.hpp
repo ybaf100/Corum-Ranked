@@ -18,7 +18,7 @@ struct SoloIntroCard {
 // The card that revolves into the next map.
 struct SoloIntroReveal {
     std::string label, chip, mapTitle, creator, detail, levelText;
-    ccColor3B accent = Cyan, detailColor = Orange;
+    ccColor3B accent = Accent, detailColor = Orange;
     CCNode* thumbnail = nullptr; // optional, already sized to kSoloIntroThumb
 };
 inline constexpr float kSoloCardW = 147.f, kSoloCardH = 182.f, kSoloSlot = 164.4f;
@@ -115,7 +115,7 @@ class SoloRoundIntro final : public CCLayerColor {
         text(m_back, reveal.levelText, 0.19f, {w / 2 - 9, top - 16}, TextMuted, FontWeight::SemiBold, 60, {1, 0.5f});
         auto y = top - 34.f;
         if (reveal.thumbnail) {
-            box(m_back, {kSoloIntroThumb.width + 2, kSoloIntroThumb.height + 2}, {0, y - kSoloIntroThumb.height / 2}, Blue, Ink, 2);
+            box(m_back, {kSoloIntroThumb.width + 2, kSoloIntroThumb.height + 2}, {0, y - kSoloIntroThumb.height / 2}, Steel, Ink, 2);
             reveal.thumbnail->setPosition({0, y - kSoloIntroThumb.height / 2}); m_back->addChild(reveal.thumbnail, 3);
             y -= kSoloIntroThumb.height + 8;
         } else y -= 6;
@@ -123,8 +123,8 @@ class SoloRoundIntro final : public CCLayerColor {
         text(m_back, "by " + reveal.creator, 0.21f, {left, y - 25}, TextMuted, FontWeight::SemiBold, w - 18, {0, 0.5f});
         box(m_back, {w - 18, 28}, {0, y - 48}, reveal.detailColor, Surface, 2);
         text(m_back, reveal.detail, 0.22f, {0, y - 48}, reveal.detailColor, FontWeight::Black, w - 30);
-        box(m_back, {w - 18, 15}, {0, -h / 2 + 15}, Cyan, Ink, 2);
-        text(m_back, "MAP DECIDED", 0.21f, {0, -h / 2 + 15}, Cyan, FontWeight::Black, w - 30);
+        box(m_back, {w - 18, 15}, {0, -h / 2 + 15}, Accent, Ink, 2);
+        text(m_back, "MAP DECIDED", 0.21f, {0, -h / 2 + 15}, Accent, FontWeight::Black, w - 30);
         // Impact ring for the death-match slam: four thin edges around the card.
         m_ring = CCLayerColor::create({0, 0, 0, 0}, 0, 0); m_ring->setCascadeOpacityEnabled(true);
         for (auto const& [size, pos] : std::vector<std::pair<CCSize, CCPoint>>{

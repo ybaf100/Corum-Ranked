@@ -89,7 +89,7 @@ struct RankedRuntime{RuntimeView data;static RankedRuntime&get(){static RankedRu
 namespace fmt {std::string runtime(std::string s){return s;}template<class...T>std::string format(std::string s,T const&...){return s;}}
 namespace corum::ranked::i18n {bool isKorean(){return false;}}
 constexpr int ccc3(unsigned char r,unsigned char g,unsigned char b){return (r<<16)|(g<<8)|b;}
-using ccColor3B=int;constexpr int kGold=1,kCyan=2,kRed=3,kGreen=4,kDeepPanel2=5,kDeepPanel=6;
+using ccColor3B=int;constexpr int kGold=1,kAccent=2,kRed=3,kGreen=4,kDeepPanel2=5,kDeepPanel=6;
 std::string operator""_spr(char const*s,std::size_t n){return {s,n};}
 #define menu_selector(...) 0
 CCNode*makeNeonPanel(CCSize s,CCPoint p,int,int,int){auto*n=new CCNode;n->size=s;n->position=p;return n;}
@@ -103,7 +103,7 @@ namespace corum::ranked::ui {constexpr int TextMuted=9,Text=10;ScrollLayer*creat
 struct CorumRankedLayer {
  corum::ranked::ModeLobbyTransition m_modeTransition;corum::ranked::HistoryScope m_historyScope=corum::ranked::HistoryScope::All;void renderHistoryTabs(){}
  std::string m_historyResult="ALL",m_historySelectedId,m_historyRound;int m_historyTabPage=0;std::optional<float> m_historyListOffset;ScrollLayer*m_historyListScroll=nullptr;
- int historyColor(History const&)const{return kCyan;}std::string historyOutcome(History const&)const{return "WIN";}std::string historyDelta(History const&)const{return "LP";}
+ int historyColor(History const&)const{return kAccent;}std::string historyOutcome(History const&)const{return "WIN";}std::string historyDelta(History const&)const{return "LP";}
  void historyText(CCNode*p,std::string const&t,float s,CCPoint pos,float,int color=0,bool=false,CCPoint anchor={.5f,.5f}){auto*n=makeLabel(t,s,pos,color);n->setAnchorPoint(anchor);p->addChild(n);}
  void historyPlayerName(CCNode*,corum::ranked::SurvivalStanding const&,CCPoint,float,int,std::string const&,bool){}
  bool onHistoryPlayerTap(CCPoint,CCPoint){return false;}
@@ -111,7 +111,7 @@ struct CorumRankedLayer {
  bool isRunning()const{return true;}~CorumRankedLayer(){delete m_root;}
  std::string tr(char const*,char const*english){return english;}
  void addTopBack(bool){}void addScreenHeader(std::string,std::string,int,int){}
- void addButton(std::string,CCPoint,int,bool,float){}
+ void addButton(std::string,CCPoint,int,bool,float,bool=false){}
  ${callbacks}
 };
 CCNode*menuFor(ScrollLayer*l,int tag){
@@ -277,7 +277,7 @@ struct CCTouchDispatcher {std::vector<CCNode*> retired;static CCTouchDispatcher*
 std::string operator""_spr(char const* p,std::size_t size){return {p,size};}
 #define schedule_selector(...) 0
 using LevelPreparationContext=int;int context=1;int currentPreparationContext(){return context;}
-enum class FontWeight {ExtraBold};constexpr int Cyan=1,Surface=2,Gold=3;
+enum class FontWeight {ExtraBold};constexpr int Accent=1,Surface=2,Gold=3;
 CCNode* surface(CCSize,CCPoint,int,int,int,bool){return new CCNode;}
 CCLabelBMFont* menuLabel(std::string text,float,CCPoint,int,FontWeight){auto* n=new CCLabelBMFont;n->text=text;return n;}
 void fitMenuLabelWidth(CCLabelBMFont*,float,float,float){}

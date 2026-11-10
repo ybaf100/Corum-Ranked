@@ -166,7 +166,7 @@ template<class T>struct Number{T unwrapOr(T v){return v;}};template<class T>Numb
 namespace corum::ranked{
 float rankedMenuTextScale(float scale){return scale;}
 namespace i18n{bool isKorean(){return false;}std::string text(char const*,char const* value){return value;}}std::string text(char const*,char const* s){return s;}
-namespace ui{inline constexpr Color Gold{255,195,55},Blue{0,0,255},SurfaceRaised{0,0,0},Cyan{0,255,255},Text{255,255,255},TextMuted{160,160,160},Red{255,0,0};enum class FontWeight{Black,ExtraBold};enum class RankBadgeDisplay{Leaderboard};
+namespace ui{inline constexpr Color Gold{255,195,55},Steel{0,0,255},SurfaceRaised{0,0,0},Accent{0,255,255},Text{255,255,255},TextMuted{160,160,160},Red{255,0,0};enum class FontWeight{Black,ExtraBold};enum class RankBadgeDisplay{Leaderboard};
  CCNode* surface(CCSize size,CCPoint pos,Color,Color,unsigned char,bool){auto* node=new CCNode;node->size=size;node->pos=pos;return node;}
  CCLabelBMFont* menuLabel(std::string const& text,float,CCPoint pos,Color,FontWeight){auto* label=new CCLabelBMFont;label->text=text;label->pos=pos;return label;}CCLabelBMFont* playerNameLabel(std::string const& text,float scale,CCPoint pos,Color color,FontWeight weight){return menuLabel(text,scale,pos,color,weight);}void fitMenuLabelWidth(CCLabelBMFont*,float,float,float){}void fitSingleLineMenuLabel(CCLabelBMFont*,float,float,float){}
 void fitFullMenuLabel(CCLabelBMFont*,float,float,float){}

@@ -45,7 +45,7 @@ bool RankedTierGuidePopup::init() {
     fitMenuLabelWidth(note,size.width-32,.22f,.18f);panel->addChild(note,5);
     auto* menu=CCMenu::create();menu->setPosition(CCPointZero);panel->addChild(menu,20);
     auto button=[&](std::string const& title,float x,SEL_MenuHandler callback) {
-        auto* face=surface({104,26},{},Blue,SurfaceRaised,250,true);
+        auto* face=surface({104,26},{},Steel,SurfaceRaised,250,true);
         face->addChild(menuLabel(title,.34f,{52,13},Text,FontWeight::SemiBold),5);
         auto* item=CCMenuItemSpriteExtra::create(face,this,callback);item->setPosition({x,22});menu->addChild(item);return item;
     };

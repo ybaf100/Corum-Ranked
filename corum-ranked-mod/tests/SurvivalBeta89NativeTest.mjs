@@ -105,7 +105,7 @@ struct CCNode{CCSize size;CCPoint pos,anchor;float scale=1;CCNode*parent=nullptr
 };struct CCMenu:CCNode{};struct CCLayer:CCNode{};
 struct CCDirector{CCSize size;static auto*sharedDirector(){static CCDirector d;return &d;}CCSize getWinSize(){return size;}};
 std::string operator""_spr(char const*s,std::size_t n){return {s,n};}
-constexpr int Cyan=1,Surface=1;
+constexpr int Accent=1,Surface=1;
 CCNode*surface(CCSize s,CCPoint p,int,int,int,bool){auto*n=CCNode::create();n->size=s;n->anchor={.5,.5};n->pos=p;return n;}
 namespace geode::prelude{}namespace cocos2d{using ::CCNode;using ::CCMenu;using ::CCLayer;using ::CCSize;}
 ${helper}

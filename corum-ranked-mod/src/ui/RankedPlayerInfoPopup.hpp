@@ -44,9 +44,9 @@ class RankedPlayerInfoPopup final : public Popup, public UserInfoDelegate {
         if (m_accountId <= 0) return false;
         m_lookupDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(25);
         m_panel = rankedPopupContent(m_mainLayer,m_buttonMenu,layout);
-        m_panel->addChild(surface({300,354},{150,177},Cyan,Surface,255,true));
+        m_panel->addChild(surface({300,354},{150,177},Accent,Surface,255,true));
         auto* menu=m_buttonMenu;menu->setZOrder(30);
-        auto* face = surface({120, 26}, {}, Blue, SurfaceRaised, 250, true);
+        auto* face = surface({120, 26}, {}, Steel, SurfaceRaised, 250, true);
         auto* caption = menuLabel(i18n::text("close", "Close"), 0.36f, {60, 13}, Text, FontWeight::ExtraBold);
         fitMenuLabelWidth(caption, 100, 0.36f, 0.26f); face->addChild(caption, 5);
         auto* close = CCMenuItemSpriteExtra::create(face, this, menu_selector(RankedPlayerInfoPopup::onClose));

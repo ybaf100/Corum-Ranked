@@ -711,7 +711,7 @@ std::string promotionMatch(int){return "PROMOTION MATCH";}
 using corum::ranked::RankedProfileView;
 struct StatusFixture {
     CCNode root;CCNode* m_root=&root;
-    ccColor3B kCyan{0,255,255},kGold{255,255,0},kRed{255,0,0};
+    ccColor3B kAccent{0,255,255},kGold{255,255,0},kRed{255,0,0};
     std::string tr(char const*,char const* english){return english;}
     CCLabelBMFont* makeLabel(std::string const& text,float,CCPoint,ccColor3B,char const*) {
         auto* label=new CCLabelBMFont;label->setString(text.c_str());return label;
@@ -969,7 +969,7 @@ struct CorumRankedLayer:CCNode {
     std::optional<WeakRef<FLAlertLayer>>m_jukeboxNotice;
     std::optional<WeakRef<corum::ranked::ui::RankedJukeboxPopup>>m_jukebox;
     bool mapReady=false;void* findPlayableMap(){return mapReady?this:nullptr;}
-    CCMenuItemSpriteExtra* addButton(std::string,CCPoint,int,bool,float) {
+    CCMenuItemSpriteExtra* addButton(std::string,CCPoint,int,bool,float,bool=false) {
         auto* face=CCNode::create();face->addChild(CCLayerColor::create({64,224,255,255}));
         face->addChild(new CCLabelBMFont);return CCMenuItemSpriteExtra::create(face,this,0);
     }

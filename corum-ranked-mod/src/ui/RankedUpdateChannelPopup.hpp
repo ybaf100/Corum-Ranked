@@ -38,10 +38,10 @@ class RankedUpdateChannelPopup final:public Popup {
         auto const layout=rankedPopupLayout({300,240},CCDirector::sharedDirector()->getWinSize());
         if(!Popup::init(layout.size.width,layout.size.height))return false;
         m_choose=std::move(choose);m_noElasticity=true;m_bgSprite->setVisible(false);m_closeBtn->setVisible(false);setID("ranked-update-channel-popup"_spr);
-        auto* content=rankedPopupContent(m_mainLayer,m_buttonMenu,layout);content->addChild(surface({300,240},{150,120},Cyan,Surface,255,true));
+        auto* content=rankedPopupContent(m_mainLayer,m_buttonMenu,layout);content->addChild(surface({300,240},{150,120},Accent,Surface,255,true));
         auto* title=menuLabel(i18n::text("update-channel","UPDATE CHANNEL"),.42f,{150,215},Text,FontWeight::Black);fitSingleLineMenuLabel(title,250,24,.42f);content->addChild(title,5);
         auto add=[&](std::string caption,CCPoint at,SEL_MenuHandler handler){
-            auto* face=surface({124,30},{},Blue,SurfaceRaised,255,true);auto* text=menuLabel(caption,.29f,{62,15},Text,FontWeight::ExtraBold);fitSingleLineMenuLabel(text,110,22,.29f);face->addChild(text,5);
+            auto* face=surface({124,30},{},Steel,SurfaceRaised,255,true);auto* text=menuLabel(caption,.29f,{62,15},Text,FontWeight::ExtraBold);fitSingleLineMenuLabel(text,110,22,.29f);face->addChild(text,5);
             auto* button=CCMenuItemSpriteExtra::create(face,this,handler);button->setPosition(at);m_buttonMenu->addChild(button);return button;
         };
         m_release=add("RELEASE",{80,173},menu_selector(RankedUpdateChannelPopup::onRelease));m_debug=add("DEBUG",{220,173},menu_selector(RankedUpdateChannelPopup::onDebug));

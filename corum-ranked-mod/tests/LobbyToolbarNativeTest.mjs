@@ -10,11 +10,11 @@ const read=p=>readFileSync(join(root,p),'utf8');
 const strip=s=>s.replace(/^#include.*$|^#pragma once$/gm,'');
 function method(source,signature){const start=source.indexOf(signature);assert(start>=0,signature);let end=source.indexOf('{',start)+1,depth=1;while(depth){if(source[end]==='{')++depth;if(source[end]==='}')--depth;++end;}return source.slice(start,end);}
 
-test('actual toolbar keeps dark gold treatment, scaled button geometry and positions through channel entry/Back; footer follows language and mode',()=>{
+test('actual toolbar keeps the quiet slab treatment, scaled button geometry and positions through channel entry/Back; footer follows language and mode',()=>{
  const dir=mkdtempSync(join(tmpdir(),'corum-lobby-toolbar-'));
  try {
   let boundary=read('tests/helpers/ResultPresentationNativeDouble.hpp').replace(/^#pragma once$/gm,'')
-   .replace('CCNode* getParent()',`CCNode*getChildByID(std::string const&s){for(auto*n:children)if(n->id==s)return n;return nullptr;}
+   .replace('CCNode* getParent()',`bool leaning=false;CCNode*getChildByID(std::string const&s){for(auto*n:children)if(n->id==s)return n;return nullptr;}
     CCSize getScaledContentSize()const{return {size.width*scaleX,size.height*scaleY};} CCNode*getParent()`)
    .replace('bool enabled=true; void setEnabled',`void updateSprite(){auto* sprite=getNormalImage();auto size=sprite->getScaledContentSize();sprite->setPosition({size.width/2,size.height/2});sprite->setAnchorPoint({.5f,.5f});setContentSize(size);}
     void setNormalImage(CCNode*face){removeAllChildrenWithCleanup(true);addChild(face);} bool enabled=true; void setEnabled`)
@@ -31,10 +31,12 @@ namespace geode {struct Mod {
 };}
 ${strip(read('src/domain/TranslationCatalog.generated.hpp'))}\n${strip(read('src/domain/TranslationCatalog.hpp'))}\n${strip(read('src/ui/RankedTranslations.hpp'))}
 std::string tr(std::string_view k,std::string_view e){return corum::ranked::i18n::text(k,e);}
-constexpr ccColor3B kGold{255,207,74},kRed{255,91,111},kCyan{64,224,255};
+constexpr ccColor3B kGold{255,207,74},kRed{255,91,111},kAccent{200,255,46},kSteel{122,130,152};
 namespace corum::ranked {struct SurvivalRuntime {struct View{std::string error;}v;static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}View const&view()const{return v;}};}
 namespace corum::ranked::ui {
- constexpr ccColor3B SurfaceRaised{16,27,49},Text{242,247,255};
+ constexpr ccColor3B SurfaceRaised{32,35,46},Text{244,245,247},AccentInk{13,14,18};
+ CCNode*slab(CCSize s,CCPoint p,ccColor3B accent,bool outlined,ccColor3B fill){auto*n=CCNode::create();n->size=s;n->position=p;n->color=outlined?fill:accent;auto*f=CCNode::create();f->id="frame";f->color=accent;n->addChild(f);return n;}
+ void leanLabel(CCNode*n){n->leaning=true;}
  CCNode*surface(CCSize s,CCPoint p,ccColor3B accent,ccColor3B fill,int,bool){auto*n=CCNode::create();n->size=s;n->position=p;n->color=fill;auto*f=CCNode::create();f->id="frame";f->color=accent;n->addChild(f);return n;}
  CCLabelBMFont*menuLabel(std::string const&s,float scale,CCPoint p,ccColor3B c,bool){auto*n=new CCLabelBMFont;n->setString(s.c_str());n->setScale(scale);n->position=p;n->color=c;return n;}
  void fitMenuLabelWidth(CCLabelBMFont*,float,float,float){}
@@ -61,8 +63,9 @@ int main(){using namespace corum::ranked;using namespace corum::ranked::ui;
    for(int repeat=0;repeat<3;repeat++)for(auto mode:{RankedMode::Survival,RankedMode::SoloRanked}){
     assert(o.m_modeTransition.select(mode));o.m_modeTransition.finish();o.updateModeLobbyHeader();
     auto*normal=history->getNormalImage();auto*panel=normal->children[0];
-    assert(panel->color==SurfaceRaised&&panel->children[0]->color==(mode==RankedMode::SoloRanked?kGold:kCyan));
-    assert(normal->children[1]->color==(mode==RankedMode::SoloRanked?kGold:Text));
+    // The quiet outlined slab in both channels: steel frame, leaning caption.
+    assert(panel->color==SurfaceRaised&&panel->children[0]->color==kSteel);
+    assert(normal->children[1]->color==Text&&normal->children[1]->leaning);
     assert(std::abs(history->size.width-normal->size.width*.66f)<.001f);
     assert(normal->anchor.x==.5f&&std::abs(normal->position.x-history->size.width/2)<.001f);
     assert(std::abs(history->position.x+history->size.width/2-(size.width-20))<.001f);

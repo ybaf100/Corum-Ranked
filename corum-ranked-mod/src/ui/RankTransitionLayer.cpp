@@ -159,7 +159,7 @@ bool RankTransitionLayer::init(
     std::function<void()> completion,
     bool chainToResult
 ) {
-    if (!CCLayerColor::initWithColor({2, 5, 15, 255})) return false;
+    if (!CCLayerColor::initWithColor({9, 10, 13, 255})) return false;
 
     m_oldRank = normalizeRankName(std::move(oldRank));
     m_newRank = normalizeRankName(std::move(newRank));
@@ -216,7 +216,7 @@ void RankTransitionLayer::createBackground() {
         backdrop->setPosition({size.width / 2.0f, size.height / 2.0f});
         m_backgroundRoot->addChild(backdrop, 0);
     } else {
-        auto* fallback = CCLayerColor::create({3, 8, 22, 255});
+        auto* fallback = CCLayerColor::create({12, 13, 17, 255});
         fallback->setContentSize(size);
         m_backgroundRoot->addChild(fallback, 0);
     }

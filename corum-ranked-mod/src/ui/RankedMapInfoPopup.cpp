@@ -54,11 +54,11 @@ void RankedMapInfoPopup::addChrome() {
     auto* menu = CCMenu::create();
     menu->setPosition(CCPointZero);
     m_content->addChild(menu, 20);
-    auto* close = CCMenuItemSpriteExtra::create(buttonFace(i18n::text("close", "CLOSE"), {64, 22}, Blue, false),
+    auto* close = CCMenuItemSpriteExtra::create(buttonFace(i18n::text("close", "CLOSE"), {64, 22}, Steel, false),
         this, menu_selector(RankedMapInfoPopup::onClose));
     close->setPosition({44, size.height - 20});
     menu->addChild(close);
-    auto* refresh = CCMenuItemSpriteExtra::create(buttonFace(i18n::text("leaderboard-refresh", "REFRESH"), {72, 22}, Cyan, false),
+    auto* refresh = CCMenuItemSpriteExtra::create(buttonFace(i18n::text("leaderboard-refresh", "REFRESH"), {72, 22}, Accent, false),
         this, menu_selector(RankedMapInfoPopup::onRefresh));
     refresh->setPosition({size.width - 44, size.height - 20});
     menu->addChild(refresh);
@@ -143,16 +143,16 @@ void RankedMapInfoPopup::showDetail(matjson::Value const& data) {
         caption(box, label, {chipWidth / 2, 8}, 0.19f, chipWidth - 8, Text, FontWeight::ExtraBold);
     };
     chip(0, fmt::format("POOL {}", map.pool), poolColor(map.pool));
-    chip(1, map.durationSeconds ? fmt::format(fmt::runtime(i18n::text("map-info-length", "Length {}")), mapPoolClock(map.durationSeconds)) : "-", Blue);
+    chip(1, map.durationSeconds ? fmt::format(fmt::runtime(i18n::text("map-info-length", "Length {}")), mapPoolClock(map.durationSeconds)) : "-", Steel);
     caption(card, i18n::text("map-info-qualifying", "Qualifying progress"), {8, cardHeight - 70}, 0.21f, 110, TextMuted, FontWeight::SemiBold, 0);
     caption(card, mapPoolPercent(map.qualifyingPercent), {leftWidth - 8, cardHeight - 70}, 0.26f, 50, Text, FontWeight::Black, 1);
     auto* rule = drawNode(card);
-    fillRect(rule, {8, cardHeight - 80, leftWidth - 16, 1}, Blue, 0.35f);
+    fillRect(rule, {8, cardHeight - 80, leftWidth - 16, 1}, Steel, 0.35f);
 
-    caption(card, i18n::text("map-info-mine", "MY RECORD"), {8, cardHeight - 92}, 0.24f, 100, Cyan, FontWeight::Black, 0);
+    caption(card, i18n::text("map-info-mine", "MY RECORD"), {8, cardHeight - 92}, 0.24f, 100, Accent, FontWeight::Black, 0);
     auto const mineWidth = (leftWidth - 16 - 8) / 3;
     auto const mineTile = [&](int index, std::string const& value, std::string const& label, ccColor3B color) {
-        auto* box = surface({mineWidth, 38}, {}, Cyan, Surface, 245, false);
+        auto* box = surface({mineWidth, 38}, {}, Accent, Surface, 245, false);
         box->setAnchorPoint(CCPointZero);
         box->setPosition({8 + index * (mineWidth + 4), cardHeight - 140});
         card->addChild(box, 4);
@@ -168,7 +168,7 @@ void RankedMapInfoPopup::showDetail(matjson::Value const& data) {
     auto* viewMenu = CCMenu::create();
     viewMenu->setPosition(CCPointZero);
     card->addChild(viewMenu, 20);
-    auto* view = CCMenuItemSpriteExtra::create(buttonFace(i18n::text("history-view-level", "VIEW LEVEL"), {leftWidth - 16, 26}, Cyan, false, 0.28f),
+    auto* view = CCMenuItemSpriteExtra::create(buttonFace(i18n::text("history-view-level", "VIEW LEVEL"), {leftWidth - 16, 26}, Accent, false, 0.28f),
         this, menu_selector(RankedMapInfoPopup::onViewLevel));
     view->setPosition({leftWidth / 2, 20});
     viewMenu->addChild(view);
@@ -188,7 +188,7 @@ void RankedMapInfoPopup::showDetail(matjson::Value const& data) {
     };
     auto const totalRounds = integer(data["totals"]["rounds"]);
     headline(0, i18n::text("map-info-share", "Played"), mapPoolPercent(map.share),
-        fmt::format(fmt::runtime(i18n::text("map-info-share-detail", "{} / {} rounds")), mapPoolNumber(map.rounds), mapPoolNumber(totalRounds)), Cyan);
+        fmt::format(fmt::runtime(i18n::text("map-info-share-detail", "{} / {} rounds")), mapPoolNumber(map.rounds), mapPoolNumber(totalRounds)), Accent);
     headline(1, i18n::text("map-info-ban", "Banned"), mapPoolPercent(map.banRate),
         fmt::format(fmt::runtime(i18n::text("map-info-ban-detail", "{} bans · {} offers")), mapPoolNumber(map.bans), mapPoolNumber(map.banOffers)), Red);
     headline(2, i18n::text("map-info-draw", "Draws"), mapPoolPercent(map.drawRate),
@@ -199,7 +199,7 @@ void RankedMapInfoPopup::showDetail(matjson::Value const& data) {
     // Where players die: ten 10% bins, the deadliest one in gold.
     auto const middleTop = size.height - 98, middleBottom = 106.0f;
     auto const deathsWidth = rightWidth * 0.6f;
-    auto* deaths = surface({deathsWidth, middleTop - middleBottom}, {}, Blue, SurfaceRaised, 245, false);
+    auto* deaths = surface({deathsWidth, middleTop - middleBottom}, {}, Steel, SurfaceRaised, 245, false);
     deaths->setAnchorPoint(CCPointZero);
     deaths->setPosition({rightX, middleBottom});
     m_content->addChild(deaths, 2);
@@ -221,7 +221,7 @@ void RankedMapInfoPopup::showDetail(matjson::Value const& data) {
     for (int bin = 0; bin < 10; ++bin) {
         auto const value = bins[static_cast<std::size_t>(bin)];
         auto const height = value > 0 ? std::max(2.0f, static_cast<float>(value / highest) * plotHeight) : 0.0f;
-        fillRect(chart, {plotLeft + bin * (barWidth + 3), plotBottom, barWidth, height}, bin == peak ? Gold : Cyan, bin == peak ? 1.0f : 0.72f);
+        fillRect(chart, {plotLeft + bin * (barWidth + 3), plotBottom, barWidth, height}, bin == peak ? Gold : Accent, bin == peak ? 1.0f : 0.72f);
     }
     fillRect(chart, {plotLeft, plotBottom - 1, plotWidth, 1}, TextMuted, 0.5f);
     caption(deaths, "0%", {plotLeft, 6}, 0.15f, 24, TextMuted, FontWeight::SemiBold, 0);
@@ -230,7 +230,7 @@ void RankedMapInfoPopup::showDetail(matjson::Value const& data) {
 
     // Played by tier: share of this map's rounds per match tier.
     auto const tiersX = rightX + deathsWidth + 6, tiersWidth = rightWidth - deathsWidth - 6;
-    auto* tiers = surface({tiersWidth, middleTop - middleBottom}, {}, Blue, SurfaceRaised, 245, false);
+    auto* tiers = surface({tiersWidth, middleTop - middleBottom}, {}, Steel, SurfaceRaised, 245, false);
     tiers->setAnchorPoint(CCPointZero);
     tiers->setPosition({tiersX, middleBottom});
     m_content->addChild(tiers, 2);

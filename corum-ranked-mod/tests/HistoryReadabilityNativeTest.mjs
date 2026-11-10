@@ -19,7 +19,7 @@ test('actual history cards distinguish confirmed elimination from non-participat
 struct ccColor3B{int r=0,g=0,b=0;bool operator==(ccColor3B const&)const=default;};
 struct ccColor4B{int r,g,b,a;};
 ccColor3B ccc3(int r,int g,int b){return {r,g,b};}
-constexpr ccColor3B kGold{255,200,1},kCyan{1,200,255},kRed{255,91,111},kGreen{1,255,150},kBlue{1,50,255},kDeepPanel2{10,19,36};
+constexpr ccColor3B kGold{255,200,1},kAccent{1,200,255},kRed{255,91,111},kGreen{1,255,150},kSteel{1,50,255},kDeepPanel2{10,19,36};
 namespace corum::ranked{struct HistoryRound{bool completed=false;std::optional<bool>ownQualified;std::optional<int>ownRank={};};
 namespace ui{constexpr ccColor3B Text{242,247,255},TextMuted{164,181,205};}}
 struct CCPoint{float x=0,y=0;};struct CCSize{float width=0,height=0;};constexpr CCPoint CCPointZero{};
@@ -44,7 +44,7 @@ int main(){Layer layer;CCNode parent;
   for(bool selected:{false,true}){
    auto*button=layer.historyButton(&parent,"R2",{50,40},49,0,2,selected,color);
    auto*face=button->children.at(0);assert(button->tag==2&&face->tint==color);
-   assert(face->children.at(0)->tint==(selected?kCyan:corum::ranked::ui::Text));
+   assert(face->children.at(0)->tint==(selected?kAccent:corum::ranked::ui::Text));
    assert(face->children.size()==1);
   }
  }
@@ -52,7 +52,7 @@ int main(){Layer layer;CCNode parent;
  auto silver=corum::ranked::survivalRankColor(2,true);assert(silver.r>=235&&silver.g>=240&&silver.b>=250);
  for(bool selected:{false,true}){
   auto*button=layer.historyButton(&parent,"SOLO",{50,40},49,0,0,selected);auto*face=button->children.at(0);
-  assert(face->tint==(selected?kCyan:kBlue));assert(face->children.size()==1);
+  assert(face->tint==(selected?kAccent:kSteel));assert(face->children.size()==1);
  }
 }
 `);
@@ -146,7 +146,7 @@ std::string operator""_spr(char const*s,std::size_t n){return std::string(s,n);}
 struct CCNode{CCSize size;CCPoint pos;std::string id;std::vector<CCNode*> children;void addChild(CCNode*n,int){children.push_back(n);}void setID(std::string s){id=s;}void setPosition(CCPoint p){pos=p;}};
 struct CCLabelBMFont:CCNode{};struct CCSprite:CCNode{static CCSprite*create(){return new CCSprite;}};struct CCMenuItemSpriteExtra:CCNode{};
 namespace fmt{std::string format(char const* pattern,int n){std::string s(pattern);auto p=s.find("{}");s.replace(p,2,std::to_string(n));return s;}}
-constexpr Color kBlue{1,2,3},kDeepPanel2{1,2,3},kDeepPanel{1,2,3},kCyan{1,2,3},kGold{1,2,3};
+constexpr Color kSteel{1,2,3},kDeepPanel2{1,2,3},kDeepPanel{1,2,3},kAccent{1,2,3},kGold{1,2,3};
 namespace corum::ranked {
 struct Badge{bool present=false;bool isObject()const{return present;}};
 struct HistoryRound{Badge roundBadge;int levelId=123,stars=7;std::string title="Exact Level",creator="Creator",key="r1",difficulty="HARDER",length="LONG",grade="LEGENDARY",label="R1";std::optional<int> featureScore=1,epic=2;};

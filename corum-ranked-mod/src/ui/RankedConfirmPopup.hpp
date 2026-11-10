@@ -78,7 +78,7 @@ class RankedConfirmPopup final : public Popup {
         auto* menu=m_buttonMenu;
         std::array<CCMenuItemSpriteExtra*,2> buttons{};
         for(int i=0;i<2;i++) {
-            auto* face=surface({140,32},{},i?accent:Blue,SurfaceRaised,255,true);
+            auto* face=surface({140,32},{},i?accent:Steel,SurfaceRaised,255,true);
             face->addChild(menuLabel(i && !confirm.empty()?confirm:i18n::text(i?"confirm":"cancel",i?"CONFIRM":"CANCEL"),.30f,{70,16},i?accent:Text,FontWeight::SemiBold),5);
             auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(RankedConfirmPopup::onChoice));item->setTag(i);item->setPosition({i?248.0f:92.0f,38});menu->addChild(item);buttons[i]=item;
         }

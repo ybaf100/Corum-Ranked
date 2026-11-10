@@ -120,7 +120,7 @@ class $modify(CorumRankedMenuLayer, MenuLayer) {
         auto* plate = corum::ranked::ui::surface(
             {52.0f, 52.0f},
             {26.0f, 26.0f},
-            corum::ranked::ui::Cyan,
+            corum::ranked::ui::Accent,
             corum::ranked::ui::Surface,
             236,
             true
@@ -150,7 +150,7 @@ class $modify(CorumRankedMenuLayer, MenuLayer) {
             "RANKED",
             0.17f,
             {size.width - 38.0f, size.height - 69.0f},
-            corum::ranked::ui::Cyan,
+            corum::ranked::ui::Accent,
             true
         );
         caption->setOpacity(225);
@@ -165,11 +165,11 @@ class $modify(CorumRankedMenuLayer, MenuLayer) {
         survivalClock->setVisible(false);
         auto* clockFace = corum::ranked::ui::surface(
             {124.0f, 28.0f}, {62.0f, 14.0f},
-            corum::ranked::ui::Cyan, corum::ranked::ui::Surface, 236, true);
+            corum::ranked::ui::Accent, corum::ranked::ui::Surface, 236, true);
         survivalClock->addChild(clockFace, 0);
         auto* clockText = corum::ranked::ui::label(
             "ROUND 1  03:00", 0.23f, {62.0f, 14.0f},
-            corum::ranked::ui::Cyan, true);
+            corum::ranked::ui::Accent, true);
         clockText->setID("survival-freeplay-menu-clock-text"_spr);
         survivalClock->addChild(clockText, 5);
         addChild(survivalClock, 21);
@@ -222,7 +222,7 @@ class $modify(CorumRankedMenuLayer, MenuLayer) {
             return;
         }
         auto const caption=clock.phase+" · "+corum::ranked::i18n::text(clock.text,clock.text);
-        text->setColor(clock.stale?corum::ranked::ui::Gold:corum::ranked::ui::Cyan);
+        text->setColor(clock.stale?corum::ranked::ui::Gold:corum::ranked::ui::Accent);
         if (caption != text->getString()) {
             text->setString(caption.c_str());
             corum::ranked::ui::fitFullMenuLabel(text, 116.0f, 24.0f, .23f);

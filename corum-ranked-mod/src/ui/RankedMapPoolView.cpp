@@ -66,7 +66,7 @@ public:
         for (int index = 0; index < kMapPoolTabs; ++index) {
             auto const selected = index == pool;
             auto* face = buttonFace(index == 0 ? i18n::text("map-pool-all", "ALL") : fmt::format("P{}", index),
-                {kTabWidth, kTabHeight}, index == 0 ? Blue : poolColor(index), selected, 0.24f, index == 0 ? Text : poolColor(index));
+                {kTabWidth, kTabHeight}, index == 0 ? Steel : poolColor(index), selected, 0.24f, index == 0 ? Text : poolColor(index));
             face->setAnchorPoint(CCPointZero);
             face->setPosition({index * (kTabWidth + kTabGap), 0});
             face->setTag(index);
@@ -230,7 +230,7 @@ bool RankedMapPoolView::init(CCSize screen) {
 
     m_caption = caption(this, "", {m_left, 22}, 0.24f, m_width * 0.36f, TextMuted, FontWeight::SemiBold, 0);
     m_updated = caption(this, "", {m_left + m_width, 22}, 0.22f, m_width * 0.30f, TextMuted, FontWeight::SemiBold, 1);
-    m_refresh = CCMenuItemSpriteExtra::create(buttonFace(i18n::text("leaderboard-refresh", "REFRESH"), {96, 26}, Cyan, false),
+    m_refresh = CCMenuItemSpriteExtra::create(buttonFace(i18n::text("leaderboard-refresh", "REFRESH"), {96, 26}, Accent, false),
         this, menu_selector(RankedMapPoolView::onRefresh));
     m_refresh->setPosition({screen.width / 2, 22});
     m_menu->addChild(m_refresh);
@@ -244,9 +244,9 @@ bool RankedMapPoolView::init(CCSize screen) {
 void RankedMapPoolView::updateControls() {
     if (m_closed) return;
     m_sortButton->setNormalImage(buttonFace(fmt::format(fmt::runtime(i18n::text("map-pool-order-button", "ORDER: {}")), sortLabel(m_sort)),
-        m_sortButton->getContentSize(), Blue, false, 0.25f));
+        m_sortButton->getContentSize(), Steel, false, 0.25f));
     m_directionButton->setNormalImage(buttonFace(m_ascending ? i18n::text("map-pool-ascending", "ASCENDING") : i18n::text("map-pool-descending", "DESCENDING"),
-        m_directionButton->getContentSize(), Cyan, false, 0.23f, Cyan));
+        m_directionButton->getContentSize(), Accent, false, 0.23f, Accent));
     // Column captions: the active order is gold (index 1.. follow kMapPoolSorts).
     for (std::size_t index = 0; index < kMapPoolSorts.size() && index + 1 < m_headers.size(); ++index)
         m_headers[index + 1]->setColor(kMapPoolSorts[index] == m_sort ? Gold : TextMuted);
@@ -322,8 +322,8 @@ void RankedMapPoolView::updateSummary() {
         caption(box, label, {7, size.height / 2}, 0.2f, width * 0.45f, TextMuted, FontWeight::SemiBold, 0);
         caption(box, value, {width - 7, size.height / 2}, 0.27f, width * 0.5f, Text, FontWeight::Black, 1);
     };
-    tile(0, i18n::text("map-pool-total-rounds", "Rounds played"), mapPoolNumber(m_totalRounds), Blue);
-    tile(1, i18n::text("map-pool-total-draws", "Draw rate"), mapPoolPercent(m_totalDrawRate), Blue);
+    tile(0, i18n::text("map-pool-total-rounds", "Rounds played"), mapPoolNumber(m_totalRounds), Steel);
+    tile(1, i18n::text("map-pool-total-draws", "Draw rate"), mapPoolPercent(m_totalDrawRate), Steel);
     tile(2, i18n::text("map-pool-most-played", "Most played"), titleOf(m_mostPlayed), Gold);
     tile(3, i18n::text("map-pool-most-banned", "Most banned"), titleOf(m_mostBanned), Red);
 }
@@ -369,7 +369,7 @@ void RankedMapPoolView::rebuildRows(bool keepOffset) {
         fitTitle(creator, map.creator.empty() ? "-" : "by " + map.creator, std::max(20.0f, columns.title + columns.titleWidth - creatorX), 0.18f);
         bar(row, {columns.barLeft, 11, columns.barWidth, 8}, Ink);
         auto const fill = maxShare > 0 ? static_cast<float>(map.share.value_or(0) / maxShare) * columns.barWidth : 0.0f;
-        if (fill > 0) bar(row, {columns.barLeft, 11, fill, 8}, Cyan, 255, 5);
+        if (fill > 0) bar(row, {columns.barLeft, 11, fill, 8}, Accent, 255, 5);
         caption(row, mapPoolPercent(map.share), {columns.share, kRowHeight / 2}, 0.22f, 32, Text, FontWeight::ExtraBold);
         caption(row, mapPoolPercent(map.drawRate), {columns.draw, kRowHeight / 2}, 0.22f, 36, Text, FontWeight::ExtraBold);
         caption(row, mapPoolPercent(map.banRate), {columns.ban, kRowHeight / 2}, 0.22f, 32, Text, FontWeight::ExtraBold);
@@ -377,7 +377,7 @@ void RankedMapPoolView::rebuildRows(bool keepOffset) {
         auto* info = buttonFace(i18n::text("map-pool-info", "INFO"), {48, 22}, Gold, false, 0.21f, Gold);
         info->setPosition({columns.info, kRowHeight / 2});
         row->addChild(info, 6);
-        auto* view = buttonFace(i18n::text("history-view-level", "VIEW LEVEL"), {48, 22}, Cyan, false, 0.21f, Cyan);
+        auto* view = buttonFace(i18n::text("history-view-level", "VIEW LEVEL"), {48, 22}, Accent, false, 0.21f, Accent);
         view->setPosition({columns.view, kRowHeight / 2});
         row->addChild(view, 6);
         m_hits.push_back({row, info, view, index});

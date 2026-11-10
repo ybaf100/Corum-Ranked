@@ -30,12 +30,12 @@ struct ThumbnailCard {
     CCLayerColor* root=nullptr;CCSprite* image=nullptr;CCSprite* placeholder=nullptr;CCLayerColor* shade=nullptr;CCNode* trim=nullptr;
     CCTexture2D* texture=nullptr;float width=0,height=0;
     void make(CCNode* parent,float w){width=w;height=w*9/16;root=group();parent->addChild(root);
-        auto* face=surface({width,height},{},Blue,SurfaceRaised,255,true);root->addChild(face);
+        auto* face=surface({width,height},{},Steel,SurfaceRaised,255,true);root->addChild(face);
         auto* viewport=clip({width-4,height-4});viewport->setPosition({2,2});face->addChild(viewport,4);
         image=CCSprite::create();image->setPosition({(width-4)/2,(height-4)/2});viewport->addChild(image);
         placeholder=CCSprite::createWithSpriteFrameName("GJ_playBtn_001.png");
         if(placeholder){placeholder->setPosition(image->getPosition());placeholder->setScale(std::min(width*.22f/placeholder->getContentSize().width,height*.40f/placeholder->getContentSize().height));viewport->addChild(placeholder);}
-        shade=CCLayerColor::create({2,7,21,160},width-4,height-4);shade->setPosition({2,2});face->addChild(shade,5);
+        shade=CCLayerColor::create({11, 12, 16,160},width-4,height-4);shade->setPosition({2,2});face->addChild(shade,5);
         trim=CCLayerColor::create({Gold.r,Gold.g,Gold.b,255},width-8,2);trim->setPosition({4,height-4});face->addChild(trim,6);
     }
     void set(CCTexture2D* next){if(placeholder)placeholder->setVisible(next==nullptr);image->setVisible(next!=nullptr);if(texture==next)return;texture=next;if(!next)return;
@@ -60,7 +60,7 @@ struct SurvivalMapSelectionLayer::Visuals {
 SurvivalMapSelectionLayer::SurvivalMapSelectionLayer()=default;
 SurvivalMapSelectionLayer::~SurvivalMapSelectionLayer()=default;
 bool SurvivalMapSelectionLayer::init(std::function<void(int)> action){
-    auto const size=CCDirector::sharedDirector()->getWinSize();if(!initWithColor({4,9,22,255},size.width,size.height))return false;
+    auto const size=CCDirector::sharedDirector()->getWinSize();if(!initWithColor({13, 14, 19,255},size.width,size.height))return false;
     setID("survival-map-selection"_spr);m_action=std::move(action);m_sceneGeneration=++sceneSequence;
     addBackdrop(this,size);
     auto* fragments=CCDrawNode::create();addChild(fragments,-10);
@@ -69,11 +69,11 @@ bool SurvivalMapSelectionLayer::init(std::function<void(int)> action){
         fragments->drawPolygon(ray,3,{.15f,.30f,.65f,.11f},0,{0,0,0,0});
     }
     m_header=menuLabel("NEXT UP!",.83f,{},Text,FontWeight::Black);addChild(m_header,15);
-    m_subtitle=menuLabel("MAP SELECTION",.23f,{},Cyan,FontWeight::ExtraBold);addChild(m_subtitle,15);
+    m_subtitle=menuLabel("MAP SELECTION",.23f,{},Accent,FontWeight::ExtraBold);addChild(m_subtitle,15);
     m_clock=menuLabel("",.25f,{},Gold,FontWeight::Black);addChild(m_clock,16);
     m_hint=menuLabel("",.18f,{},TextMuted,FontWeight::SemiBold);addChild(m_hint,15);
     m_finalId=menuLabel("",.8f,{},Gold,FontWeight::Black,countdownFont());addChild(m_finalId,15);
-    m_pendingLabel=menuLabel(i18n::text("survival-selecting-map","SELECTING A SERVER MAP..."),.3f,{size.width/2,size.height/2},Cyan,FontWeight::ExtraBold);
+    m_pendingLabel=menuLabel(i18n::text("survival-selecting-map","SELECTING A SERVER MAP..."),.3f,{size.width/2,size.height/2},Accent,FontWeight::ExtraBold);
     fitFullMenuLabel(m_pendingLabel,size.width-48,40,.3f);m_pendingLabel->setVisible(false);addChild(m_pendingLabel,15);
     m_panel=SurvivalSelectedMapPanel::create([weak=WeakRef(this)](int tag){
         auto owner=weak.lock();if(!owner || !owner->isRunning() || !owner->m_action)return;
@@ -100,9 +100,9 @@ void SurvivalMapSelectionLayer::numberFrame(SurvivalRevealFrame const& frame,Sur
     if(v.columns.size()!=n){
         if(v.reels)v.reels->removeFromParentAndCleanup(true);v.columns.clear();v.reels=CCNode::create();addChild(v.reels,8);
         auto const layout=survivalNumberLayout(size.width,size.height,n);v.reelHeight=layout.lineStep;v.reelY=layout.ribbon.cy();
-        v.reels->addChild(surface({layout.ribbon.w,layout.ribbon.h},{layout.ribbon.cx(),layout.ribbon.cy()},Blue,Surface,255,true));
+        v.reels->addChild(surface({layout.ribbon.w,layout.ribbon.h},{layout.ribbon.cx(),layout.ribbon.cy()},Steel,Surface,255,true));
         for(std::size_t i=0;i<n;++i){auto const rect=layout.columns[i];auto const width=rect.w;Visuals::Reel reel;auto* viewport=clip({width,rect.h});viewport->setPosition({rect.x,rect.y});v.reels->addChild(viewport,2);reel.root=viewport;
-            viewport->addChild(CCLayerColor::create({10,22,43,255},width,76*r.scale));
+            viewport->addChild(CCLayerColor::create({26, 28, 36,255},width,76*r.scale));
             for(std::size_t j=0;j<3;++j){reel.labels[j]=menuLabel("0",.9f,{width/2,38*r.scale},Text,FontWeight::Black,countdownFont());fitSingle(reel.labels[j],width-4*r.scale,50*r.scale,.9f);reel.scales[j]=reel.labels[j]->getScale();viewport->addChild(reel.labels[j],3);}
             reel.impact=CCLayerColor::create({Gold.r,Gold.g,Gold.b,255},width,2*r.scale);reel.impact->setPosition({0,0});viewport->addChild(reel.impact,5);v.columns.push_back(reel);
         }

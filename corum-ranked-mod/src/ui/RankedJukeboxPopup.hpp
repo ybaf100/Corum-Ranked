@@ -91,7 +91,7 @@ class RankedJukeboxPopup final : public Popup {
         if (m_closed || m_context != currentPreparationContext()) { closeOwnedDialogs(); return; }
         if (!m_ownedDialogs.empty()) {
             auto const size = CCDirector::sharedDirector()->getWinSize();
-            auto* timer = surface({126, 30}, {size.width - 77, size.height - 25}, Cyan, Surface, 245, true);
+            auto* timer = surface({126, 30}, {size.width - 77, size.height - 25}, Accent, Surface, 245, true);
             timer->setID("ranked-jukebox-countdown"_spr);
             m_countdownLabel = menuLabel("", 0.25f, {63, 15}, Gold, FontWeight::ExtraBold);
             timer->addChild(m_countdownLabel, 5);

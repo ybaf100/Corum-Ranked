@@ -16,8 +16,8 @@ class SurvivalFillBotsPopup final : public Popup {
     bool init() {
         if(!Popup::init(320,258))return false;
         setID("survival-fill-auth"_spr);m_bgSprite->setVisible(false);
-        auto* panel=ui::surface({320,258},{160,129},ui::Blue,ui::Surface,255,true);m_mainLayer->addChild(panel);
-        panel->addChild(ui::menuLabel(i18n::text("survival-fill-bots","FILL WITH BOTS"),.44f,{160,233},ui::Cyan,ui::FontWeight::Black));
+        auto* panel=ui::surface({320,258},{160,129},ui::Steel,ui::Surface,255,true);m_mainLayer->addChild(panel);
+        panel->addChild(ui::menuLabel(i18n::text("survival-fill-bots","FILL WITH BOTS"),.44f,{160,233},ui::Accent,ui::FontWeight::Black));
         auto* warning=ui::menuLabel(i18n::text("survival-debug-rating","DEBUG RESULTS AFFECT YOUR SURVIVAL LP"),.23f,{160,207},ui::Red,ui::FontWeight::SemiBold);
         ui::fitMenuLabelWidth(warning,292,.23f,.19f);panel->addChild(warning);
         m_password=TextInput::create(256,"Debug password");m_password->setPasswordMode(true);m_password->setMaxCharCount(128);m_password->setPosition({160,71});panel->addChild(m_password,10);
@@ -31,7 +31,7 @@ class SurvivalFillBotsPopup final : public Popup {
         deathMatch->setPosition({46,108});deathMatch->setID("force-death-match");menu->addChild(deathMatch);
         auto* deathMatchLabel=ui::menuLabel(i18n::text("survival-force-death-match","Force Death Match"),.28f,{69,108},ui::Text,ui::FontWeight::SemiBold);
         deathMatchLabel->setAnchorPoint({0,.5f});ui::fitMenuLabelWidth(deathMatchLabel,226,.28f,.20f);panel->addChild(deathMatchLabel);
-        auto* face=ui::surface({240,32},{},ui::Cyan,ui::SurfaceRaised,255,true);
+        auto* face=ui::surface({240,32},{},ui::Accent,ui::SurfaceRaised,255,true);
         face->addChild(ui::menuLabel(i18n::text("start","START"),.34f,{120,16},ui::Text,ui::FontWeight::SemiBold),5);
         auto* start=CCMenuItemSpriteExtra::create(face,this,menu_selector(SurvivalFillBotsPopup::onStart));start->setPosition({160,34});menu->addChild(start);return true;
     }

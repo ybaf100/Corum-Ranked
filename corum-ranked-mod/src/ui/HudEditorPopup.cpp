@@ -183,7 +183,7 @@ CCNodeRGBA* HudEditorPopup::group(std::string_view id) {
 
 void HudEditorPopup::buildBackground() {
     auto const w = m_size.width, h = m_size.height;
-    auto* sky = CCLayerColor::create({18, 38, 86, 255});
+    auto* sky = CCLayerColor::create({44, 47, 61, 255});
     sky->setContentSize(m_size);
     m_canvas->addChild(sky, -10);
     if (auto* gradient = CCSprite::create("GJ_gradientBG.png")) {
@@ -197,7 +197,7 @@ void HudEditorPopup::buildBackground() {
     }
     // A plain ground band stands in for the level; the HUD is always drawn
     // over gameplay, so the preview only needs comparable contrast.
-    auto* ground = CCLayerColor::create({10, 22, 54, 235});
+    auto* ground = CCLayerColor::create({27, 29, 38, 235});
     ground->setContentSize({w, 64.0f});
     m_canvas->addChild(ground, -8);
     // Grid and centre guides appear only while an element is dragged.
@@ -234,7 +234,7 @@ void HudEditorPopup::buildSoloPreview() {
     };
     add(group("fps"), "FPS : 60", FontWeight::SemiBold, 0.51f, {0, 1}, {7.0f, top - 0.5f}, Text);
 
-    add(group("own-name"), i18n::text("you", "YOU"), FontWeight::SemiBold, 0.51f, {0, 1}, {left, top - 4.0f}, Cyan).fit(96.0f, 0.51f, 0.21f);
+    add(group("own-name"), i18n::text("you", "YOU"), FontWeight::SemiBold, 0.51f, {0, 1}, {left, top - 4.0f}, Accent).fit(96.0f, 0.51f, 0.21f);
     add(group("own-caption"), i18n::text("score", "SCORE"), FontWeight::SemiBold, 0.51f, {0, 1}, {left, top - 22.0f}, Text);
     add(group("own-score"), "182.0", FontWeight::Black, 0.714f, {0, 1}, {left + 82.0f, top - 20.0f}, Text).fit(76.0f, 0.714f, 0.26f);
     // Death Match attempt counters exactly as GameplayUx draws them.
@@ -374,7 +374,7 @@ static void markUnavailable(CCMenuItemSpriteExtra* item, bool unavailable) {
     constexpr int tag = 9301;
     auto* veil = static_cast<CCLayerColor*>(item->getChildByTag(tag));
     if (!veil && unavailable) {
-        veil = CCLayerColor::create({4, 8, 18, 190});
+        veil = CCLayerColor::create({12, 13, 17, 190});
         veil->setContentSize(item->getContentSize());
         veil->setTag(tag);
         item->addChild(veil, 100);
@@ -399,7 +399,7 @@ CCMenuItemSpriteExtra* HudEditorPopup::toolbarButton(std::string const& text, CC
 // 1 px nudges. GJ_arrow_01 points left; rotation is clockwise.
 CCMenuItemSpriteExtra* HudEditorPopup::arrowButton(float rotation, CCPoint offset, int tag) {
     CCSize const size {22.0f, 22.0f};
-    auto* face = surface(size, {}, Blue, SurfaceRaised, 250, true);
+    auto* face = surface(size, {}, Steel, SurfaceRaised, 250, true);
     if (auto* arrow = CCSprite::createWithSpriteFrameName("GJ_arrow_01_001.png")) {
         auto const content = arrow->getContentSize();
         auto const fit = std::max(content.width, content.height);
@@ -434,7 +434,7 @@ void HudEditorPopup::buildToolbar() {
     auto const dockW = std::min(m_size.width - 16.0f, std::max(kToolbarDesignWidth, m_size.width * 0.80f));
     auto const k = std::min(1.0f, dockW / kToolbarDesignWidth);
     m_toolbarSize = CCSize{dockW, 58.0f};
-    m_toolbar = surface(m_toolbarSize, {}, Cyan, Surface, 242, true);
+    m_toolbar = surface(m_toolbarSize, {}, Accent, Surface, 242, true);
     m_toolbar->setID("hud-editor-toolbar"_spr);
     m_canvas->addChild(m_toolbar, 50);
     auto const L0 = -dockW / 2.0f, R0 = dockW / 2.0f;
@@ -444,20 +444,20 @@ void HudEditorPopup::buildToolbar() {
     constexpr float top = 13.0f, bottom = -13.0f;
     auto const square = W(20.0f);
 
-    toolbarButton("<", square, {L(16.0f), top}, menu_selector(HudEditorPopup::onPrevious), Blue);
+    toolbarButton("<", square, {L(16.0f), top}, menu_selector(HudEditorPopup::onPrevious), Steel);
     m_elementName = toolbarCaption("", {L(62.0f), top + 4.0f}, 64.0f * k, Text, 0.24f);
     m_indexLabel = toolbarCaption("", {L(62.0f), top - 6.0f}, 64.0f * k, TextMuted, 0.15f);
-    toolbarButton(">", square, {L(108.0f), top}, menu_selector(HudEditorPopup::onNext), Blue);
+    toolbarButton(">", square, {L(108.0f), top}, menu_selector(HudEditorPopup::onNext), Steel);
 
     toolbarCaption(i18n::text("hud-size", "SIZE"), {L(136.0f), top}, 26.0f * k, TextMuted, 0.18f);
-    m_smallerButton = toolbarButton("-", square, {L(160.0f), top}, menu_selector(HudEditorPopup::onSmaller), Blue);
+    m_smallerButton = toolbarButton("-", square, {L(160.0f), top}, menu_selector(HudEditorPopup::onSmaller), Steel);
     m_scaleLabel = toolbarCaption("", {L(186.0f), top}, 30.0f * k, Gold, 0.24f);
-    m_largerButton = toolbarButton("+", square, {L(212.0f), top}, menu_selector(HudEditorPopup::onLarger), Blue);
+    m_largerButton = toolbarButton("+", square, {L(212.0f), top}, menu_selector(HudEditorPopup::onLarger), Steel);
 
     toolbarCaption(i18n::text("hud-transparency", "TRANSPARENCY"), {L(244.0f), top}, 34.0f * k, TextMuted, 0.18f);
-    m_opaqueButton = toolbarButton("-", square, {L(274.0f), top}, menu_selector(HudEditorPopup::onLessTransparent), Blue);
+    m_opaqueButton = toolbarButton("-", square, {L(274.0f), top}, menu_selector(HudEditorPopup::onLessTransparent), Steel);
     m_transparencyLabel = toolbarCaption("", {L(300.0f), top}, 30.0f * k, Gold, 0.24f);
-    m_transparentButton = toolbarButton("+", square, {L(326.0f), top}, menu_selector(HudEditorPopup::onMoreTransparent), Blue);
+    m_transparentButton = toolbarButton("+", square, {L(326.0f), top}, menu_selector(HudEditorPopup::onMoreTransparent), Steel);
 
     arrowButton(0.0f, {L(356.0f), top}, 0);
     arrowButton(90.0f, {L(378.0f), top}, 1);
@@ -468,25 +468,25 @@ void HudEditorPopup::buildToolbar() {
     m_visibleButton = toolbarButton(i18n::text("hud-hide", "HIDE"), W(50), {L(31.0f), bottom},
         menu_selector(HudEditorPopup::onToggleVisible), Red, &m_visibleCaption);
     m_gridButton = toolbarButton(i18n::text("hud-grid-on", "GRID 8PX"), W(54), {L(88.0f), bottom},
-        menu_selector(HudEditorPopup::onGrid), Blue, &m_gridCaption);
+        menu_selector(HudEditorPopup::onGrid), Steel, &m_gridCaption);
     auto const presets = HudPresets;
     for (std::size_t index = 0; index < presets.size(); ++index) {
         toolbarButton(i18n::text(std::string(hudPresetKey(m_mode, presets[index])), std::string(hudPresetFallback(m_mode, presets[index]))),
-            W(46), {L(146.0f + 47.0f * static_cast<float>(index)), bottom}, menu_selector(HudEditorPopup::onPreset), Cyan,
+            W(46), {L(146.0f + 47.0f * static_cast<float>(index)), bottom}, menu_selector(HudEditorPopup::onPreset), Accent,
             nullptr, static_cast<int>(index));
     }
     toolbarButton(i18n::text("hud-reset", "RESET"), W(46), {L(146.0f + 47.0f * 3 + 6.0f), bottom}, menu_selector(HudEditorPopup::onReset), Orange);
     toolbarButton(i18n::text("hud-list", "LIST"), W(42), {R(126.0f), bottom}, menu_selector(HudEditorPopup::onList), Gold);
-    toolbarButton(i18n::text("cancel", "CANCEL"), W(42), {R(80.0f), bottom}, menu_selector(HudEditorPopup::onCancel), Blue);
+    toolbarButton(i18n::text("cancel", "CANCEL"), W(42), {R(80.0f), bottom}, menu_selector(HudEditorPopup::onCancel), Steel);
     toolbarButton(i18n::text("hud-save", "SAVE"), W(50), {R(30.0f), bottom}, menu_selector(HudEditorPopup::onSave), Green);
     // Collapse tab sits on the dock's top edge.
     toolbarButton(i18n::text("hud-collapse", "HIDE TOOLS"), W(36, 14), {R(24.0f), m_toolbarSize.height / 2.0f + 8.0f},
-        menu_selector(HudEditorPopup::onCollapse), Blue);
+        menu_selector(HudEditorPopup::onCollapse), Steel);
 
     // Collapsed tools leave one button at the bottom centre.
     {
         CCSize const size {84.0f, 22.0f};
-        auto* face = surface(size, {}, Cyan, Surface, 245, true);
+        auto* face = surface(size, {}, Accent, Surface, 245, true);
         auto* title = menuLabel(i18n::text("hud-tools-open", "TOOLS"), 0.24f, {size.width / 2.0f, size.height / 2.0f}, Text, FontWeight::ExtraBold);
         fitFullMenuLabel(title, size.width - 8.0f, size.height - 6.0f, 0.24f);
         face->addChild(title, 5);
@@ -524,7 +524,7 @@ void HudEditorPopup::buildList() {
         return item;
     };
     auto const origin = CCPoint{m_size.width / 2.0f - panel.width / 2.0f, m_size.height / 2.0f - panel.height / 2.0f};
-    auto* closeFace = surface({58, 18}, {}, Blue, SurfaceRaised, 250, true);
+    auto* closeFace = surface({58, 18}, {}, Steel, SurfaceRaised, 250, true);
     auto* closeText = menuLabel(i18n::text("close", "CLOSE"), 0.22f, {29, 9}, Text, FontWeight::ExtraBold);
     fitFullMenuLabel(closeText, 50, 14, 0.22f);
     closeFace->addChild(closeText, 5);
@@ -535,7 +535,7 @@ void HudEditorPopup::buildList() {
         auto const y = origin.y + panel.height - 36.0f - static_cast<float>(row) * 22.0f;
         ListRow entry;
         entry.id = std::string(elements[index].id);
-        auto* face = surface({112, 19}, {}, Blue, SurfaceRaised, 250, false);
+        auto* face = surface({112, 19}, {}, Steel, SurfaceRaised, 250, false);
         entry.name = menuLabel("", 0.2f, {5, 9.5f}, Text, FontWeight::ExtraBold);
         entry.name->setAnchorPoint({0.0f, 0.5f});
         face->addChild(entry.name, 5);
@@ -568,7 +568,7 @@ void HudEditorPopup::refreshList() {
         auto const t = transform(row.id);
         auto const selected = row.id == m_selected;
         row.name->setString(elementName(m_mode, row.id).c_str());
-        row.name->setColor(selected ? Cyan : (t.visible ? Text : TextMuted));
+        row.name->setColor(selected ? Accent : (t.visible ? Text : TextMuted));
         fitMenuLabelWidth(row.name, 62.0f, 0.2f, 0.11f);
         std::string state;
         if (t.scale != 1.0f) state = fmt::format("{}%", static_cast<int>(std::lround(t.scale * 100.0f)));
@@ -749,7 +749,7 @@ void HudEditorPopup::refresh() {
     if (!selected.visible) text += " · " + i18n::text("hud-hidden-tag", "HIDDEN");
     if (overlap) text += " · " + i18n::text("hud-overlap", "OVERLAP");
     m_tag->setString(text.c_str());
-    m_tag->setColor(overlap ? Red : Cyan);
+    m_tag->setColor(overlap ? Red : Accent);
     auto const tagHeight = m_tag->getScaledContentSize().height;
     auto const above = selectedBox.getMaxY() + 3.0f + tagHeight <= m_size.height;
     m_tag->setAnchorPoint({0.0f, above ? 0.0f : 1.0f});

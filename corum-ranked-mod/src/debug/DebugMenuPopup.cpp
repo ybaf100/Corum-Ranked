@@ -19,7 +19,7 @@ class DebugMenuPopup final : public Popup {
         m_mode=mode;
         if (!Popup::init(300,220)) return false;
         m_bgSprite->setVisible(false); setID("ranked-debug-menu"_spr);
-        auto* panel = ui::surface({300,220},{150,110},ui::Cyan,ui::Surface,255,true);
+        auto* panel = ui::surface({300,220},{150,110},ui::Accent,ui::Surface,255,true);
         m_mainLayer->addChild(panel);
         panel->addChild(ui::menuLabel(i18n::text("debug","DEBUG"),0.55f,{150,195},ui::Text,ui::FontWeight::Black));
         auto* menu = CCMenu::create(); menu->setPosition(CCPointZero); panel->addChild(menu,10);
@@ -28,7 +28,7 @@ class DebugMenuPopup final : public Popup {
         for (int i = 0; i < 3; ++i) {
             auto const label = i == 0 ? i18n::text("debug-bot","BOT MATCH")
                 : i == 1 ? i18n::text("debug-spectate","SPECTATE") : std::string("Admin");
-            auto* face = ui::surface({220,34},{},i == 2 ? ui::Red : ui::Blue,ui::SurfaceRaised,255,true);
+            auto* face = ui::surface({220,34},{},i == 2 ? ui::Red : ui::Steel,ui::SurfaceRaised,255,true);
             auto* caption = ui::menuLabel(label,0.38f,{110,17},ui::Text,ui::FontWeight::ExtraBold);
             ui::fitMenuLabelWidth(caption,202,0.38f,0.28f); face->addChild(caption,5);
             auto* button = CCMenuItemSpriteExtra::create(face,this,menu_selector(DebugMenuPopup::onSelect));

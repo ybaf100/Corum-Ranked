@@ -26,8 +26,8 @@ class BadgeDetail final:public Popup {
         auto layout=rankedPopupLayout({410,292},CCDirector::sharedDirector()->getWinSize());
         if(!Popup::init(layout.size.width,layout.size.height))return false;
         m_session=RankedRuntime::get().spectatorLiveSessionToken();m_closed=std::move(closed);m_bgSprite->setVisible(false);
-        auto* root=rankedPopupContent(m_mainLayer,m_buttonMenu,layout);root->addChild(surface({410,292},{205,146},eliminated?Red:Cyan,Surface,242,true));
-        auto* title=menuLabel(eliminated?"ELIMINATED":difficultyName(selected),.36f,{205,266},eliminated?Red:Cyan,FontWeight::Black);fitFullMenuLabel(title,350,24,.36f);root->addChild(title,5);
+        auto* root=rankedPopupContent(m_mainLayer,m_buttonMenu,layout);root->addChild(surface({410,292},{205,146},eliminated?Red:Accent,Surface,242,true));
+        auto* title=menuLabel(eliminated?"ELIMINATED":difficultyName(selected),.36f,{205,266},eliminated?Red:Accent,FontWeight::Black);fitFullMenuLabel(title,350,24,.36f);root->addChild(title,5);
         auto const counts=eliminated?data["totals"]:selected["counts"];std::int64_t total=0;
         if(eliminated)total=counts["ELIMINATED"].asInt().unwrapOr(0);else total=survivalBadgeCollectionTotal(counts);
         root->addChild(menuLabel(fmt::format("{}: {}",i18n::text("badge-total","TOTAL"),total),.27f,{240,229},Text,FontWeight::ExtraBold));
@@ -93,7 +93,7 @@ class BadgeCollection final:public Popup {
         m_root->addChild(menuLabel(i18n::text("badge-collection","ROUND BADGES"),.39f,{240,231},Gold,FontWeight::Black));
         m_status=menuLabel(i18n::text("loading","Loading..."),.24f,{240,190},TextMuted);m_root->addChild(m_status,5);
         auto* hint=menuLabel(i18n::text("badge-drag","DRAG TO EXPLORE · TAP FOR DETAILS"),.22f,{240,60},TextMuted);fitFullMenuLabel(hint,440,20,.22f);m_root->addChild(hint,5);
-        auto* face=surface({120,26},{},Blue,SurfaceRaised,255,true);face->addChild(menuLabel(i18n::text("refresh","REFRESH"),.25f,{60,13},Text));auto* retry=CCMenuItemSpriteExtra::create(face,this,menu_selector(BadgeCollection::refresh));retry->setPosition({240,28});m_buttonMenu->addChild(retry);
+        auto* face=surface({120,26},{},Steel,SurfaceRaised,255,true);face->addChild(menuLabel(i18n::text("refresh","REFRESH"),.25f,{60,13},Text));auto* retry=CCMenuItemSpriteExtra::create(face,this,menu_selector(BadgeCollection::refresh));retry->setPosition({240,28});m_buttonMenu->addChild(retry);
         m_session=RankedRuntime::get().spectatorLiveSessionToken();scheduleUpdate();refresh(nullptr);return true;
     }
     void refresh(CCObject*){

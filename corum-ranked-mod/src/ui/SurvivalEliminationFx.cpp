@@ -361,7 +361,7 @@ void runSliceGathering(CCNode* layer, std::vector<SliceGatherExecutor> const& ex
     auto const end = plan.home;
     // A dark backdrop over the board while the field is cut; it lifts while
     // the icon flies home.
-    auto* dim = CCLayerColor::create({2, 4, 10, 0}, area.width, area.height);
+    auto* dim = CCLayerColor::create({8, 9, 11, 0}, area.width, area.height);
     stage->addChild(dim, -1000);
     auto const dimOut = plan.finaleCut + SliceHitStop + 0.25f;
     dim->runAction(CCSequence::create(CCDelayTime::create(0.6f), CCFadeTo::create(0.45f, 160),

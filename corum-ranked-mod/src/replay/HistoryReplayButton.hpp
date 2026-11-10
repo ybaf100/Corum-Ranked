@@ -12,7 +12,7 @@ class HistoryReplayButton final:public cocos2d::CCNode {
     bool init(Json identity,float width){
         if(!CCNode::init())return false;m_identity=std::move(identity);Recorder::get().retryPending();
         auto* menu=cocos2d::CCMenu::create();menu->setPosition({0,0});addChild(menu);
-        auto* face=ui::surface({width,25},{},ui::Cyan,ui::Surface,240,true);
+        auto* face=ui::surface({width,25},{},ui::Accent,ui::Surface,240,true);
         m_caption=ui::menuLabel("REPLAY...",.22f,{width/2,12.5f},ui::Text);face->addChild(m_caption,5);
         m_button=CCMenuItemSpriteExtra::create(face,this,menu_selector(HistoryReplayButton::play));menu->addChild(m_button);m_button->setEnabled(false);
         try{m_check=Recorder::get().storage().inspectState(m_identity);scheduleUpdate();}catch(...){m_caption->setString(i18n::text("replay-damaged","Replay file damaged").c_str());ui::fitFullMenuLabel(m_caption,width-10,20,.22f);}return true;

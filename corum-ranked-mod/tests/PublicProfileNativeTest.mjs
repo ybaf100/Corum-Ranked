@@ -109,7 +109,7 @@ struct TextInput:CCNode{std::string value;bool masked=false,enabled=true;int lim
 namespace web{struct WebResponse{int status;matjson::Value body;int code(){return status;}struct Parsed{matjson::Value body;auto unwrapOr(matjson::Value){return body;}};auto json(){return Parsed{body};}};
 struct Operation{std::string path;matjson::Value body;};struct WebRequest{matjson::Value body;WebRequest&timeout(std::chrono::seconds s){assert(s.count()==8);return*this;}WebRequest&followRedirects(bool b){assert(!b);return*this;}void bodyJSON(matjson::Value const&v){body=v;}Operation post(std::string path){return {path,body};}};}
 namespace geode{namespace prelude{using::Ref;using::WeakRef;namespace web=::web;}namespace async{struct Job{web::Operation op;std::function<void(web::WebResponse)>callback;};inline std::vector<Job>jobs;template<class T>struct TaskHolder{int cancels=0;void cancel(){++cancels;}template<class F>void spawn(web::Operation op,F callback){jobs.push_back({op,callback});}};}}
-namespace corum::ranked::ui{enum class FontWeight{ExtraBold,Black,SemiBold};constexpr int Cyan=1,Blue=2,Surface=3,SurfaceRaised=4,Text=5,TextMuted=6;
+namespace corum::ranked::ui{enum class FontWeight{ExtraBold,Black,SemiBold};constexpr int Accent=1,Steel=2,Surface=3,SurfaceRaised=4,Text=5,TextMuted=6;
 namespace i18n{std::string text(char const*,char const*f){return f;}}
 struct Layout{CCSize size;};Layout rankedPopupLayout(CCSize size,CCSize){return {size};}CCNode*rankedPopupContent(CCNode*,CCMenu*,Layout){return new CCNode;}
 CCNode*surface(CCSize,CCPoint,int,int,int,bool){return new CCNode;}

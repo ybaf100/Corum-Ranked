@@ -5,7 +5,7 @@
 namespace corum::ranked::ui {
 // The same title, GD difficulty badge and duration row used by Solo Placement.
 inline void addRankedMapHeading(cocos2d::CCNode* parent,int levelId,std::string title,MapMetadata metadata,
-    cocos2d::CCPoint titlePosition,cocos2d::ccColor3B durationColor=Cyan) {
+    cocos2d::CCPoint titlePosition,cocos2d::ccColor3B durationColor=Accent) {
     std::transform(title.begin(),title.end(),title.begin(),[](unsigned char c){return static_cast<char>(std::toupper(c));});
     auto* name=menuLabel(title,.42f,titlePosition,Text,FontWeight::Black);
     fitMenuLabelWidth(name,278,.42f,.25f);parent->addChild(name,5);

@@ -31,7 +31,7 @@ SurvivalSelectedMapPanel* SurvivalSelectedMapPanel::create(std::function<void(in
     delete p;return nullptr;
 }
 CCNode* SurvivalSelectedMapPanel::readyFace(bool enabled,bool retry,bool start){
-    (void)start;auto const& r=m_layout.ready;auto* face=surface({r.w,r.h},{},retry?Blue:ccc3(255,237,139),retry?SurfaceRaised:Gold,255,true);
+    (void)start;auto const& r=m_layout.ready;auto* face=surface({r.w,r.h},{},retry?Steel:ccc3(255,237,139),retry?SurfaceRaised:Gold,255,true);
     auto* label=menuLabel(i18n::text(retry?"retry":"survival-reenter",retry?"RETRY":"RE-ENTER"),.34f,{r.w/2,r.h/2},retry?Text:Ink,FontWeight::Black);
     fitSurvivalSingleLine(label,r.w-16,r.h-10,.34f);face->addChild(label,5);if(!enabled)grayButtonVisual(face);return face;
 }
@@ -43,16 +43,16 @@ void SurvivalSelectedMapPanel::build(CCSize size,bool thumbnail,bool ldm){
     m_difficulty=nullptr;m_levelId=-1;m_metadataRevision=0;m_mapMetadata={};
     m_creatorText.clear();m_statusText.clear();m_songText.clear();
     removeAllChildrenWithCleanup(true);m_thumbnail=thumbnail;m_ldmSupported=ldm;m_layout=survivalSelectionLayout(size.width,size.height,thumbnail,ldm);m_built=true;
-    auto const& r=m_layout;auto* panel=surface({r.panel.w,r.panel.h},center(r.panel),Blue,Surface,250,true);addChild(panel,0);
+    auto const& r=m_layout;auto* panel=surface({r.panel.w,r.panel.h},center(r.panel),Steel,Surface,250,true);addChild(panel,0);
     auto caption=[&](SurvivalRect rect,ccColor3B color,FontWeight weight){auto* value=menuLabel("",.25f,center(rect),color,weight);addChild(value,5);return value;};
     m_title=caption(r.title,Text,FontWeight::Black);m_creator=caption(r.creator,TextMuted,FontWeight::SemiBold);
     m_rating=caption({r.creator.x+r.creator.w*.70f,r.creator.y,r.creator.w*.30f,r.creator.h},Gold,FontWeight::ExtraBold);m_rating->setID("survival-selected-map-rating"_spr);
-    m_metadata=caption(r.metadata,Cyan,FontWeight::SemiBold);m_readiness=caption(r.readiness,TextMuted,FontWeight::SemiBold);
+    m_metadata=caption(r.metadata,Accent,FontWeight::SemiBold);m_readiness=caption(r.readiness,TextMuted,FontWeight::SemiBold);
     m_song=caption(r.song,TextMuted,FontWeight::SemiBold);m_song->setID("survival-selected-map-song"_spr);
     // Download progress: left half = map (GD reports completion only), right
     // half = audio (real per-file song/SFX progress from MusicDownloadManager).
     m_progressTrack=CCLayerColor::create(ccc4(255,255,255,40),r.readiness.w,3*r.scale);m_progressTrack->setPosition({r.readiness.x,r.panel.y+1*r.scale});addChild(m_progressTrack,6);
-    m_progressFill=CCLayerColor::create(ccc4(Cyan.r,Cyan.g,Cyan.b,235),r.readiness.w,3*r.scale);m_progressFill->setAnchorPoint({0,0});m_progressFill->ignoreAnchorPointForPosition(false);
+    m_progressFill=CCLayerColor::create(ccc4(Accent.r,Accent.g,Accent.b,235),r.readiness.w,3*r.scale);m_progressFill->setAnchorPoint({0,0});m_progressFill->ignoreAnchorPointForPosition(false);
     m_progressFill->setPosition({r.readiness.x,r.panel.y+1*r.scale});m_progressFill->setScaleX(0);m_progressFill->setID("survival-download-progress"_spr);addChild(m_progressFill,7);
     m_countdown=caption(r.ready,Gold,FontWeight::Black);m_countdown->setID("survival-automatic-entry-countdown"_spr);
     // Verified native frame used by Geode ModsLayer; never an emoji substitute.
@@ -66,7 +66,7 @@ void SurvivalSelectedMapPanel::build(CCSize size,bool thumbnail,bool ldm){
     };
     m_ldm=item(r.ldm,ldm?survivalOptionFace({r.ldm.w,r.ldm.h},"LDM",m_options.lowDetail):survivalUnavailableLdmFace({r.ldm.w,r.ldm.h}),4,"survival-round-ldm");
     m_shake=item(r.shake,survivalOptionFace({r.shake.w,r.shake.h},i18n::text("disable-shake","Disable Shake"),m_options.disableShake),5,"survival-round-shake");
-    auto* jukebox=surface({r.jukebox.w,r.jukebox.h},{},Blue,SurfaceRaised,255,false);
+    auto* jukebox=surface({r.jukebox.w,r.jukebox.h},{},Steel,SurfaceRaised,255,false);
     // The existing public native widget opens Jukebox's real song selector.
     // Track arrows/selection remain owned by that selector, not a private ABI.
     auto* jukeboxCaption=menuLabel("Jukebox",.22f,{r.jukebox.w/2,r.jukebox.h/2},Text,FontWeight::ExtraBold);
@@ -125,7 +125,7 @@ void SurvivalSelectedMapPanel::present(CCSize size,bool thumbnail,SurvivalMatchV
     if(m_levelId!=view.map.levelId || m_metadataRevision!=revision || m_mapMetadata!=metadata){
         m_levelId=view.map.levelId;m_metadataRevision=revision;m_mapMetadata=metadata;
         line(m_rating,std::string(mapFeatureGrade(metadata)),{r.creator.x+r.creator.w*.70f,r.creator.y,r.creator.w*.30f,r.creator.h},.19f);
-        m_rating->setColor(metadata.epic.value_or(0)>0?Gold:metadata.featureScore.value_or(0)>0?Cyan:TextMuted);
+        m_rating->setColor(metadata.epic.value_or(0)>0?Gold:metadata.featureScore.value_or(0)>0?Accent:TextMuted);
         if(m_difficulty)m_difficulty->removeFromParentAndCleanup(true);
         m_difficulty=mapDifficultyBadge(view.map.levelId,metadata,r.difficulty.w,r.difficulty.h,false);m_difficulty->setPosition({r.difficulty.x,r.difficulty.y});addChild(m_difficulty,5);
         auto const detail=fmt::format("GD #{}\n{}",view.map.levelId,mapLengthText(metadata));line(m_metadata,detail,{r.metadata.x,r.metadata.y+6*r.scale,r.metadata.w,r.metadata.h},.21f);

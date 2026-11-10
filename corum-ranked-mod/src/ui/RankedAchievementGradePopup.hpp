@@ -93,7 +93,7 @@ class RankedAchievementGradePopup final : public Popup {
             : i18n::text("achievement-grade-top", "Highest grade reached");
         auto* next = menuLabel(nextLine, .24f, {165, 46}, grade.nextAp > 0 ? achievementGradeTone(grade.nextTier) : Gold, FontWeight::Black);
         fitSingleLineMenuLabel(next, 302, 16, .24f); panel->addChild(next, 5);
-        auto* face = surface({110, 26}, {}, Blue, SurfaceRaised, 255, true);
+        auto* face = surface({110, 26}, {}, Steel, SurfaceRaised, 255, true);
         auto* closeLabel = menuLabel(i18n::text("close", "CLOSE"), .28f, {55, 13}, Text, FontWeight::ExtraBold);
         fitSingleLineMenuLabel(closeLabel, 96, 18, .28f); face->addChild(closeLabel, 5);
         auto* close = CCMenuItemSpriteExtra::create(face, this, menu_selector(RankedAchievementGradePopup::onClose));

@@ -20,10 +20,10 @@ class RankedCreditsPopup final:public Popup {
         m_noElasticity=true;
         m_bgSprite->setVisible(false);m_closeBtn->setVisible(false);setID("ranked-credits-popup"_spr);
         auto* content=rankedPopupContent(m_mainLayer,m_buttonMenu,layout);
-        content->addChild(surface({350,342},{175,171},Cyan,Surface,255,true));
+        content->addChild(surface({350,342},{175,171},Accent,Surface,255,true));
         auto add=[&](std::string text,CCPoint at,ccColor3B tint,float scale){auto* label=menuLabel(text,scale,at,tint,FontWeight::ExtraBold);fitFullMenuLabel(label,316,26,scale);content->addChild(label,5);};
-        add("CREDITS",{175,315},Cyan,.49f);
-        content->addChild(surface({318,103},{175,253},Blue,SurfaceRaised,250,false));
+        add("CREDITS",{175,315},Accent,.49f);
+        content->addChild(surface({318,103},{175,253},Steel,SurfaceRaised,250,false));
         add("PROJECT LEAD · GAME DESIGN · DEVELOPMENT",{175,288},TextMuted,.21f);
         add("hwanhee1",{175,265},Gold,.38f);
         add("AI-ASSISTED IMPLEMENTATION",{175,242},TextMuted,.17f);
@@ -50,13 +50,13 @@ class RankedCreditsPopup final:public Popup {
             auto const& uses=songs.at(id);
             std::string scope;for(auto const& use:uses){if(!scope.empty())scope+=" · ";scope+=use;}
             auto const y=h-18-n++*61;
-            scroll->m_contentLayer->addChild(surface({314,55},{163,y-10},Blue,SurfaceRaised,245,false),1);
+            scroll->m_contentLayer->addChild(surface({314,55},{163,y-10},Steel,SurfaceRaised,245,false),1);
             auto* usage=menuLabel(scope,.20f,{163,y},TextMuted,FontWeight::SemiBold);fitFullMenuLabel(usage,306,22,.20f);scroll->m_contentLayer->addChild(usage,5);
             auto* title=menuLabel(i18n::text("credits-song-loading","Loading song credits..."),.29f,{163,y-25},Text,FontWeight::ExtraBold);fitFullMenuLabel(title,306,28,.29f);scroll->m_contentLayer->addChild(title,5);m_songs.push_back({id,0,"",title,{}});
         }
         if(songs.empty())add(i18n::text("credits-no-music","No configured music"),{175,137},TextMuted,.27f);
         scroll->scrollToTop();
-        auto* face=surface({120,28},{},Blue,SurfaceRaised,255,true);auto* text=menuLabel(i18n::text("close","Close"),.32f,{60,14},Text,FontWeight::ExtraBold);face->addChild(text,5);
+        auto* face=surface({120,28},{},Steel,SurfaceRaised,255,true);auto* text=menuLabel(i18n::text("close","Close"),.32f,{60,14},Text,FontWeight::ExtraBold);face->addChild(text,5);
         auto* close=CCMenuItemSpriteExtra::create(face,this,menu_selector(RankedCreditsPopup::onClose));close->setPosition({175,22});m_buttonMenu->addChild(close);
         MusicDownloadManager::sharedState()->tryLoadLibraries();schedule(schedule_selector(RankedCreditsPopup::refresh),.25f);refresh(0);return true;
     }

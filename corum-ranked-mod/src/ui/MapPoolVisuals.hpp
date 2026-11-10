@@ -18,8 +18,8 @@ using namespace geode::prelude;
 inline ccColor3B poolColor(int pool) {
     switch (pool) {
         case 1: return Green;
-        case 2: return Cyan;
-        case 3: return Blue;
+        case 2: return Accent;
+        case 3: return Steel;
         case 4: return Gold;
         case 5: return Orange;
         default: return Red;

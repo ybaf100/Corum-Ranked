@@ -128,12 +128,12 @@ namespace ui{
 void cancelMenuTouch(CCMenu* menu){if(menu)++menu->cancellations;}
 struct SurvivalPlayerInfoPopup{static inline int opened=0,account=0;static inline bool survival=false;static SurvivalPlayerInfoPopup*createForLeaderboard(SurvivalStanding const& p,CCNode*,bool mode){account=p.accountId;survival=mode;static SurvivalPlayerInfoPopup instance;return &instance;}void show(){++opened;}};
 enum class FontWeight{SemiBold,ExtraBold,Black};enum class RankBadgeDisplay{Matched,Leaderboard};
-constexpr ccColor3B Text{242,247,255},TextMuted{164,181,205},Gold{255,207,74},Blue{77,135,255},Red{255,91,111},Green{90,238,151},Cyan{64,224,255},Surface{},SurfaceSoft{},SurfaceRaised{};
+constexpr ccColor3B Text{242,247,255},TextMuted{164,181,205},Gold{255,207,74},Steel{77,135,255},Red{255,91,111},Green{90,238,151},Accent{64,224,255},Surface{},SurfaceSoft{},SurfaceRaised{};
 CCLabelBMFont* menuLabel(std::string const& t,float s,CCPoint p,ccColor3B c=Text,FontWeight=FontWeight::ExtraBold){auto* n=new CCLabelBMFont;n->setString(t.c_str());n->setScale(s);n->setPosition(p);n->setColor(c);return n;}
 void fitMenuLabelWidth(CCLabelBMFont* n,float w,float s,float){n->setScale(std::min(s,w/n->size.width));}
 CCLabelBMFont*publicPlayerTitle(CCNode*,matjson::Value const&,CCPoint,float,float){return nullptr;}
 CCNode* surface(CCSize s,CCPoint p,ccColor3B accent,ccColor3B fill,int,bool){auto* n=CCNode::create();n->size=s;n->position=p;n->color=fill;auto* frame=CCNode::create();frame->color=accent;frame->id="frame";n->addChild(frame);return n;}
-ccColor3B tierColor(std::string const& t){return t=="GOLD"?Gold:Blue;}
+ccColor3B tierColor(std::string const& t){return t=="GOLD"?Gold:Steel;}
 CCNode* standingNumber(std::optional<int> rank,float s){return menuLabel(rank?fmt::format("#{}",*rank):"#—",s,{});}
 CCSprite* rankResourceSprite(char const*){return CCSprite::createWithSpriteFrameName("existing-glow");}
 void fitRankSprite(CCSprite* n,CCSize s){n->size=s;}
@@ -209,11 +209,11 @@ int main(){using namespace corum::ranked;using namespace ui;namespace web=geode:
  reopened->onRefresh(nullptr);auto oldSolo=web::pending.back().callback;
  reopened->onMode(reopened->m_survivalTab);assert(reopened->m_mode==corum::ranked::RankedMode::Survival&&reopened->m_offset==0&&reopened->m_busy&&reopened->m_rows.empty());
  assert(reopened->m_survivalTab->getNormalImage()->color==SurfaceRaised&&reopened->m_survivalTab->getNormalImage()->getChildByID("frame")->color==Gold);
- assert(reopened->m_soloTab->getNormalImage()->color==SurfaceRaised&&reopened->m_soloTab->getNormalImage()->getChildByID("frame")->color==Cyan);
+ assert(reopened->m_soloTab->getNormalImage()->color==SurfaceRaised&&reopened->m_soloTab->getNormalImage()->getChildByID("frame")->color==Accent);
  assert(web::pending.back().request.url.starts_with("/api/ranked/survival/leaderboard"));auto oldSur=web::pending.back().callback;
  reopened->onMode(reopened->m_soloTab);auto newest=web::pending.back().callback;
  assert(reopened->m_soloTab->getNormalImage()->color==SurfaceRaised&&reopened->m_soloTab->getNormalImage()->getChildByID("frame")->color==Gold);
- assert(reopened->m_survivalTab->getNormalImage()->color==SurfaceRaised&&reopened->m_survivalTab->getNormalImage()->getChildByID("frame")->color==Cyan);
+ assert(reopened->m_survivalTab->getNormalImage()->color==SurfaceRaised&&reopened->m_survivalTab->getNormalImage()->getChildByID("frame")->color==Accent);
  oldSolo({page()});oldSur({page()});drainMainQueue();assert(reopened->m_rows.empty()&&reopened->m_busy);
  newest({empty});drainMainQueue();assert(!reopened->m_busy&&reopened->m_mode==corum::ranked::RankedMode::SoloRanked);
  reopened->onRefresh(nullptr);auto failure=web::pending.back().callback;failure({{},false});drainMainQueue();assert(!reopened->m_busy&&reopened->m_refresh->isEnabled());reopened->dismiss();

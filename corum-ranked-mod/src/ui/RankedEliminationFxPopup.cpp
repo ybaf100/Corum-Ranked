@@ -110,12 +110,12 @@ void RankedEliminationFxPopup::showMessage(std::string const& message, ccColor3B
     auto* menu = CCMenu::create();
     menu->setPosition(CCPointZero);
     m_content->addChild(menu, 20);
-    auto* close = CCMenuItemSpriteExtra::create(buttonFace(i18n::text("close", "CLOSE"), {64, 22}, Blue, false),
+    auto* close = CCMenuItemSpriteExtra::create(buttonFace(i18n::text("close", "CLOSE"), {64, 22}, Steel, false),
         this, menu_selector(RankedEliminationFxPopup::onClose));
     close->setPosition({44, size.height - 20});
     menu->addChild(close);
     if (!m_loaded) {
-        auto* retry = CCMenuItemSpriteExtra::create(buttonFace(i18n::text("retry", "RETRY"), {96, 24}, Cyan, false),
+        auto* retry = CCMenuItemSpriteExtra::create(buttonFace(i18n::text("retry", "RETRY"), {96, 24}, Accent, false),
             this, menu_selector(RankedEliminationFxPopup::onRetry));
         retry->setPosition({size.width / 2, 24});
         menu->addChild(retry);
@@ -189,7 +189,7 @@ void RankedEliminationFxPopup::render() {
         auto const effect = kEliminationEffects[i];
         auto const unlocked = m_unlocked[i], equipped = effect == m_equipped, selected = effect == m_selected;
         auto const rowSize = CCSize{listWidth, kRow - 6};
-        auto* row = surface(rowSize, {}, selected ? Gold : unlocked ? Blue : SurfaceRaised, selected ? SurfaceSoft : SurfaceRaised, 250, true);
+        auto* row = surface(rowSize, {}, selected ? Gold : unlocked ? Steel : SurfaceRaised, selected ? SurfaceSoft : SurfaceRaised, 250, true);
         auto* mark = glyph(effect, unlocked ? Gold : TextMuted);
         mark->setPosition({20, rowSize.height / 2});
         row->addChild(mark, 5);
@@ -214,11 +214,11 @@ void RankedEliminationFxPopup::render() {
     // Preview stage on the right, the selected effect's buttons below it.
     auto const stageLeft = 24 + listWidth;
     auto const stageSize = CCSize{size.width - stageLeft - 12, size.height - 50 - 56};
-    m_stage = surface(stageSize, {stageLeft + stageSize.width / 2, 56 + stageSize.height / 2}, Blue, {7, 13, 24}, 255, true);
+    m_stage = surface(stageSize, {stageLeft + stageSize.width / 2, 56 + stageSize.height / 2}, Steel, {17, 18, 24}, 255, true);
     m_content->addChild(m_stage, 6);
     auto const index = effectIndex(m_selected);
     auto const buttonWidth = (stageSize.width - 6) / 2;
-    auto* replay = CCMenuItemSpriteExtra::create(buttonFace(i18n::text("elim-replay", "REPLAY"), {buttonWidth, 26}, Cyan, false, 0.22f),
+    auto* replay = CCMenuItemSpriteExtra::create(buttonFace(i18n::text("elim-replay", "REPLAY"), {buttonWidth, 26}, Accent, false, 0.22f),
         this, menu_selector(RankedEliminationFxPopup::onReplay));
     replay->setPosition({stageLeft + buttonWidth / 2, 28});
     menu->addChild(replay);
@@ -263,7 +263,7 @@ void RankedEliminationFxPopup::buildStage() {
     auto const cardWidth = (size.width - 16) / 3.0f - 4.0f;
     for (int i = 0; i < 3; ++i) {
         auto const x = 8 + static_cast<float>(i) * (cardWidth + 4) + cardWidth / 2 + 2;
-        auto* card = surface({cardWidth, 40}, {x, 30}, Blue, SurfaceRaised, 250, true);
+        auto* card = surface({cardWidth, 40}, {x, 30}, Steel, SurfaceRaised, 250, true);
         m_world->addChild(card, 2);
         auto* slot = CCNode::create();
         slot->setPosition({cardWidth / 2, 21});

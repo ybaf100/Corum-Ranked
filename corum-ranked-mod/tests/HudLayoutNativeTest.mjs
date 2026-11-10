@@ -227,7 +227,7 @@ using geode::WeakRef;
 namespace corum::ranked::i18n{inline std::string text(std::string_view,std::string_view english){return std::string(english);}inline char const* literal(std::string_view){return "ATTEMPTS LEFT : ";}}
 namespace corum::ranked::ui{
  enum class FontWeight{Medium,SemiBold,ExtraBold,Black};
- constexpr ccColor3B Text{242,247,255},TextMuted{164,181,205},Cyan{64,224,255},Blue{77,135,255},Green{90,238,151},Red{255,91,111},Gold{255,207,74},Orange{255,145,68},Surface{10,19,36},SurfaceRaised{15,28,50};
+ constexpr ccColor3B Text{242,247,255},TextMuted{164,181,205},Accent{64,224,255},Steel{77,135,255},Green{90,238,151},Red{255,91,111},Gold{255,207,74},Orange{255,145,68},Surface{10,19,36},SurfaceRaised{15,28,50};
  inline CCLabelBMFont* label(std::string const& t,float s,CCPoint p,ccColor3B,FontWeight,char const* =nullptr){auto*l=new CCLabelBMFont;l->text=t;l->scale=s;l->position=p;return l;}
  inline CCLabelBMFont* playerNameLabel(std::string const& t,float s,CCPoint p,ccColor3B c,FontWeight w){return label(t,s,p,c,w);}
  inline CCLabelBMFont* menuLabel(std::string const& t,float s,CCPoint p,ccColor3B c,FontWeight w){return label(t,s,p,c,w);}

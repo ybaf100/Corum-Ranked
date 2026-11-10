@@ -18,7 +18,7 @@ class SurvivalQueueOverlay final : public CCMenu {
     bool init() override {
         if(!CCMenu::init())return false;
         setID("survival-queue-overlay"_spr);setPosition(CCPointZero);
-        m_face=ui::surface({96,22},{},ui::Cyan,ui::Ink,236,true);
+        m_face=ui::surface({96,22},{},ui::Accent,ui::Ink,236,true);
         m_label=ui::menuLabel("",.26f,{48,11},ui::Text,ui::FontWeight::ExtraBold);m_face->addChild(m_label,5);
         auto* item=CCMenuItemSpriteExtra::create(m_face,this,menu_selector(SurvivalQueueOverlay::onTap));
         item->setID("survival-queue-overlay-button"_spr);addChild(item);

@@ -22,18 +22,18 @@ struct SeekProgressOverlay {
     void attach(CCNode* parent, int z) {
         if (layer || !parent) return;
         auto const size = CCDirector::sharedDirector()->getWinSize();
-        layer = CCLayerColor::create(ccc4(4, 7, 14, 214), size.width, size.height);
+        layer = CCLayerColor::create(ccc4(11, 12, 15, 214), size.width, size.height);
         if (!layer) return;
         layer->setVisible(false);
         parent->addChild(layer, z);
         auto const width = std::min(360.f, size.width - 40.f), height = 92.f;
-        auto* window = surface({width, height}, {size.width / 2, size.height / 2}, Cyan, Surface, 250, true);
+        auto* window = surface({width, height}, {size.width / 2, size.height / 2}, Accent, Surface, 250, true);
         layer->addChild(window, 1);
         barWidth = width - 40.f;
         auto* track = CCLayerColor::create(ccc4(255, 255, 255, 40), barWidth, 8);
         track->setPosition({20.f, 24.f});
         window->addChild(track, 5);
-        fill = CCLayerColor::create(ccc4(Cyan.r, Cyan.g, Cyan.b, 255), barWidth, 8);
+        fill = CCLayerColor::create(ccc4(Accent.r, Accent.g, Accent.b, 255), barWidth, 8);
         fill->setAnchorPoint({0, 0});
         fill->ignoreAnchorPointForPosition(false);
         fill->setPosition({20.f, 24.f});

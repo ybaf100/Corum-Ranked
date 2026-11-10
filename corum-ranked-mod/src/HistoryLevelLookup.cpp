@@ -90,7 +90,7 @@ class HistoryLevelPopup final:public Popup {
     }
     bool init(int id,std::string message){
         if(!Popup::init(250,115))return false;
-        auto* title=ui::menuLabel(i18n::text("history-view-level","VIEW LEVEL"),.4f,{125,92},ui::Cyan,ui::FontWeight::ExtraBold);ui::fitFullMenuLabel(title,210,25,.4f);m_mainLayer->addChild(title);
+        auto* title=ui::menuLabel(i18n::text("history-view-level","VIEW LEVEL"),.4f,{125,92},ui::Accent,ui::FontWeight::ExtraBold);ui::fitFullMenuLabel(title,210,25,.4f);m_mainLayer->addChild(title);
         m_status=ui::menuLabel(message.empty()?i18n::text("loading","LOADING..."):message,.34f,{125,48},ui::Text,ui::FontWeight::SemiBold);ui::fitFullMenuLabel(m_status,220,55,.34f);m_mainLayer->addChild(m_status);
         if(!message.empty())return true;
         m_origin.emplace(CCDirector::sharedDirector()->getRunningScene());m_deadline=std::chrono::steady_clock::now()+std::chrono::seconds(15);

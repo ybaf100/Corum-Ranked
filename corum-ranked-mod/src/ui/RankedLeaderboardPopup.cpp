@@ -63,7 +63,7 @@ public:
 };
 
 CCNode* modeTabFace(RankedMode mode, bool selected,float width=140) {
-    auto* face = surface({width,23},{},selected ? Gold : Cyan,
+    auto* face = surface({width,23},{},selected ? Gold : Accent,
         SurfaceRaised,250,true);
     auto* caption = menuLabel(mode == RankedMode::Survival ? "SURVIVAL" : "SOLO RANKED",0.28f,{width/2,11.5f},
         selected ? Gold : Text);
@@ -144,7 +144,7 @@ bool RankedLeaderboardPopup::init() {
     });
     auto* menu = CCMenu::create(); menu->setPosition(CCPointZero); panel->addChild(menu,20);
     auto button = [&](std::string const& text, float x, SEL_MenuHandler callback) {
-        auto* face = surface({std::min(68.f,(size.width-30)/4),25},{},Blue,SurfaceRaised,250,true);
+        auto* face = surface({std::min(68.f,(size.width-30)/4),25},{},Steel,SurfaceRaised,250,true);
         auto* caption = menuLabel(text,0.30f,{std::min(68.f,(size.width-30)/4)/2,12.5f}); fitMenuLabelWidth(caption,std::min(60.f,(size.width-30)/4-8),0.30f,0.23f);
         face->addChild(caption,5);
         auto* item = CCMenuItemSpriteExtra::create(face,this,callback); item->setPosition({x,17});
@@ -158,7 +158,7 @@ bool RankedLeaderboardPopup::init() {
     auto const inputWidth=std::min(220.0f,size.width-125);
     m_searchInput=TextInput::create(inputWidth,"Player name");m_searchInput->setCommonFilter(CommonFilter::Name);
     m_searchInput->setMaxCharCount(32);m_searchInput->setPosition({size.width/2-42,size.height-72});panel->addChild(m_searchInput,20);
-    auto* searchFace=surface({68,25},{},Blue,SurfaceRaised,250,true);
+    auto* searchFace=surface({68,25},{},Steel,SurfaceRaised,250,true);
     auto* searchLabel=menuLabel(i18n::text("leaderboard-find","FIND"),.30f,{34,12.5f},Text,FontWeight::SemiBold);
     fitMenuLabelWidth(searchLabel,60,.30f,.23f);searchFace->addChild(searchLabel,5);
     m_searchButton=CCMenuItemSpriteExtra::create(searchFace,this,menu_selector(RankedLeaderboardPopup::onSearch));
@@ -286,7 +286,7 @@ void RankedLeaderboardPopup::showRows(matjson::Value const& data) {
         if (rank->getContentSize().width > 40) rank->setScale(40 / rank->getContentSize().width);
         row->addChild(rank,5);
         auto const equipped=player["equippedTitle"];
-        leftCaption(row,entry.player,{columns.name,equipped.isObject()?42.f:36.f},columns.nameWidth,0.36f,mine ? Cyan : Text);
+        leftCaption(row,entry.player,{columns.name,equipped.isObject()?42.f:36.f},columns.nameWidth,0.36f,mine ? Accent : Text);
         if(equipped.isObject())publicPlayerTitle(row,equipped,{columns.name+columns.nameWidth/2,26},columns.nameWidth,.20f);
         if (entry.promotion || entry.warning) leftCaption(row,
             entry.promotion ? i18n::text("promotion-match","PROMOTION MATCH") : i18n::text("demotion-warning","DEMOTION WARNING"),

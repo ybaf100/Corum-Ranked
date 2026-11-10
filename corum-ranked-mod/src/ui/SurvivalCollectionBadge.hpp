@@ -46,7 +46,7 @@ inline SurvivalBadgeFaceEnvelope survivalBadgeFaceEnvelope(){
 }
 inline CCNode* survivalCollectionBadge(int nativeCode,std::string_view grade,float side,float faceArea=0){
     auto const eliminated=grade=="ELIMINATED";
-    auto* card=surface({side,side},{},grade.empty()?Blue:survivalBadgeColor(grade),Surface,242,true);
+    auto* card=surface({side,side},{},grade.empty()?Steel:survivalBadgeColor(grade),Surface,242,true);
     auto const area=faceArea>0?std::min(side,faceArea):side;
     if(eliminated){
         auto* cross=menuLabel("X",.82f,{side/2,side/2},Red,FontWeight::Black);

@@ -1,10 +1,12 @@
 #pragma once
 
+#include "ButtonFx.hpp"
 #include "RankAssetPackManager.hpp"
 #include "../domain/FontMetrics.hpp"
 #include "../domain/RankTierPresentation.hpp"
 
 #include <Geode/Geode.hpp>
+#include <Geode/cocos/draw_nodes/CCDrawNode.h>
 
 #include <algorithm>
 #include <cctype>
@@ -18,14 +20,18 @@ namespace corum::ranked::ui {
 
 using namespace geode::prelude;
 
-inline constexpr ccColor3B Ink = {5, 10, 22};
-inline constexpr ccColor3B Surface = {10, 19, 36};
-inline constexpr ccColor3B SurfaceRaised = {15, 28, 50};
-inline constexpr ccColor3B SurfaceSoft = {21, 38, 65};
-inline constexpr ccColor3B Text = {242, 247, 255};
-inline constexpr ccColor3B TextMuted = {164, 181, 205};
-inline constexpr ccColor3B Cyan = {64, 224, 255};
-inline constexpr ccColor3B Blue = {77, 135, 255};
+// Broadcast palette: a near-black neutral ground, one lime signal colour and
+// steel for everything secondary. Tier colours stay the only other hues.
+inline constexpr ccColor3B Ink = {13, 14, 18};
+inline constexpr ccColor3B Surface = {23, 25, 34};
+inline constexpr ccColor3B SurfaceRaised = {32, 35, 46};
+inline constexpr ccColor3B SurfaceSoft = {43, 47, 60};
+inline constexpr ccColor3B Text = {244, 245, 247};
+inline constexpr ccColor3B TextMuted = {169, 174, 189};
+inline constexpr ccColor3B Accent = {200, 255, 46};
+// Text and marks drawn on top of an Accent fill.
+inline constexpr ccColor3B AccentInk = {13, 14, 18};
+inline constexpr ccColor3B Steel = {122, 130, 152};
 inline constexpr ccColor3B Green = {90, 238, 151};
 inline constexpr ccColor3B Red = {255, 91, 111};
 inline constexpr ccColor3B Gold = {255, 207, 74};
@@ -308,48 +314,93 @@ inline CCLabelBMFont* menuLabel(std::string const& text, float scale, CCPoint po
         display ? FontWeight::Black : FontWeight::SemiBold);
 }
 
+inline constexpr int SurfaceShadowTag = 8028;
+inline constexpr int SurfaceFillTag = 8029;
+inline constexpr int SurfaceBorderTag = 8030;
+inline constexpr int SurfaceRuleTag = 8031;
+inline constexpr int SurfaceTabTag = 8032;
+
+// Places a surface's chrome for `size`. surface() builds through this and the
+// lobby card widens through it, so both always agree on the geometry.
+inline void layoutSurface(CCNode* root, CCSize size) {
+    if (!root) return;
+    root->setContentSize(size);
+    for (auto* child : CCArrayExt<CCNode*>(root->getChildren())) {
+        auto* layer = typeinfo_cast<CCLayerColor*>(child);
+        if (!layer) continue;
+        switch (layer->getTag()) {
+            case SurfaceShadowTag:
+                layer->setContentSize(size);
+                layer->setPosition({1.5f, -2.0f});
+                break;
+            case SurfaceBorderTag:
+                layer->setContentSize(size);
+                layer->setPosition(CCPointZero);
+                break;
+            case SurfaceFillTag:
+                layer->setContentSize({std::max(2.0f, size.width - 2.0f), std::max(2.0f, size.height - 2.0f)});
+                layer->setPosition({1.0f, 1.0f});
+                break;
+            case SurfaceRuleTag: {
+                auto const rule = layer->getContentSize().height;
+                layer->setContentSize({size.width, rule});
+                layer->setPosition({0.0f, size.height - rule});
+                break;
+            }
+            case SurfaceTabTag: {
+                auto const tab = layer->getContentSize().height;
+                layer->setContentSize({std::clamp(size.width * 0.2f, 8.0f, 36.0f), tab});
+                layer->setPosition({1.3f, size.height - 2.0f - tab});
+                break;
+            }
+            default: break;
+        }
+    }
+}
+
+// The one panel every Corum screen is built from: a flat fill inside a thin
+// tinted frame, ruled along the top. A strong surface carries a heavier rule
+// with a slanted tab under its left end. No glow and no gradient.
 inline CCNode* surface(
     CCSize size,
     CCPoint position,
-    ccColor3B accent = Cyan,
+    ccColor3B accent = Steel,
     ccColor3B fill = Surface,
     GLubyte opacity = 242,
     bool strong = false
 ) {
     auto* root = CCNode::create();
-    root->setContentSize(size);
     root->setAnchorPoint({0.5f, 0.5f});
     root->setPosition(position);
 
-    // Flat, low-noise chrome keeps the information hierarchy readable on a
-    // phone. The previous double glow, side rail and four corner blocks made
-    // every panel compete with the actual values displayed inside it.
-    auto* shadow = CCLayerColor::create({1, 4, 12, static_cast<GLubyte>(strong ? 82 : 54)});
-    shadow->setContentSize({size.width + 2.0f, size.height + 3.0f});
-    shadow->setPosition({-1.0f, -2.0f});
+    auto* shadow = CCLayerColor::create({0, 0, 0, static_cast<GLubyte>(strong ? 78 : 50)});
+    shadow->setTag(SurfaceShadowTag);
     root->addChild(shadow, -2);
 
-    auto* border = CCLayerColor::create({accent.r, accent.g, accent.b, static_cast<GLubyte>(strong ? 158 : 88)});
-    border->setContentSize(size);
-    border->setPosition(CCPointZero);
-    border->setTag(8030);root->addChild(border, 0);
+    auto* border = CCLayerColor::create({accent.r, accent.g, accent.b, static_cast<GLubyte>(strong ? 150 : 80)});
+    border->setTag(SurfaceBorderTag);
+    root->addChild(border, 0);
 
     auto* inner = CCLayerColor::create({fill.r, fill.g, fill.b, opacity});
-    inner->setContentSize({std::max(2.0f, size.width - 1.5f), std::max(2.0f, size.height - 1.5f)});
-    inner->setPosition({0.75f, 0.75f});
+    inner->setTag(SurfaceFillTag);
     root->addChild(inner, 1);
 
-    auto* highlight = CCLayerColor::create({accent.r, accent.g, accent.b, static_cast<GLubyte>(strong ? 235 : 190)});
-    highlight->setContentSize({std::max(4.0f, size.width - 8.0f), strong ? 1.5f : 1.0f});
-    highlight->setPosition({4.0f, size.height - 3.0f});
-    highlight->setTag(8031);root->addChild(highlight, 3);
+    auto* rule = CCLayerColor::create({accent.r, accent.g, accent.b, static_cast<GLubyte>(strong ? 255 : 140)});
+    rule->setContentSize({size.width, strong ? 2.0f : 1.0f});
+    rule->setTag(SurfaceRuleTag);
+    root->addChild(rule, 3);
 
     if (strong) {
-        auto* leftRail = CCLayerColor::create({accent.r, accent.g, accent.b, 138});
-        leftRail->setContentSize({1.5f, std::max(4.0f, size.height - 10.0f)});
-        leftRail->setPosition({3.0f, 5.0f});
-        leftRail->setTag(8032);root->addChild(leftRail, 3);
+        auto* tab = CCLayerColor::create({accent.r, accent.g, accent.b, 255});
+        tab->setContentSize({8.0f, 3.0f});
+        tab->setSkewX(40.0f);
+        tab->setTag(SurfaceTabTag);
+        root->addChild(tab, 3);
     }
+    layoutSurface(root, size);
+
+    // Any surface that ends up as a menu item's face answers the pointer.
+    if (auto* fx = ButtonFx::create()) root->addChild(fx, 2);
 
     return root;
 }
@@ -357,7 +408,121 @@ inline CCNode* surface(
 // Recolor only static border/highlight layers; keep fill, children and actions.
 inline void setSurfaceAccent(CCNode* panel,ccColor3B color) {
     if(!panel)return;
-    for(int tag:{8030,8031,8032})if(auto* layer=typeinfo_cast<CCLayerColor*>(panel->getChildByTag(tag)))layer->setColor(color);
+    for(int tag:{SurfaceBorderTag,SurfaceRuleTag,SurfaceTabTag})if(auto* layer=typeinfo_cast<CCLayerColor*>(panel->getChildByTag(tag)))layer->setColor(color);
+}
+
+// A slanted slab: the face of an action. Filled, it is the primary action in
+// the signal colour (caption in AccentInk); outlined, it is a secondary one.
+inline CCNode* slab(
+    CCSize size,
+    CCPoint position,
+    ccColor3B color = Accent,
+    bool outlined = false,
+    ccColor3B fill = SurfaceRaised
+) {
+    auto* root = CCNode::create();
+    root->setContentSize(size);
+    root->setAnchorPoint({0.5f, 0.5f});
+    root->setPosition(position);
+
+    auto* shadow = CCLayerColor::create({0, 0, 0, 96});
+    shadow->setContentSize(size);
+    shadow->setPosition({2.0f, -2.0f});
+    shadow->setSkewX(SlabSkew);
+    root->addChild(shadow, -2);
+
+    auto* body = CCLayerColor::create({color.r, color.g, color.b, 255});
+    body->setContentSize(size);
+    body->setSkewX(SlabSkew);
+    body->setTag(SurfaceBorderTag);
+    root->addChild(body, 0);
+
+    if (outlined) {
+        auto* inner = CCLayerColor::create({fill.r, fill.g, fill.b, 255});
+        inner->setContentSize({std::max(2.0f, size.width - 3.0f), std::max(2.0f, size.height - 3.0f)});
+        inner->setPosition({1.5f, 1.5f});
+        inner->setSkewX(SlabSkew);
+        inner->setTag(SurfaceFillTag);
+        root->addChild(inner, 1);
+    }
+    if (auto* fx = ButtonFx::create(ButtonFxKind::Standard, SlabSkew)) root->addChild(fx, 2);
+    return root;
+}
+
+// Captions on a slab, and display titles, lean with it.
+inline void leanLabel(CCNode* caption) {
+    if (caption) caption->setSkewX(SlabSkew);
+}
+
+// A ">" drawn from two bars, so it fades and tints like any other layer.
+inline CCNode* chevron(float arm, float thickness, ccColor3B color) {
+    auto* root = CCNode::create();
+    for (int i = 0; i < 2; ++i) {
+        auto* bar = CCLayerColor::create({color.r, color.g, color.b, 255});
+        bar->setContentSize({arm, thickness});
+        bar->setPosition({-arm / 2.0f, (i ? -1.0f : 1.0f) * arm * 0.32f - thickness / 2.0f});
+        bar->setRotation(i ? -40.0f : 40.0f);
+        root->addChild(bar);
+    }
+    return root;
+}
+
+// An "x" drawn from two bars, for close buttons.
+inline CCNode* cross(float arm, float thickness, ccColor3B color) {
+    auto* root = CCNode::create();
+    for (int i = 0; i < 2; ++i) {
+        auto* bar = CCLayerColor::create({color.r, color.g, color.b, 255});
+        bar->setContentSize({arm, thickness});
+        bar->setPosition({-arm / 2.0f, -thickness / 2.0f});
+        bar->setRotation(i ? -45.0f : 45.0f);
+        root->addChild(bar);
+    }
+    return root;
+}
+
+// The mode start button: a large signal slab with a double chevron. It shines
+// on its own while idle, grows under the pointer and bursts when pressed.
+// A start button that cannot be used right now is a quiet steel slab.
+inline CCNode* heroSlab(CCSize size, bool live = true) {
+    auto const fill = live ? Accent : SurfaceSoft;
+    auto const ink = live ? AccentInk : TextMuted;
+    auto* root = CCNode::create();
+    root->setContentSize(size);
+    root->setAnchorPoint({0.5f, 0.5f});
+
+    CCLayerColor* pings[2] = {nullptr, nullptr};
+    for (int i = 0; i < 2; ++i) {
+        pings[i] = CCLayerColor::create({Accent.r, Accent.g, Accent.b, 0});
+        pings[i]->setContentSize(size);
+        pings[i]->setSkewX(SlabSkew);
+        root->addChild(pings[i], -3 + i);
+    }
+    auto* body = CCNode::create();
+    body->setContentSize(size);
+    body->setAnchorPoint({0.5f, 0.5f});
+    body->setPosition({size.width / 2.0f, size.height / 2.0f});
+    root->addChild(body, 1);
+
+    auto* shadow = CCLayerColor::create({0, 0, 0, 110});
+    shadow->setContentSize(size);
+    shadow->setPosition({3.0f, -3.0f});
+    shadow->setSkewX(SlabSkew);
+    body->addChild(shadow, -2);
+
+    auto* face = CCLayerColor::create({fill.r, fill.g, fill.b, 255});
+    face->setContentSize(size);
+    face->setSkewX(SlabSkew);
+    face->setTag(SurfaceBorderTag);
+    body->addChild(face, 0);
+
+    auto const arm = size.height * 0.34f;
+    for (int i = 0; i < 2; ++i) {
+        auto* mark = chevron(arm, std::max(3.0f, arm * 0.30f), ink);
+        mark->setPosition({size.width / 2.0f + (i ? 1.0f : -1.0f) * arm * 0.42f + arm * 0.10f, size.height / 2.0f});
+        body->addChild(mark, 5);
+    }
+    if (auto* fx = ButtonFx::create(ButtonFxKind::Hero, SlabSkew, body, pings[0], pings[1])) body->addChild(fx, 2);
+    return root;
 }
 
 inline CCNode* pill(
@@ -382,34 +547,34 @@ inline CCNode* menuPill(std::string const& text, CCSize size, CCPoint position,
 }
 
 inline void addBackdrop(CCNode* parent, CCSize const& size) {
-    auto* base = CCLayerColor::create({4, 9, 22, 255});
+    auto* base = CCLayerColor::create({Ink.r, Ink.g, Ink.b, 255});
     base->setContentSize(size);
     parent->addChild(base, -20);
 
-    if (auto* gradient = CCSprite::create("GJ_gradientBG.png")) {
-        gradient->setAnchorPoint({0.5f, 0.5f});
-        gradient->setPosition({size.width / 2.0f, size.height / 2.0f});
-        auto const content = gradient->getContentSize();
-        if (content.width > 0.0f) gradient->setScaleX(size.width / content.width);
-        if (content.height > 0.0f) gradient->setScaleY(size.height / content.height);
-        gradient->setColor({9, 57, 125});
-        gradient->setOpacity(155);
-        parent->addChild(gradient, -19);
-    }
+    // Two slanted slabs give the flat ground a direction without a gradient.
+    auto* wide = CCLayerColor::create({Surface.r, Surface.g, Surface.b, 150});
+    wide->setContentSize({size.width * 0.34f, size.height * 1.5f});
+    wide->setPosition({size.width * 0.58f, -size.height * 0.25f});
+    wide->setSkewX(SlabSkew * 2.0f);
+    parent->addChild(wide, -19);
 
-    auto* topGlow = CCLayerColor::create({28, 111, 210, 42});
-    topGlow->setContentSize({size.width, size.height * 0.42f});
-    topGlow->setPosition({0.0f, size.height * 0.58f});
-    parent->addChild(topGlow, -18);
+    auto* thin = CCLayerColor::create({Accent.r, Accent.g, Accent.b, 14});
+    thin->setContentSize({size.width * 0.05f, size.height * 1.5f});
+    thin->setPosition({size.width * 0.50f, -size.height * 0.25f});
+    thin->setSkewX(SlabSkew * 2.0f);
+    parent->addChild(thin, -19);
 
-    auto* horizon = CCLayerColor::create({Cyan.r, Cyan.g, Cyan.b, 45});
+    // Fine diagonal hatching across the whole ground, drawn once.
+    auto* hatch = CCDrawNode::create();
+    auto const lean = size.height * 0.2867f; // tan(16 degrees)
+    for (float x = -lean; x < size.width; x += 14.0f)
+        hatch->drawSegment({x, 0.0f}, {x + lean, size.height}, 0.3f, {1.0f, 1.0f, 1.0f, 0.03f});
+    parent->addChild(hatch, -18);
+
+    auto* horizon = CCLayerColor::create({SurfaceSoft.r, SurfaceSoft.g, SurfaceSoft.b, 255});
     horizon->setContentSize({size.width - 34.0f, 1.0f});
     horizon->setPosition({17.0f, size.height - 72.0f});
     parent->addChild(horizon, -17);
-
-    auto* vignette = CCLayerColor::create({0, 2, 10, 78});
-    vignette->setContentSize(size);
-    parent->addChild(vignette, -16);
 }
 
 inline std::string trophyFilename(std::string tier) {

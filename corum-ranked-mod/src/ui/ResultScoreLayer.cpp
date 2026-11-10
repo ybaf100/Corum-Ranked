@@ -89,7 +89,7 @@ bool ResultScoreLayer::init(ScoreAnimationInput input, CCNode* resultScreen, std
     setContentSize(size); setPosition(CCPointZero); setID("ranked-result-score-layer"_spr);
     if (auto* blur = captureBlurredResult(resultScreen, size)) addChild(blur, 0);
     else log::warn("[RankedResult] result backdrop blur could not be created");
-    auto* dim = CCLayerColor::create({2,5,14,148}); dim->setContentSize(size); addChild(dim, 1);
+    auto* dim = CCLayerColor::create({9, 10, 13,148}); dim->setContentSize(size); addChild(dim, 1);
 
     m_barLeft = std::max(82.0f, size.width * 0.18f);
     m_barWidth = size.width - m_barLeft * 2;

@@ -40,8 +40,8 @@ class DebugLogPopup final : public Popup {
         auto const& file = m_files[index];
         auto const selected = m_selected.contains(index);
         auto const full = !selected && m_selected.size() >= DebugLogMaxFiles;
-        auto const accent = file.crash ? ui::Red : ui::Cyan;
-        auto* face = ui::surface({RowW, RowH}, {}, selected ? accent : ui::Blue, selected ? ui::SurfaceSoft : ui::SurfaceRaised,
+        auto const accent = file.crash ? ui::Red : ui::Accent;
+        auto* face = ui::surface({RowW, RowH}, {}, selected ? accent : ui::Steel, selected ? ui::SurfaceSoft : ui::SurfaceRaised,
             full ? 150 : 250, selected);
         // Check box.
         auto* box = ui::surface({11, 11}, {10, RowH / 2.0f}, selected ? accent : ui::TextMuted, ui::Ink, 255, selected);
@@ -90,7 +90,7 @@ class DebugLogPopup final : public Popup {
     }
 
     void column(CCNode* panel, bool crash, float x) {
-        auto const accent = crash ? ui::Red : ui::Cyan;
+        auto const accent = crash ? ui::Red : ui::Accent;
         auto* box = ui::surface({ColumnW, 168}, {x, 134}, accent, ui::Surface, 245, false);
         panel->addChild(box, 2);
         auto* heading = ui::menuLabel(crash ? i18n::text("debug-logs-crash", "CRASH LOGS") : i18n::text("debug-logs-game", "GAME LOGS"),
@@ -135,7 +135,7 @@ class DebugLogPopup final : public Popup {
         column(panel, true, W / 2.0f + ColumnW / 2.0f + 4.0f);
         m_count = ui::menuLabel("", .24f, {78, 24}, ui::TextMuted, ui::FontWeight::ExtraBold);panel->addChild(m_count, 6);
         m_status = ui::menuLabel("", .22f, {W / 2.0f, 42}, ui::TextMuted, ui::FontWeight::SemiBold);panel->addChild(m_status, 6);
-        auto* closeFace = ui::surface({84, 30}, {}, ui::Blue, ui::SurfaceRaised, 255, false);
+        auto* closeFace = ui::surface({84, 30}, {}, ui::Steel, ui::SurfaceRaised, 255, false);
         auto* closeText = ui::menuLabel(i18n::text("close", "CLOSE"), .30f, {42, 15}, ui::Text, ui::FontWeight::Black);
         ui::fitMenuLabelWidth(closeText, 72.0f, .30f, .2f);closeFace->addChild(closeText, 5);
         button(closeFace, menu_selector(DebugLogPopup::onClose), {W / 2.0f + 34.0f, 22});
