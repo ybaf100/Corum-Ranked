@@ -2419,13 +2419,6 @@ class CorumRankedLayer final : public CCLayerColor {
             oldEmblem = corum::ranked::ui::createAnimatedRankBadge(seen.tier, {74.0f, 74.0f}, corum::ranked::ui::RankBadgeDisplay::Large);
             oldEmblem->setPosition({leftCenter.x, leftCenter.y + 18.0f});m_root->addChild(oldEmblem, 4);
         }
-        // A strong halo behind the tier mark (the transition bloom covers it
-        // while a tier change plays).
-        if (!tierShift) {
-            auto* halo = corum::ranked::ui::createRankBadgeBackdrop(nowTier, {136.0f, 136.0f}, corum::ranked::ui::RankBadgeDisplay::Matched);
-            halo->setPosition({leftCenter.x, leftCenter.y + 18.0f}); halo->setID("ranked-profile-halo"_spr);
-            m_root->addChild(halo, 3);
-        }
         auto* emblem = corum::ranked::ui::createAnimatedRankBadge(
             view.profileTier,
             {74.0f, 74.0f},

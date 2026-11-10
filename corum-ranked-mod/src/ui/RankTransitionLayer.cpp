@@ -216,11 +216,6 @@ void RankTransitionLayer::createBackground() {
     auto* ground = CCLayerColor::create({13, 14, 18, 255});
     ground->setContentSize(size);
     m_backgroundRoot->addChild(ground, 0);
-    auto* hatch = CCDrawNode::create();
-    auto const lean = size.height * 0.2867f;
-    for (float x = -lean; x < size.width; x += 14.0f)
-        hatch->drawSegment({x, 0.0f}, {x + lean, size.height}, 0.3f, {1.0f, 1.0f, 1.0f, 0.03f});
-    m_backgroundRoot->addChild(hatch, 0);
     struct Band { float x, width; GLubyte alpha; };
     for (auto const band : {Band{0.26f, 0.10f, 18}, Band{0.40f, 0.20f, 30}, Band{0.63f, 0.06f, 18}}) {
         auto* ray = CCLayerColor::create({profile.color.r, profile.color.g, profile.color.b, band.alpha});

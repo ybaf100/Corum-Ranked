@@ -625,12 +625,6 @@ inline void addBackdrop(CCNode* parent, CCSize const& size) {
     thin->setSkewX(SlabSkew * 2.0f);
     parent->addChild(thin, -19);
 
-    // Fine diagonal hatching across the whole ground, drawn once.
-    auto* hatch = CCDrawNode::create();
-    auto const lean = size.height * 0.2867f; // tan(16 degrees)
-    for (float x = -lean; x < size.width; x += 14.0f)
-        hatch->drawSegment({x, 0.0f}, {x + lean, size.height}, 0.3f, {1.0f, 1.0f, 1.0f, 0.03f});
-    parent->addChild(hatch, -18);
 
     auto* horizon = CCLayerColor::create({SurfaceSoft.r, SurfaceSoft.g, SurfaceSoft.b, 255});
     horizon->setContentSize({size.width - 34.0f, 1.0f});
