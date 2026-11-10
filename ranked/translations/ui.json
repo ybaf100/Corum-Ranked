@@ -3542,5 +3542,29 @@
   "map-pool-load-failed": {
     "en": "Could not load the map pool.",
     "ko": "맵 풀을 불러오지 못했습니다."
+  },
+  "round-short": {
+    "en": "ROUND",
+    "ko": "라운드"
+  },
+  "best-progress-short": {
+    "en": "BEST",
+    "ko": "최고 진행도"
+  },
+  "draw-short": {
+    "en": "D",
+    "ko": "무"
+  },
+  "win-short": {
+    "en": "W",
+    "ko": "승"
+  },
+  "lose-short": {
+    "en": "L",
+    "ko": "패"
+  },
+  "to-lobby": {
+    "en": "LOBBY",
+    "ko": "로비로"
   }
 }
