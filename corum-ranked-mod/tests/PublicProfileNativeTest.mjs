@@ -45,7 +45,7 @@ int main(){using namespace corum::ranked;using ui::LobbyPopulationView;
 `);
  const popup=read('src/RankedPopup.cpp');const start=popup.indexOf('    void historyPlayerName('),end=popup.indexOf('    bool onHistoryPlayerTap(',start);
  assert.doesNotMatch(popup.slice(start,end),/createAnimatedRankBadge|createRankAmbientFx/);
- assert.match(popup,/addScreenHeader\("RANKED",""/);
+ assert.match(popup,/addScreenHeader\(!openMode \? "RANKED" : \*openMode == corum::ranked::RankedMode::Survival \? "SURVIVAL" : "SOLO RANKED",""/);
 });
 test('actual public profile helpers retain scoped titles/effects, current badges, missing LP and promotion marks',()=>{
  const source=read('src/ui/PublicPlayerProfile.hpp').replace(/^#pragma once\s*|^#include .*$/gm,'');

@@ -3067,6 +3067,14 @@ class CorumRankedLayer final : public CCLayerColor {
 
     void updateModeLobbyHeader() {
         auto const selected = m_modeTransition.selected();
+        // L2/L3 are their own pages in the board: the screen title names the
+        // chosen mode, and returns to RANKED on mode select.
+        if (m_root) if (auto* title = typeinfo_cast<CCLabelBMFont*>(m_root->getChildByID("ranked-screen-title"_spr))) {
+            auto const text = !selected ? std::string("RANKED")
+                : *selected == corum::ranked::RankedMode::Survival ? std::string("SURVIVAL") : std::string("SOLO RANKED");
+            title->setString(text.c_str());
+            corum::ranked::ui::fitMenuLabelWidth(title, CCDirector::sharedDirector()->getWinSize().width - 170.0f, 0.70f, 0.40f);
+        }
         if (m_lobbyToolbar) {
             m_lobbyToolbar->setVisible(true);
             if (auto* history = typeinfo_cast<CCMenuItemSpriteExtra*>(m_lobbyToolbar->getChildByID("ranked-lobby-history"_spr))) {
@@ -3716,7 +3724,9 @@ class CorumRankedLayer final : public CCLayerColor {
     void renderMain(RuntimeView const& view) {
         auto const size = CCDirector::sharedDirector()->getWinSize();
         addTopBack(true); addLanguageSelector();
-        addScreenHeader("RANKED","",corum::ranked::ui::Text,kAccent);
+        // With a mode open, the title names it (L2/L3 pages); see updateModeLobbyHeader.
+        auto const openMode = m_modeTransition.selected();
+        addScreenHeader(!openMode ? "RANKED" : *openMode == corum::ranked::RankedMode::Survival ? "SURVIVAL" : "SOLO RANKED","",corum::ranked::ui::Text,kAccent);
         if(auto* population=corum::ranked::ui::LobbyPopulationView::create()){
             population->setID("ranked-lobby-population"_spr);population->setPosition({size.width/2,size.height-53});
             population->updatePopulation({view.lobbyOffline,view.lobbyOnline,view.lobbyPopulationKnown});m_root->addChild(population,7);
