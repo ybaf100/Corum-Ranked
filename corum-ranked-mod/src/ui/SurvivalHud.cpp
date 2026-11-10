@@ -118,7 +118,7 @@ void SurvivalHud::present(SurvivalMatchView const& view,std::int64_t remainingMs
     auto const observer=SurvivalRuntime::get().observing();
     auto const rankVisible=!observer && !view.ownEliminated && view.state=="PLAYING" && own!=view.standings.end();
     m_rank.foreground->setVisible(rankVisible);m_rank.shadow->setVisible(rankVisible);
-    if(observer){m_waiting.text("");m_difference.text(view.cutoff?rankedScoreText(*view.cutoff,deathmatch)+"%":"--%");m_difference.color(Accent);}
+    if(observer){m_waiting.text("");m_difference.text(view.cutoff?rankedScoreText(*view.cutoff,deathmatch)+"%":"--%");m_difference.color(HudCyan);}
     if(own!=view.standings.end() && !observer) {
         m_rank.text(survivalOrdinal(own->rank));m_rank.color(color(*own));
         if(m_lastRank!=own->rank){m_lastRank=own->rank;for(auto* label:{m_rank.foreground,m_rank.shadow}) {

@@ -16,13 +16,13 @@ class SurvivalSpectatorTargetPopup final:public Popup {
         if(!Popup::init(layout.size.width,layout.size.height))return false;
         m_noElasticity=true;setID("survival-live-targets"_spr);m_bgSprite->setVisible(false);m_closeBtn->setVisible(false);
         auto* content=ui::rankedPopupContent(m_mainLayer,m_buttonMenu,layout);
-        content->addChild(ui::surface({490,302},{245,151},ui::Steel,ui::Surface,255,true));
-        content->addChild(ui::menuLabel("SURVIVAL · LIVE SPECTATE",.36f,{245,280},ui::Accent,ui::FontWeight::Black));
+        content->addChild(ui::hudSurface({490,302},{245,151},ui::HudBlue,ui::HudSurface,255,true));
+        content->addChild(ui::menuLabel("SURVIVAL · LIVE SPECTATE",.36f,{245,280},ui::HudCyan,ui::FontWeight::Black));
         m_clock=ui::menuLabel("",.22f,{245,258},ui::Text);content->addChild(m_clock);
         m_message=ui::menuLabel("",.18f,{245,42},ui::TextMuted);content->addChild(m_message);
         m_pageLabel=ui::menuLabel("",.23f,{245,18},ui::Text);content->addChild(m_pageLabel);
-        for(int i:{-1,1}){auto* face=ui::surface({44,24},{},ui::Steel,ui::SurfaceRaised,255,true);face->addChild(ui::menuLabel(i<0?"<":">",.26f,{22,12},ui::Text));auto* b=CCMenuItemSpriteExtra::create(face,this,menu_selector(SurvivalSpectatorTargetPopup::onPage));b->setTag(i);b->setPosition({245.f+70*i,18});m_buttonMenu->addChild(b);}
-        auto* backFace=ui::surface({86,24},{},ui::Steel,ui::SurfaceRaised,255,true);backFace->addChild(ui::menuLabel(i18n::text("back","BACK"),.22f,{43,12},ui::Text));
+        for(int i:{-1,1}){auto* face=ui::hudSurface({44,24},{},ui::HudBlue,ui::HudSurfaceRaised,255,true);face->addChild(ui::menuLabel(i<0?"<":">",.26f,{22,12},ui::Text));auto* b=CCMenuItemSpriteExtra::create(face,this,menu_selector(SurvivalSpectatorTargetPopup::onPage));b->setTag(i);b->setPosition({245.f+70*i,18});m_buttonMenu->addChild(b);}
+        auto* backFace=ui::hudSurface({86,24},{},ui::HudBlue,ui::HudSurfaceRaised,255,true);backFace->addChild(ui::menuLabel(i18n::text("back","BACK"),.22f,{43,12},ui::Text));
         auto* back=CCMenuItemSpriteExtra::create(backFace,this,menu_selector(SurvivalSpectatorTargetPopup::onBack));back->setPosition({60,18});m_buttonMenu->addChild(back);
         m_grid=CCNode::create();content->addChild(m_grid);m_watchMenu=CCMenu::create();m_watchMenu->setPosition({0,0});m_grid->addChild(m_watchMenu);
         m_identity=SurvivalRuntime::get().view().id;SurvivalSpectatorRuntime::get().selectionVisible(true);scheduleUpdate();update(0);return true;
@@ -42,14 +42,14 @@ class SurvivalSpectatorTargetPopup final:public Popup {
         std::string key=std::to_string(m_page)+":"+std::to_string(m_pageSize);for(auto const&t:targets)key+=":"+t.id+":"+t.name;
         if(m_rosterKey!=key){m_rosterKey=key;m_grid->removeAllChildrenWithCleanup(true);m_cards.clear();m_watchMenu=CCMenu::create();m_watchMenu->setPosition({0,0});m_grid->addChild(m_watchMenu);
             for(std::size_t i=m_page*m_pageSize;i<std::min(targets.size(),(m_page+1)*m_pageSize);++i){auto const&t=targets[i];auto const cell=i%m_pageSize;float h=compact?29:43,x=65.f+120*(cell%4),y=compact?238.f-32*(cell/4):232.f-48*(cell/4);
-                auto* face=ui::surface({82,h},{},ui::Steel,ui::SurfaceRaised,255,true);
+                auto* face=ui::hudSurface({82,h},{},ui::HudBlue,ui::HudSurfaceRaised,255,true);
                 auto* name=ui::playerNameLabel(t.name,.18f,{43,h-7},ui::Text,ui::FontWeight::Black);ui::fitSingleLineMenuLabel(name,62,11,.18f);face->addChild(name,5);
                 auto* score=ui::menuLabel("",compact?.12f:.15f,{43,h-17},ui::Text);face->addChild(score,5);
                 auto* status=ui::menuLabel("",.12f,{43,compact?3.f:8.f},ui::TextMuted);face->addChild(status,5);
                 SurvivalStanding row;row.id=t.id;row.name=t.name;row.bot=t.bot;row.accountId=t.account;
                 if(auto* avatar=ui::survivalAvatar(row,v.ownId,11)){avatar->setPosition({8,h/2});face->addChild(avatar,5);}
                 auto* info=CCMenuItemSpriteExtra::create(face,this,menu_selector(SurvivalSpectatorTargetPopup::onInfo));info->setPosition({x-15,y});info->setTag(static_cast<int>(m_cards.size()));m_watchMenu->addChild(info);
-                auto* watchFace=ui::surface({27,h-4},{},ui::Accent,ui::Surface,255,true);watchFace->addChild(ui::menuLabel(i18n::text("survival-watch","WATCH"),.12f,{13.5f,(h-4)/2},ui::Accent));
+                auto* watchFace=ui::hudSurface({27,h-4},{},ui::HudCyan,ui::HudSurface,255,true);watchFace->addChild(ui::menuLabel(i18n::text("survival-watch","WATCH"),.12f,{13.5f,(h-4)/2},ui::HudCyan));
                 auto* watch=CCMenuItemSpriteExtra::create(watchFace,this,menu_selector(SurvivalSpectatorTargetPopup::onWatch));watch->setPosition({x+40,y});watch->setTag(static_cast<int>(m_cards.size()));m_watchMenu->addChild(watch);
                 m_cards.push_back({t.id,watch,name,score,status});
             }

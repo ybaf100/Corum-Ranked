@@ -195,7 +195,7 @@ public:
         auto* menu=CCMenu::create();menu->setPosition({0,0});addChild(menu,1500);
         std::array<char const*,6> captions{"PLAY / PAUSE","RESTART","SPEED","-10s","+10s","BACK"};
         auto width=std::min(460.f,size.width-12),cell=width/6;
-        for(int i=0;i<6;++i){auto* face=corum::ranked::ui::surface({cell-3,23},{},corum::ranked::ui::Accent,corum::ranked::ui::Surface,235,true);
+        for(int i=0;i<6;++i){auto* face=corum::ranked::ui::hudSurface({cell-3,23},{},corum::ranked::ui::HudCyan,corum::ranked::ui::HudSurface,235,true);
           auto* text=corum::ranked::ui::menuLabel(captions[i],.18f,{(cell-3)/2,11.5f},corum::ranked::ui::Text);corum::ranked::ui::fitFullMenuLabel(text,cell-8,18,.18f);face->addChild(text,5);
           auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(CorumSurvivalReplayLayer::onReplayControl));item->setTag(i+1);item->setPosition({(size.width-width)/2+cell*(i+.5f),16});menu->addChild(item);
         }

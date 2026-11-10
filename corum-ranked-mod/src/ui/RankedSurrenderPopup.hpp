@@ -25,7 +25,7 @@ class RankedSurrenderPopup final : public Popup {
 
     void action(CCMenu* menu, std::string const& caption, CCPoint position,
         ccColor3B accent, SEL_MenuHandler callback, float width = 130) {
-        auto* face = surface({width, 35}, {}, accent, SurfaceRaised, 250, true);
+        auto* face = hudSurface({width, 35}, {}, accent, HudSurfaceRaised, 250, true);
         auto* text = menuLabel(caption, 0.42f, {width / 2, 17.5f}, Text, FontWeight::ExtraBold);
         corum::ranked::ui::fitMenuLabelWidth(text, width - 14, 0.42f, 0.30f); face->addChild(text, 5);
         auto* item = CCMenuItemSpriteExtra::create(face, this, callback);
@@ -43,7 +43,7 @@ class RankedSurrenderPopup final : public Popup {
     }
     void render() {
         if (m_contents) m_contents->removeFromParentAndCleanup(true);
-        m_contents = surface({370, 235}, {185, 117.5f}, Accent, Surface, 255, true);
+        m_contents = hudSurface({370, 235}, {185, 117.5f}, HudCyan, HudSurface, 255, true);
         m_mainLayer->addChild(m_contents, 10);
         auto title = m_placement ? i18n::text("placement-skip-map", "SKIP MAP") : i18n::text(m_confirmation ? "surrender-confirm" : "surrender",
             m_confirmation ? "CONFIRM SURRENDER" : "SURRENDER");
@@ -69,7 +69,7 @@ class RankedSurrenderPopup final : public Popup {
             action(menu, i18n::text("surrender-match", "MATCH"), {257, 72}, Red,
                 menu_selector(RankedSurrenderPopup::onMatch));
         }
-        action(menu, i18n::text("cancel", "CANCEL"), {185, 29}, Steel,
+        action(menu, i18n::text("cancel", "CANCEL"), {185, 29}, HudBlue,
             menu_selector(RankedSurrenderPopup::onCancel), 275);
     }
     bool sameRound() const {

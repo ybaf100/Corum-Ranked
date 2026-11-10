@@ -108,7 +108,7 @@ public:
         if(survivalRuntime.freePlaying() && survivalRuntime.observing() && localPlay && localPlay->m_level &&
             static_cast<int>(localPlay->m_level->m_levelID)==survivalRuntime.view().map.levelId){
             auto const size=CCDirector::sharedDirector()->getWinSize();auto* menu=CCMenu::create();menu->setPosition(CCPointZero);addChild(menu,1100);
-            auto* face=ui::surface({148,32},{},ui::Red,ui::SurfaceRaised,255,true);
+            auto* face=ui::hudSurface({148,32},{},ui::Red,ui::HudSurfaceRaised,255,true);
             auto* text=ui::menuLabel(i18n::text("survival-leave-observer","LEAVE WATCH"),.28f,{74,16},ui::Text,ui::FontWeight::ExtraBold);ui::fitFullMenuLabel(text,136,24,.28f);face->addChild(text,5);
             auto* button=CCMenuItemSpriteExtra::create(face,this,menu_selector(CorumRankedPauseLayer::onLeaveObserver));button->setPosition({size.width-86,size.height-40});menu->addChild(button);
             auto const context=survivalRuntime.optionsContext();auto weak=WeakRef(this);
@@ -154,7 +154,7 @@ public:
         button->setScale(0.95f);
         CCNode* surrenderFace=button;
         if(m_fields->survival){
-            surrenderFace=ui::surface({96,36},{},ui::Red,ui::SurfaceRaised,255,true);
+            surrenderFace=ui::hudSurface({96,36},{},ui::Red,ui::HudSurfaceRaised,255,true);
             auto* caption=ui::menuLabel(i18n::text("surrender","SURRENDER"),.26f,{48,18},ui::Red,ui::FontWeight::ExtraBold);
             ui::fitFullMenuLabel(caption,84,24,.26f);surrenderFace->addChild(caption,5);
         }
@@ -176,7 +176,7 @@ public:
         // Solo Debug Bot round: END ROUND next to the surrender X (the player
         // cannot leave a live Solo round to the board).
         if(!m_fields->survival && !m_fields->placement && RankedRuntime::get().canDebugEndRound()){
-            auto* face=ui::surface({96,36},{},ui::Red,ui::SurfaceRaised,255,true);
+            auto* face=ui::hudSurface({96,36},{},ui::Red,ui::HudSurfaceRaised,255,true);
             auto* caption=ui::menuLabel(i18n::text("survival-end-round","END ROUND"),.25f,{48,18},ui::Red,ui::FontWeight::ExtraBold);
             ui::fitFullMenuLabel(caption,84,24,.25f);face->addChild(caption,5);
             auto* end=CCMenuItemSpriteExtra::create(face,this,menu_selector(CorumRankedPauseLayer::onSoloEndRound));
@@ -236,7 +236,7 @@ public:
     void setupSurvivalForceClear(CCSize size) {
         auto const& view=SurvivalRuntime::get().view();
         if(!m_fields->forceClear && m_fields->survival && view.debug && !view.online){
-            auto* face=ui::surface({112,30},{},ui::Gold,ui::SurfaceRaised,255,true);
+            auto* face=ui::hudSurface({112,30},{},ui::Gold,ui::HudSurfaceRaised,255,true);
             face->addChild(ui::menuLabel(i18n::text("survival-force-clear","FORCE CLEAR"),.28f,{56,15},ui::Gold,ui::FontWeight::ExtraBold),5);
             m_fields->forceClear=CCMenuItemSpriteExtra::create(face,this,menu_selector(CorumRankedPauseLayer::onForceClear));
             m_fields->forceClear->setID("survival-force-clear-button"_spr);
@@ -248,7 +248,7 @@ public:
             m_fields->forceClear->setPosition({size.width-76,size.height-88});
             m_fields->forceClearMenu->addChild(m_fields->forceClear);
             addChild(m_fields->forceClearMenu,1100);
-            auto* endFace=ui::surface({112,30},{},ui::Red,ui::SurfaceRaised,255,true);
+            auto* endFace=ui::hudSurface({112,30},{},ui::Red,ui::HudSurfaceRaised,255,true);
             auto* caption=ui::menuLabel(i18n::text("survival-end-round","END ROUND"),.25f,{56,15},ui::Red,ui::FontWeight::ExtraBold);ui::fitFullMenuLabel(caption,104,24,.25f);endFace->addChild(caption,5);
             m_fields->endRound=CCMenuItemSpriteExtra::create(endFace,this,menu_selector(CorumRankedPauseLayer::onEndRound));m_fields->endRound->setID("survival-end-round-button"_spr);m_fields->endRound->setPosition({size.width-196,size.height-88});m_fields->forceClearMenu->addChild(m_fields->endRound);
         }

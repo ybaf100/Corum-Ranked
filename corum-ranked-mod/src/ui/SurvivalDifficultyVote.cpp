@@ -136,9 +136,9 @@ void SurvivalDifficultyVote::present(SurvivalVoteStage stage, std::string const&
     m_title->setOpacity(titleOpacity);m_status->setOpacity(titleOpacity);
     m_title->setPositionY(getContentSize().height * .56f - (1.0f - std::clamp(m_entry / .42f, 0.0f, 1.0f)) * 16.0f);
     auto const secondsLeft = survivalVoteSecondsLeft(closesInMs);
-    auto status = fmt::format("{}  ·  {}",
-        fmt::format(fmt::runtime(i18n::text("survival-vote-time", "TIME LEFT {}s")), secondsLeft),
-        fmt::format(fmt::runtime(i18n::text("survival-vote-count", "VOTED {}/{}")), std::max(0, voted), std::max(0, total)));
+    // Votes stay private: neither who voted nor how many is shown.
+    (void)voted;(void)total;
+    auto status = fmt::format(fmt::runtime(i18n::text("survival-vote-time", "TIME LEFT {}s")), secondsLeft);
     if (m_pending >= 0) status = fmt::format(fmt::runtime(i18n::text("survival-vote-confirming", "CONFIRMING IN {}s · TAP ANOTHER CARD TO CHANGE")),
         std::max(1, static_cast<int>(std::ceil(SurvivalVoteConfirmSeconds - m_pendingFor))));
     // Last seconds of the window: the timer line turns red.

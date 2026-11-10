@@ -855,7 +855,7 @@ public:
         m_fields->survivalLiveText=label("WAITING FOR PLAYER","medium",.26f,{.5f,1},{size.width/2,size.height-12});
         addChild(m_fields->survivalLiveText,1000);
         auto* menu=CCMenu::create();menu->setPosition({0,0});addChild(menu,1001);
-        for(int i=0;i<4;++i){auto* face=corum::ranked::ui::surface({86,24},{},corum::ranked::ui::Steel,corum::ranked::ui::SurfaceRaised,240,true);
+        for(int i=0;i<4;++i){auto* face=corum::ranked::ui::hudSurface({86,24},{},corum::ranked::ui::HudBlue,corum::ranked::ui::HudSurfaceRaised,240,true);
             auto* caption=corum::ranked::ui::menuLabel(corum::ranked::i18n::text(i==0?"survival-other-player":i==1?"survival-view-board":i==2?"exit":"survival-free-play",i==0?"OTHER PLAYER":i==1?"VIEW STATUS":i==2?"EXIT":"FREE PLAY"),.23f,{43,12},corum::ranked::ui::Text);
             corum::ranked::ui::fitFullMenuLabel(caption,78,18,.23f);face->addChild(caption,5);
             auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(CorumRankedPlayLayer::onSurvivalLiveAction));item->setTag(i);item->setPosition({size.width/2+(i-1.5f)*90,20});menu->addChild(item);
@@ -2329,7 +2329,7 @@ public:
             0.51f,
             {0.0f, 1.0f},
             {left, top - 4.0f},
-            corum::ranked::ui::Accent
+            corum::ranked::ui::HudCyan
         );
         limitHudWidth(m_fields->ownNameLabel, 96.0f, 0.51f, 0.21f);
 
@@ -2599,7 +2599,7 @@ public:
             0.34f,
             {0.5f, 0.5f},
             {37.0f, 1.0f},
-            corum::ranked::ui::Accent,
+            corum::ranked::ui::HudCyan,
             2
         );
         addShadowedHudLabel(

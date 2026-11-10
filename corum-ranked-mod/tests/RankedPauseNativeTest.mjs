@@ -36,7 +36,7 @@ test('pause surrender uses native GD X sprite and Corum modal/font, never vanill
     assert.match(pause,/exit->setTarget\(this, menu_selector\(CorumRankedPauseLayer::onBlockedQuit\)\)/);
     assert.match(pause,/ui::label\([\s\S]*FontWeight::ExtraBold/);
     assert.match(popup,/FontWeight::Black/);
-    assert.match(popup,/surface\(\{370, 235\}/);
+    assert.match(popup,/hudSurface\(\{370, 235\}/);
     assert.match(popup,/i18n::text\("surrender-round"/);
     assert.match(popup,/i18n::text\("surrender-match"/);
     assert.match(popup,/WeakRef<PauseLayer>/);

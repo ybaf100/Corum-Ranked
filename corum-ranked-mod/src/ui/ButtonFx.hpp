@@ -80,7 +80,9 @@ class ButtonFx final : public CCNode {
         // Rows, cards and square icon buttons keep their rectangle.
         if (m_kind == ButtonFxKind::Standard && m_skew == 0.0f && face->getSkewX() == 0.0f &&
             size.height <= 40.0f && size.width <= 200.0f && size.width >= size.height * 1.6f) {
-            face->setSkewX(SlabSkew);
+            // Only the chrome leans; captions and icons stay upright to read.
+            for (auto* child : CCArrayExt<CCNode*>(face->getChildren()))
+                if (typeinfo_cast<CCLayerColor*>(child)) child->setSkewX(SlabSkew);
             leaned = true;
         }
         m_glow = CCLayerColor::create({255, 255, 255, 0});

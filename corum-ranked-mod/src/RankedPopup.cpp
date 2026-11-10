@@ -399,7 +399,7 @@ CCNode* makeActionButtonVisual(
     auto const width = std::clamp(46.0f + static_cast<float>(text.size()) * 7.0f, 104.0f, 178.0f);
     constexpr float height = 34.0f;
     auto const filled = !danger && (selected || !secondary);
-    auto const accent = danger ? kRed : (filled ? kAccent : kSteel);
+    auto const accent = danger ? kRed : (filled ? corum::ranked::ui::AccentFill : kSteel);
 
     auto* root = CCNode::create();
     root->setAnchorPoint({0.5f, 0.5f});
@@ -422,7 +422,6 @@ CCNode* makeActionButtonVisual(
         true
     );
     corum::ranked::ui::fitMenuLabelWidth(caption, width - 20.0f, 0.62f, 0.30f);
-    corum::ranked::ui::leanLabel(caption);
     root->addChild(caption, 5);
     return root;
 }

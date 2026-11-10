@@ -31,6 +31,8 @@ inline constexpr ccColor3B TextMuted = {169, 174, 189};
 inline constexpr ccColor3B Accent = {200, 255, 46};
 // Text and marks drawn on top of an Accent fill.
 inline constexpr ccColor3B AccentInk = {13, 14, 18};
+// Filled lime under an ink caption: deeper than Accent so the caption reads.
+inline constexpr ccColor3B AccentFill = {166, 222, 36};
 inline constexpr ccColor3B Steel = {122, 130, 152};
 inline constexpr ccColor3B Green = {90, 238, 151};
 inline constexpr ccColor3B Red = {255, 91, 111};
@@ -368,6 +370,52 @@ inline void layoutSurface(CCNode* root, CCSize size) {
     }
 }
 
+// In-level UI (HUD, pause additions, replay and spectator overlays) keeps
+// the pre-0.6 look: navy panels with a cyan frame. The broadcast restyle is
+// for menus only.
+inline constexpr ccColor3B HudInk = {5, 10, 22};
+inline constexpr ccColor3B HudSurface = {10, 19, 36};
+inline constexpr ccColor3B HudSurfaceRaised = {15, 28, 50};
+inline constexpr ccColor3B HudSurfaceSoft = {21, 38, 65};
+inline constexpr ccColor3B HudCyan = {64, 224, 255};
+inline constexpr ccColor3B HudBlue = {77, 135, 255};
+
+inline CCNode* hudSurface(
+    CCSize size,
+    CCPoint position,
+    ccColor3B accent = HudCyan,
+    ccColor3B fill = HudSurface,
+    GLubyte opacity = 242,
+    bool strong = false
+) {
+    auto* root = CCNode::create();
+    root->setContentSize(size);
+    root->setAnchorPoint({0.5f, 0.5f});
+    root->setPosition(position);
+    auto* shadow = CCLayerColor::create({1, 4, 12, static_cast<GLubyte>(strong ? 82 : 54)});
+    shadow->setContentSize({size.width + 2.0f, size.height + 3.0f});
+    shadow->setPosition({-1.0f, -2.0f});
+    root->addChild(shadow, -2);
+    auto* border = CCLayerColor::create({accent.r, accent.g, accent.b, static_cast<GLubyte>(strong ? 158 : 88)});
+    border->setContentSize(size);
+    border->setTag(SurfaceBorderTag);root->addChild(border, 0);
+    auto* inner = CCLayerColor::create({fill.r, fill.g, fill.b, opacity});
+    inner->setContentSize({std::max(2.0f, size.width - 1.5f), std::max(2.0f, size.height - 1.5f)});
+    inner->setPosition({0.75f, 0.75f});
+    root->addChild(inner, 1);
+    auto* highlight = CCLayerColor::create({accent.r, accent.g, accent.b, static_cast<GLubyte>(strong ? 235 : 190)});
+    highlight->setContentSize({std::max(4.0f, size.width - 8.0f), strong ? 1.5f : 1.0f});
+    highlight->setPosition({4.0f, size.height - 3.0f});
+    highlight->setTag(SurfaceRuleTag);root->addChild(highlight, 3);
+    if (strong) {
+        auto* leftRail = CCLayerColor::create({accent.r, accent.g, accent.b, 138});
+        leftRail->setContentSize({1.5f, std::max(4.0f, size.height - 10.0f)});
+        leftRail->setPosition({3.0f, 5.0f});
+        leftRail->setTag(SurfaceTabTag);root->addChild(leftRail, 3);
+    }
+    return root;
+}
+
 // The one panel every Corum screen is built from: a flat fill inside a thin
 // tinted frame, ruled along the top. A strong surface carries a heavier rule
 // with a slanted tab under its left end. No glow and no gradient.
@@ -429,7 +477,7 @@ inline void setSurfaceAccent(CCNode* panel,ccColor3B color) {
 inline CCNode* slab(
     CCSize size,
     CCPoint position,
-    ccColor3B color = Accent,
+    ccColor3B color = AccentFill,
     bool outlined = false,
     ccColor3B fill = SurfaceRaised
 ) {
@@ -497,7 +545,7 @@ inline CCNode* cross(float arm, float thickness, ccColor3B color) {
 // on its own while idle, grows under the pointer and bursts when pressed.
 // A start button that cannot be used right now is a quiet steel slab.
 inline CCNode* heroSlab(CCSize size, bool live = true) {
-    auto const fill = live ? Accent : SurfaceSoft;
+    auto const fill = live ? AccentFill : SurfaceSoft;
     auto const ink = live ? AccentInk : TextMuted;
     auto* root = CCNode::create();
     root->setContentSize(size);
@@ -505,7 +553,7 @@ inline CCNode* heroSlab(CCSize size, bool live = true) {
 
     CCLayerColor* pings[2] = {nullptr, nullptr};
     for (int i = 0; i < 2; ++i) {
-        pings[i] = CCLayerColor::create({Accent.r, Accent.g, Accent.b, 0});
+        pings[i] = CCLayerColor::create({AccentFill.r, AccentFill.g, AccentFill.b, 0});
         pings[i]->setContentSize(size);
         pings[i]->setSkewX(SlabSkew);
         root->addChild(pings[i], -3 + i);

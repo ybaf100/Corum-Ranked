@@ -1073,7 +1073,7 @@
   },
   "low-detail": {
     "en": "LDM",
-    "ko": "저사양"
+    "ko": "LDM"
   },
   "lp-warning-recovery": {
     "en": "Clears at {} LP",
@@ -2593,43 +2593,43 @@
   },
   "badge-difficulty-HARD": {
     "en": "Hard",
-    "ko": "하드"
+    "ko": "Hard"
   },
   "badge-difficulty-HARDER": {
     "en": "Harder",
-    "ko": "하더"
+    "ko": "Harder"
   },
   "badge-difficulty-INSANE": {
     "en": "Insane",
-    "ko": "인세인"
+    "ko": "Insane"
   },
   "badge-difficulty-EASY_DEMON": {
     "en": "Easy Demon",
-    "ko": "이지 데몬"
+    "ko": "Easy Demon"
   },
   "badge-difficulty-MEDIUM_DEMON": {
     "en": "Medium Demon",
-    "ko": "미디엄 데몬"
+    "ko": "Medium Demon"
   },
   "badge-difficulty-HARD_DEMON": {
     "en": "Hard Demon",
-    "ko": "하드 데몬"
+    "ko": "Hard Demon"
   },
   "badge-difficulty-INSANE_DEMON": {
     "en": "Insane Demon",
-    "ko": "인세인 데몬"
+    "ko": "Insane Demon"
   },
   "badge-difficulty-EASY": {
     "en": "Easy",
-    "ko": "이지"
+    "ko": "Easy"
   },
   "badge-difficulty-NORMAL": {
     "en": "Normal",
-    "ko": "노멀"
+    "ko": "Normal"
   },
   "badge-difficulty-EXTREME_DEMON": {
     "en": "Extreme Demon",
-    "ko": "익스트림 데몬"
+    "ko": "Extreme Demon"
   },
   "replay-physics-unsupported": {
     "en": "Replay capture unavailable for this physics environment",
@@ -2897,15 +2897,15 @@
   },
   "survival-vote-easy": {
     "en": "EASY",
-    "ko": "쉬움"
+    "ko": "Easy"
   },
   "survival-vote-normal": {
     "en": "NORMAL",
-    "ko": "보통"
+    "ko": "Normal"
   },
   "survival-vote-hard": {
     "en": "HARD",
-    "ko": "어려움"
+    "ko": "Hard"
   },
   "survival-vote-none": {
     "en": "NO PREFERENCE",

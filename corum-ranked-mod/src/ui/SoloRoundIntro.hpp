@@ -18,7 +18,7 @@ struct SoloIntroCard {
 // The card that revolves into the next map.
 struct SoloIntroReveal {
     std::string label, chip, mapTitle, creator, detail, levelText;
-    ccColor3B accent = Accent, detailColor = Orange;
+    ccColor3B accent = HudCyan, detailColor = Orange;
     CCNode* thumbnail = nullptr; // optional, already sized to kSoloIntroThumb
 };
 inline constexpr float kSoloCardW = 147.f, kSoloCardH = 182.f, kSoloSlot = 164.4f;
@@ -67,8 +67,8 @@ class SoloRoundIntro final : public CCLayerColor {
         parent->addChild(label, 5);
         return label;
     }
-    static CCNode* box(CCNode* parent, CCSize size, CCPoint center, ccColor3B accent, ccColor3B fill = Surface, int z = 2) {
-        auto* node = surface(size, center, accent, fill, 246, false);
+    static CCNode* box(CCNode* parent, CCSize size, CCPoint center, ccColor3B accent, ccColor3B fill = HudSurface, int z = 2) {
+        auto* node = hudSurface(size, center, accent, fill, 246, false);
         parent->addChild(node, z);
         return node;
     }
@@ -76,10 +76,10 @@ class SoloRoundIntro final : public CCLayerColor {
         auto* root = CCLayerColor::create({0, 0, 0, 255}, 0, 0);
         root->setCascadeOpacityEnabled(true);
         auto const w = kSoloCardW, h = kSoloCardH, left = -w / 2 + 9, top = h / 2;
-        root->addChild(surface({w, h}, {}, card.accent, Ink, 246, true), 0);
+        root->addChild(hudSurface({w, h}, {}, card.accent, HudInk, 246, true), 0);
         text(root, card.label, 0.33f, {left, top - 16}, Text, FontWeight::Black, 80, {0, 0.5f});
         if (!card.result.empty()) {
-            box(root, {44, 15}, {w / 2 - 9 - 22, top - 16}, card.resultColor, Ink, 3);
+            box(root, {44, 15}, {w / 2 - 9 - 22, top - 16}, card.resultColor, HudInk, 3);
             text(root, card.result, 0.20f, {w / 2 - 9 - 22, top - 16}, card.resultColor, FontWeight::Black, 40);
         }
         if (card.locked) {
@@ -90,7 +90,7 @@ class SoloRoundIntro final : public CCLayerColor {
         text(root, card.detail, 0.19f, {left, top - 52}, card.detailColor, FontWeight::SemiBold, w - 18, {0, 0.5f});
         for (int i = 0; i < 2; ++i) {
             auto const y = top - 87 - i * 46.f;
-            box(root, {w - 18, 41}, {0, y}, i == 0 ? Gold : TextMuted, Surface, 2);
+            box(root, {w - 18, 41}, {0, y}, i == 0 ? Gold : TextMuted, HudSurface, 2);
             text(root, i == 0 ? "YOU" : "OPPONENT", 0.20f, {left + 7, y + 10}, i == 0 ? Gold : TextMuted, FontWeight::ExtraBold, 80, {0, 0.5f});
             text(root, i == 0 ? card.you : card.opp, 0.45f, {left + 7, y - 7}, i == 0 ? Text : ccc3(195, 205, 224), FontWeight::Black, w - 32, {0, 0.5f});
         }
@@ -103,28 +103,28 @@ class SoloRoundIntro final : public CCLayerColor {
         m_flip = CCNode::create(); m_reveal->addChild(m_flip, 1);
         auto const w = kSoloCardW, h = kSoloCardH, left = -w / 2 + 9, top = h / 2;
         m_front = CCNode::create(); m_flip->addChild(m_front, 1);
-        m_front->addChild(surface({w, h}, {}, reveal.accent, Surface, 250, true), 0);
+        m_front->addChild(hudSurface({w, h}, {}, reveal.accent, HudSurface, 250, true), 0);
         text(m_front, reveal.label, 0.33f, {left, top - 16}, reveal.accent, FontWeight::Black, 90, {0, 0.5f});
-        box(m_front, {58, 15}, {w / 2 - 9 - 29, top - 16}, reveal.accent, Ink, 3);
+        box(m_front, {58, 15}, {w / 2 - 9 - 29, top - 16}, reveal.accent, HudInk, 3);
         text(m_front, reveal.chip, 0.19f, {w / 2 - 9 - 29, top - 16}, reveal.accent, FontWeight::Black, 54);
         text(m_front, "?", 2.0f, {0, 4}, reveal.accent, FontWeight::Black, 120);
         text(m_front, "NEXT MAP", 0.25f, {0, -h / 2 + 22}, TextMuted, FontWeight::ExtraBold, w - 20);
         m_back = CCNode::create(); m_flip->addChild(m_back, 2); m_back->setVisible(false);
-        m_back->addChild(surface({w, h}, {}, reveal.detailColor, Ink, 250, true), 0);
+        m_back->addChild(hudSurface({w, h}, {}, reveal.detailColor, HudInk, 250, true), 0);
         text(m_back, reveal.label, 0.33f, {left, top - 16}, Text, FontWeight::Black, 80, {0, 0.5f});
         text(m_back, reveal.levelText, 0.19f, {w / 2 - 9, top - 16}, TextMuted, FontWeight::SemiBold, 60, {1, 0.5f});
         auto y = top - 34.f;
         if (reveal.thumbnail) {
-            box(m_back, {kSoloIntroThumb.width + 2, kSoloIntroThumb.height + 2}, {0, y - kSoloIntroThumb.height / 2}, Steel, Ink, 2);
+            box(m_back, {kSoloIntroThumb.width + 2, kSoloIntroThumb.height + 2}, {0, y - kSoloIntroThumb.height / 2}, HudBlue, HudInk, 2);
             reveal.thumbnail->setPosition({0, y - kSoloIntroThumb.height / 2}); m_back->addChild(reveal.thumbnail, 3);
             y -= kSoloIntroThumb.height + 8;
         } else y -= 6;
         text(m_back, reveal.mapTitle, 0.36f, {left, y - 8}, Text, FontWeight::Black, w - 18, {0, 0.5f});
         text(m_back, "by " + reveal.creator, 0.21f, {left, y - 25}, TextMuted, FontWeight::SemiBold, w - 18, {0, 0.5f});
-        box(m_back, {w - 18, 28}, {0, y - 48}, reveal.detailColor, Surface, 2);
+        box(m_back, {w - 18, 28}, {0, y - 48}, reveal.detailColor, HudSurface, 2);
         text(m_back, reveal.detail, 0.22f, {0, y - 48}, reveal.detailColor, FontWeight::Black, w - 30);
-        box(m_back, {w - 18, 15}, {0, -h / 2 + 15}, Accent, Ink, 2);
-        text(m_back, "MAP DECIDED", 0.21f, {0, -h / 2 + 15}, Accent, FontWeight::Black, w - 30);
+        box(m_back, {w - 18, 15}, {0, -h / 2 + 15}, HudCyan, HudInk, 2);
+        text(m_back, "MAP DECIDED", 0.21f, {0, -h / 2 + 15}, HudCyan, FontWeight::Black, w - 30);
         // Impact ring for the death-match slam: four thin edges around the card.
         m_ring = CCLayerColor::create({0, 0, 0, 0}, 0, 0); m_ring->setCascadeOpacityEnabled(true);
         for (auto const& [size, pos] : std::vector<std::pair<CCSize, CCPoint>>{
