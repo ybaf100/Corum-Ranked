@@ -3470,5 +3470,13 @@
   "stat-rank": {
     "en": "RANK",
     "ko": "순위"
+  },
+  "season-ladder": {
+    "en": "SEASON LADDER",
+    "ko": "시즌 래더 진행도"
+  },
+  "tier-guide-short": {
+    "en": "TIERS",
+    "ko": "티어"
   }
 }

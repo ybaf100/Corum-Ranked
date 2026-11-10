@@ -234,7 +234,7 @@ test('mode lobby owns Cocos actions and defers full UI replacement while moving'
  assert.match(card,/makeNeonPanel\(\{188.0f, 210.0f\}/);
  assert.match(panel,/makeNeonPanel\(\{188.0f, 210.0f\}/);
  assert.match(panel,/makeNeonPanel\(\{188,210\}/);
- assert.match(panel,/rightCenter.x,rightCenter.y \+ 80.0f/);
+ assert.match(panel,/rightCenter.x - 82.0f,rightCenter.y \+ 88.0f/);assert.match(panel,/heroSlab\(\{164.0f, 42.0f\}/);
  assert.match(panel,/rankIcon_1_001\.png/);assert.doesNotMatch(panel,/GJ_highscoreBtn_001\.png/);
  assert.match(panel,/queue->setEnabled\(online\)/);
  assert.match(panel,/online=view\.survivalEnabled && view\.survival\.onlineAvailable/);

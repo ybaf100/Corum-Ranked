@@ -544,7 +544,9 @@ inline CCNode* cross(float arm, float thickness, ccColor3B color) {
 // The mode start button: a large signal slab with a double chevron. It shines
 // on its own while idle, grows under the pointer and bursts when pressed.
 // A start button that cannot be used right now is a quiet steel slab.
-inline CCNode* heroSlab(CCSize size, bool live = true) {
+// With a caption the slab reads "CAPTION >>": the caption sits left of the
+// chevrons, which move to the right end.
+inline CCNode* heroSlab(CCSize size, bool live = true, CCNode* caption = nullptr) {
     auto const fill = live ? AccentFill : SurfaceSoft;
     auto const ink = live ? AccentInk : TextMuted;
     auto* root = CCNode::create();
@@ -579,8 +581,13 @@ inline CCNode* heroSlab(CCSize size, bool live = true) {
     auto const arm = size.height * 0.34f;
     for (int i = 0; i < 2; ++i) {
         auto* mark = chevron(arm, std::max(3.0f, arm * 0.30f), ink);
-        mark->setPosition({size.width / 2.0f + (i ? 1.0f : -1.0f) * arm * 0.42f + arm * 0.10f, size.height / 2.0f});
+        auto const markX = caption ? size.width - arm * 1.7f : size.width / 2.0f;
+        mark->setPosition({markX + (i ? 1.0f : -1.0f) * arm * 0.42f + arm * 0.10f, size.height / 2.0f});
         body->addChild(mark, 5);
+    }
+    if (caption) {
+        caption->setPosition({(size.width - arm * 2.6f) / 2.0f + 2.0f, size.height / 2.0f});
+        body->addChild(caption, 5);
     }
     if (auto* fx = ButtonFx::create(ButtonFxKind::Hero, SlabSkew, body, pings[0], pings[1])) body->addChild(fx, 2);
     return root;

@@ -2661,6 +2661,33 @@ class CorumRankedLayer final : public CCLayerColor {
         m_lobbyContents->setCascadeOpacityEnabled(true);m_lobbyPanel->addChild(m_lobbyContents,10);
         m_root = m_lobbyContents; m_menu = CCMenu::create(); m_menu->setPosition(CCPointZero); m_root->addChild(m_menu,20);
         auto const rightCenter = CCPoint{94,0};
+        // L2 / L3 panel: MATCHMAKING eyebrow and player name, the season
+        // ladder, one wide hero start slab with its caption, and the tool
+        // row (map pool or elimination effect, UI editor, tier guide).
+        auto const addPanelHead = [&](ccColor3B accent) {
+            auto* actionTitle = makeLabel(tr("matchmaking", "MATCHMAKING"), 0.22f, {rightCenter.x - 82.0f,rightCenter.y + 88.0f}, accent, "semibold", {0.0f, 0.5f});
+            corum::ranked::ui::fitMenuLabelWidth(actionTitle,110,0.22f,0.16f);
+            m_root->addChild(actionTitle, 4);
+            auto* account = GJAccountManager::get();
+            auto const name = account ? std::string(account->m_username) : std::string();
+            if (!name.empty()) {
+                auto* player = makeLabel(name, 0.36f, {rightCenter.x - 82.0f, rightCenter.y + 74.0f}, corum::ranked::ui::Text, "black", {0.0f, 0.5f});
+                corum::ranked::ui::fitMenuLabelWidth(player, 122.0f, 0.36f, 0.2f);
+                player->setID("ranked-panel-player-name"_spr); m_root->addChild(player, 4);
+            }
+        };
+        auto const addLadder = [&](bool survival) {
+            if (tierProgressFor(view, survival).kind == corum::ranked::TierProgressKind::Hidden) return false;
+            auto* caption = makeLabel(tr("season-ladder", "SEASON LADDER"), 0.18f, {rightCenter.x - 82.0f, rightCenter.y + 60.0f}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f});
+            corum::ranked::ui::fitMenuLabelWidth(caption, 120.0f, 0.18f, 0.12f); m_root->addChild(caption, 4);
+            addTierProgress(view, survival, {rightCenter.x, rightCenter.y + 33.0f});
+            return true;
+        };
+        auto const startCaption = [&](std::string const& text, bool live) {
+            auto* label = makeLabel(text, 0.40f, {}, live ? corum::ranked::ui::AccentInk : corum::ranked::ui::TextMuted, "black");
+            corum::ranked::ui::fitMenuLabelWidth(label, 112.0f, 0.40f, 0.22f);
+            return label;
+        };
         if (mode == corum::ranked::RankedMode::SoloRanked) {
         auto* actionPanel = makeNeonPanel({188.0f, 210.0f}, rightCenter, kSteel, kDeepPanel, 246);
         m_lobbyPanel->addChild(actionPanel, 1);
@@ -2669,21 +2696,19 @@ class CorumRankedLayer final : public CCLayerColor {
             corum::ranked::ui::fitRankSprite(icon,{24,24}); icon->setPosition({15,15}); leaderboardFace->addChild(icon,5);
         }
         auto* leaderboard = CCMenuItemSpriteExtra::create(leaderboardFace,this,menu_selector(CorumRankedLayer::onLeaderboard));
-        leaderboard->setPosition({rightCenter.x + 73,rightCenter.y + 78});
+        leaderboard->setPosition({rightCenter.x + 73,rightCenter.y + 80});
         leaderboard->setID("ranked-leaderboard-trophy"_spr); m_menu->addChild(leaderboard);
-        auto* guideFace=corum::ranked::ui::surface({30,30},{},kGold,kDeepPanel2,250,true);
-        auto* guideBadge=corum::ranked::ui::createAnimatedRankBadge("GOLD",{25,25},corum::ranked::ui::RankBadgeDisplay::Matched);
-        guideBadge->setPosition({15,15});guideFace->addChild(guideBadge,5);
-        auto* guide=CCMenuItemSpriteExtra::create(guideFace,this,menu_selector(CorumRankedLayer::onTierGuide));
-        guide->setPosition({rightCenter.x-73,rightCenter.y+78});guide->setID("ranked-tier-guide-gold"_spr);m_menu->addChild(guide);
-        auto* actionTitle = makeLabel(tr("matchmaking", "MATCHMAKING"), 0.34f, {rightCenter.x,rightCenter.y + 80.0f}, kAccent, "semibold");
-        corum::ranked::ui::fitMenuLabelWidth(actionTitle,96,0.34f,0.24f);
-        m_root->addChild(actionTitle, 4);
+        addPanelHead(kAccent);
 
         if (view.stage == RuntimeStage::Ready || view.stage == RuntimeStage::Queued || view.stage == RuntimeStage::JoiningQueue) {
             // The start button: the one hero slab of the lobby.
             auto const playLive = view.stage == RuntimeStage::Ready && (view.soloEnabled || view.placement.active);
-            auto* playCircle = corum::ranked::ui::heroSlab({88.0f, 60.0f}, playLive);
+            auto const startText = view.placement.required
+                ? (view.placement.active && view.placement.state == "STAGE_RESULT"
+                    ? tr("continue-placement", "CONTINUE PLACEMENT")
+                    : tr("start-placement", "START PLACEMENT"))
+                : tr("start-queue", "START QUEUE");
+            auto* playCircle = corum::ranked::ui::heroSlab({164.0f, 42.0f}, playLive, startCaption(startText, playLive));
             auto* play = CCMenuItemSpriteExtra::create(
                 playCircle,
                 this,
@@ -2693,44 +2718,35 @@ class CorumRankedLayer final : public CCLayerColor {
                         : menu_selector(CorumRankedLayer::onOpenPlacement))
                     : menu_selector(CorumRankedLayer::onJoin)
             );
-            play->setPosition({rightCenter.x, rightCenter.y + 18.0f});
+            play->setPosition({rightCenter.x, rightCenter.y - 12.0f});
             play->setEnabled(playLive);
             play->setID("ranked-start-button"_spr);
             m_menu->addChild(play);
-            addHudEditorButton({rightCenter.x + 71.0f, rightCenter.y + 18.0f},
-                view.stage == RuntimeStage::Ready && !lobbyQueueActive(), "ranked-hud-editor-button"_spr);
-            // Map pool list, mirroring the UI editor on the other side of the start button.
-            addMapPoolButton({rightCenter.x - 71.0f, rightCenter.y + 18.0f});
-            // With a tier bar below, the caption and hint move up a little.
-            auto const tierBar = !view.placement.required &&
-                tierProgressFor(view, false).kind != corum::ranked::TierProgressKind::Hidden;
-            auto* actionText = makeLabel(
-                view.placement.required
-                    ? (view.placement.active && view.placement.state == "STAGE_RESULT"
-                        ? tr("continue-placement", "CONTINUE PLACEMENT")
-                        : tr("start-placement", "START PLACEMENT"))
-                    : tr("start-queue", "START QUEUE"),
-                tierBar ? 0.40f : 0.44f,
-                {rightCenter.x, rightCenter.y - (tierBar ? 30.0f : 40.0f)},
-                kAccent,
-                "black"
-            );
-            corum::ranked::ui::fitMenuLabelWidth(actionText,170,tierBar ? 0.40f : 0.44f,0.26f);
-            m_root->addChild(actionText, 4);
+            if (!view.placement.required) addLadder(false);
             auto* actionHint = makeLabel(
                 view.placement.required
                     ? (view.placement.active && view.placement.state == "STAGE_RESULT"
                         ? fmt::format("STAGE {} / {} SAVED", view.placement.currentStageIndex, view.placement.totalStages)
                         : tr("choose-first-pool", "CHOOSE YOUR FIRST STAGE POOL"))
                     : tr("find-match", "FIND A 1V1 MATCH"),
-                tierBar ? 0.23f : 0.27f,
-                {rightCenter.x, rightCenter.y - (tierBar ? 48.0f : 68.0f)},
+                0.20f,
+                {rightCenter.x, rightCenter.y - 43.0f},
                 corum::ranked::ui::TextMuted,
                 "semibold"
             );
-            corum::ranked::ui::fitMenuLabelWidth(actionHint,170,tierBar ? 0.23f : 0.27f,0.17f);
+            corum::ranked::ui::fitMenuLabelWidth(actionHint,170,0.20f,0.14f);
             m_root->addChild(actionHint, 4);
-            if (tierBar) addTierProgress(view, false, {rightCenter.x, rightCenter.y - 80.0f});
+            // Tool row: map pool, UI editor, tier guide.
+            addMapPoolButton({rightCenter.x - 56.0f, rightCenter.y - 78.0f});
+            addHudEditorButton({rightCenter.x, rightCenter.y - 78.0f},
+                view.stage == RuntimeStage::Ready && !lobbyQueueActive(), "ranked-hud-editor-button"_spr);
+            auto* guideFace=corum::ranked::ui::surface({34,34},{},kGold,kDeepPanel2,250,true);
+            auto* guideBadge=corum::ranked::ui::createAnimatedRankBadge("GOLD",{22,22},corum::ranked::ui::RankBadgeDisplay::Matched);
+            guideBadge->setPosition({17,20});guideFace->addChild(guideBadge,5);
+            auto* guideCaption = makeLabel(tr("tier-guide-short","TIERS"),0.17f,{17,6},kGold,"semibold");
+            corum::ranked::ui::fitMenuLabelWidth(guideCaption,30,0.17f,0.1f); guideFace->addChild(guideCaption,5);
+            auto* guide=CCMenuItemSpriteExtra::create(guideFace,this,menu_selector(CorumRankedLayer::onTierGuide));
+            guide->setPosition({rightCenter.x + 56.0f,rightCenter.y - 78.0f});guide->setID("ranked-tier-guide-gold"_spr);m_menu->addChild(guide);
         } else if (view.stage == RuntimeStage::Queued || view.stage == RuntimeStage::JoiningQueue) {
             auto* spinner = LoadingSpinner::create(58.0f);
             spinner->setPosition({rightCenter.x, rightCenter.y + 18.0f});
@@ -2752,32 +2768,29 @@ class CorumRankedLayer final : public CCLayerColor {
 
         } else {
             m_lobbyPanel->addChild(makeNeonPanel({188,210},rightCenter,kAccent,kDeepPanel,246),1);
-            auto* heading = makeLabel(tr("matchmaking", "MATCHMAKING"),0.34f,{94,80},kAccent,"semibold");
-            corum::ranked::ui::fitMenuLabelWidth(heading,116,0.34f,0.24f); m_root->addChild(heading,5);
+            addPanelHead(kAccent);
             auto* face = corum::ranked::ui::surface({30,30},{},kGold,kDeepPanel2,250,true);
             if (auto* icon = CCSprite::createWithSpriteFrameName("rankIcon_1_001.png")) {
                 corum::ranked::ui::fitRankSprite(icon,{24,24}); icon->setPosition({15,15}); face->addChild(icon,5);
             }
             auto* leaderboard = CCMenuItemSpriteExtra::create(face,this,menu_selector(CorumRankedLayer::onLeaderboard));
-            leaderboard->setPosition({167,78}); leaderboard->setID("survival-leaderboard-trophy"_spr); m_menu->addChild(leaderboard);
+            leaderboard->setPosition({167,80}); leaderboard->setID("survival-leaderboard-trophy"_spr); m_menu->addChild(leaderboard);
             auto const online=view.survivalEnabled && view.survival.onlineAvailable && view.stage==RuntimeStage::Ready;
-            auto* playCircle = corum::ranked::ui::heroSlab({88.0f, 60.0f}, online);
+            auto* playCircle = corum::ranked::ui::heroSlab({164.0f, 42.0f}, online, startCaption(tr("start-queue", "START QUEUE"), online));
             auto* queue = CCMenuItemSpriteExtra::create(playCircle,this,menu_selector(CorumRankedLayer::onSurvivalQueue));
-            queue->setPosition({94,18}); m_menu->addChild(queue);
+            queue->setPosition({94,-12}); m_menu->addChild(queue);
             queue->setEnabled(online); queue->setID("survival-start-button"_spr);
-            addHudEditorButton({165,18},view.stage==RuntimeStage::Ready && !lobbyQueueActive(),"survival-hud-editor-button"_spr);
-            // Elimination effect picker, mirroring the UI editor on the other side of the start button.
-            addEliminationFxButton({23,18});
             auto const retry = !view.survival.loaded || !view.survival.error.empty();
-            auto const tierBar = !retry && tierProgressFor(view, true).kind != corum::ranked::TierProgressKind::Hidden;
-            auto* hint = makeLabel(tr("start-queue", "START QUEUE"),tierBar?0.40f:0.44f,{94,tierBar?-30.0f:-40.0f},online?kAccent:corum::ranked::ui::TextMuted,"black");
-            corum::ranked::ui::fitMenuLabelWidth(hint,170,tierBar?0.40f:0.44f,0.26f); m_root->addChild(hint,5);
-            auto* details = makeLabel(online?fmt::format(fmt::runtime(tr("survival-online-ready-format","2-{} PLAYERS")),view.survivalPlayerCount):tr("mode-disabled","MODE DISABLED"),tierBar?0.23f:0.27f,{94,tierBar?-48.0f:-68.0f},corum::ranked::ui::TextMuted,"semibold");
-            corum::ranked::ui::fitMenuLabelWidth(details,170,tierBar?0.23f:0.27f,0.17f); m_root->addChild(details,5);
-            if (tierBar) addTierProgress(view, true, {94, -80.0f});
-            if (!view.survival.loaded || !view.survival.error.empty()) {
-                addButton(tr("retry","RETRY"),{94,-88},menu_selector(CorumRankedLayer::onRetrySurvival),false,0.44f);
+            if (!retry) addLadder(true);
+            if (retry) {
+                addButton(tr("retry","RETRY"),{94,-43},menu_selector(CorumRankedLayer::onRetrySurvival),false,0.44f);
+            } else {
+                auto* details = makeLabel(online?fmt::format(fmt::runtime(tr("survival-online-ready-format","2-{} PLAYERS")),view.survivalPlayerCount):tr("mode-disabled","MODE DISABLED"),0.20f,{94,-43.0f},corum::ranked::ui::TextMuted,"semibold");
+                corum::ranked::ui::fitMenuLabelWidth(details,170,0.20f,0.14f); m_root->addChild(details,5);
             }
+            // Tool row: elimination effect and UI editor.
+            addEliminationFxButton({66,-78});
+            addHudEditorButton({122,-78},view.stage==RuntimeStage::Ready && !lobbyQueueActive(),"survival-hud-editor-button"_spr);
         }
         m_root = savedRoot; m_menu = savedMenu;
     }
