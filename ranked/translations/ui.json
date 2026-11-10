@@ -3534,5 +3534,13 @@
   "rule-round-draw": {
     "en": "A DRAW GOES TO A DEATH MATCH (BEST PROGRESS)",
     "ko": "무승부가 나면 데스매치 (최고 진행도 승부)"
+  },
+  "random-ranked-map": {
+    "en": "RANDOM RANKED MAP",
+    "ko": "무작위 랭크 맵"
+  },
+  "map-pool-load-failed": {
+    "en": "Could not load the map pool.",
+    "ko": "맵 풀을 불러오지 못했습니다."
   }
 }

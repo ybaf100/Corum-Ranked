@@ -9,6 +9,7 @@
 #include "domain/SurvivalVotePresentation.hpp"
 #include "domain/SurvivalEliminationEffects.hpp"
 #include "HistoryLevelLookup.hpp"
+#include "ui/MapPoolVisuals.hpp"
 #include "SurvivalThumbnailProvider.hpp"
 #include "ui/ModeLobbyMotion.hpp"
 #include "ui/SoloRoundIntro.hpp"
@@ -530,6 +531,7 @@ class CorumRankedLayer final : public CCLayerColor {
     CCLabelBMFont *m_queuePlayers = nullptr, *m_queueWait = nullptr, *m_queueMinimum = nullptr, *m_queueHint = nullptr, *m_queueHeading = nullptr;
     std::vector<CCLayerColor*> m_queueSlots;
     CCLayerColor* m_queueFillBar = nullptr; float m_queueFillWidth = 0.0f; int m_queueSeatMaximum = 0;
+    geode::async::TaskHolder<geode::utils::web::WebResponse> m_randomMapRequest; bool m_randomMapBusy = false;
     // Queue arena: radar ring (cyan while searching, gold on MATCH FOUND) and
     // the anonymous opponent slot. Names and icons appear only in the intro.
     CCNode *m_queueRingCyan = nullptr, *m_queueRingGold = nullptr, *m_queueSweep = nullptr;
@@ -2170,9 +2172,13 @@ class CorumRankedLayer final : public CCLayerColor {
         if (downloading) {
             m_resourceProgressLabel = makeLabel(fmt::format("{}%", static_cast<int>(std::round(resourceProgress() * 100))),
                 0.23f, {center.x, center.y - 62}, kGold); m_root->addChild(m_resourceProgressLabel, 4);
-            auto* freePlay = addButton(tr("mod-update-free-play", "FREE PLAY WHILE DOWNLOADING"), {center.x, center.y - 88},
-                menu_selector(CorumRankedLayer::onResourceFreePlay), false, 0.52f, true);
+            auto* freePlay = addButton(tr("mod-update-free-play", "FREE PLAY WHILE DOWNLOADING"), {center.x - 70, center.y - 88},
+                menu_selector(CorumRankedLayer::onResourceFreePlay), false, 0.48f, true);
             freePlay->setID("ranked-resources-free-play"_spr);
+            // Q12: practise a random Ranked map (no official record) meanwhile.
+            auto* randomMap = addButton(tr("random-ranked-map", "RANDOM RANKED MAP"), {center.x + 82, center.y - 88},
+                menu_selector(CorumRankedLayer::onRandomRankedMap), false, 0.48f, true);
+            randomMap->setID("ranked-resources-random-map"_spr);
         } else if (complete) {
             addButton(tr("continue", "CONTINUE"), {center.x, center.y - 83}, menu_selector(CorumRankedLayer::onContinueResources), false, 0.72f);
         } else {
@@ -6757,6 +6763,32 @@ class CorumRankedLayer final : public CCLayerColor {
         auto& assets = corum::ranked::ui::RankAssetPackManager::get();
         if (assets.view().state == corum::ranked::ui::RankAssetPackState::Failed) assets.retry();
         else assets.prepare();
+    }
+
+    // Fetch the active map pool and open one map at random through GD's level
+    // page; downloads continue and nothing is recorded.
+    void onRandomRankedMap(CCObject*) {
+        if (m_randomMapBusy) return;
+        m_randomMapBusy = true;
+        ResourceReadyWatcher::arm();
+        auto pending = corum::ranked::ui::mappool::request();
+        m_randomMapRequest.spawn(pending.get(RankedRuntime::get().mapPoolUrl()), [weak = WeakRef(this)](geode::utils::web::WebResponse response) {
+            queueInMainThread([weak, response = std::move(response)] {
+                auto self = weak.lock(); if (!self) return;
+                self->m_randomMapBusy = false;
+                std::vector<int> ids;
+                auto const data = response.json().unwrapOr(matjson::Value());
+                for (auto const& map : data["maps"].asArray().unwrapOr(std::vector<matjson::Value>{})) {
+                    if (auto const id = corum::ranked::ui::mappool::levelNumber(corum::ranked::ui::mappool::parseRow(map).levelId); id > 0) ids.push_back(id);
+                }
+                if (!response.ok() || ids.empty()) {
+                    Notification::create(corum::ranked::i18n::text("map-pool-load-failed", "Could not load the map pool."), NotificationIcon::Error, 2.0f)->show();
+                    return;
+                }
+                auto const pick = ids[static_cast<std::size_t>(std::rand()) % ids.size()];
+                showHistoryLevel(pick);
+            });
+        });
     }
 
     void onResourceFreePlay(CCObject* sender) {
