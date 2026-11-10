@@ -5938,6 +5938,22 @@ class CorumRankedLayer final : public CCLayerColor {
                 m_menu->addChild(titleButton);
                 titleButton->setTag(static_cast<int>(index));
                 titleButton->setEnabled(titleUnlocked && !view.achievements.loading);
+                if (equipped) {
+                    // H3: the equipped card is outlined in lime and carries an
+                    // EQUIPPED chip on its top edge.
+                    auto const lime = corum::ranked::ui::Accent;
+                    auto const x0 = center.x - cardWidth / 2.0f, y0 = center.y - cardHeight / 2.0f;
+                    for (auto const& [pos, sz] : std::array<std::pair<CCPoint, CCSize>, 4>{{
+                        {{x0, y0}, {cardWidth, 1.5f}}, {{x0, y0 + cardHeight - 1.5f}, {cardWidth, 1.5f}},
+                        {{x0, y0}, {1.5f, cardHeight}}, {{x0 + cardWidth - 1.5f, y0}, {1.5f, cardHeight}}}}) {
+                        auto* edge = CCLayerColor::create({lime.r, lime.g, lime.b, 255}, sz.width, sz.height);
+                        edge->setPosition(pos); m_root->addChild(edge, 6);
+                    }
+                    auto* chip = corum::ranked::ui::slab({50.0f, 11.0f}, {x0 + 32.0f, y0 + cardHeight}, corum::ranked::ui::AccentFill);
+                    chip->setID("ranked-achievement-equipped-chip"_spr); m_root->addChild(chip, 7);
+                    auto* chipText = makeLabel(tr("title-equipped-chip", "EQUIPPED"), 0.17f, {x0 + 32.0f, y0 + cardHeight}, corum::ranked::ui::AccentInk, "black");
+                    corum::ranked::ui::fitMenuLabelWidth(chipText, 44.0f, 0.17f, 0.11f); m_root->addChild(chipText, 8);
+                }
             }
         }
 

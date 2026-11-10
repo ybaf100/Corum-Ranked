@@ -46,11 +46,14 @@ inline SurvivalBadgeFaceEnvelope survivalBadgeFaceEnvelope(){
 }
 inline CCNode* survivalCollectionBadge(int nativeCode,std::string_view grade,float side,float faceArea=0){
     auto const eliminated=grade=="ELIMINATED";
-    auto* card=surface({side,side},{},grade.empty()?Steel:survivalBadgeColor(grade),Surface,242,true);
+    // H4: the badge itself is unchanged; its frame is a neutral outline with
+    // a top edge in the grade colour.
+    auto const tone=grade.empty()?Steel:survivalBadgeColor(grade);
+    auto* card=surface({side,side},{},SurfaceSoft,Surface,242,true);
     auto const area=faceArea>0?std::min(side,faceArea):side;
     if(eliminated){
         auto* cross=menuLabel("X",.82f,{side/2,side/2},Red,FontWeight::Black);
-        fitFullMenuLabel(cross,area-16,area-16,.82f);card->addChild(cross,5);return card;
+        fitFullMenuLabel(cross,area-16,area-16,.82f);card->addChild(cross,5);topEdge(card,Red,std::max(2.f,side*.035f));return card;
     }
     auto* face=GJDifficultySprite::create(nativeCode,GJDifficultyName::Short);
     if(face){
@@ -63,6 +66,7 @@ inline CCNode* survivalCollectionBadge(int nativeCode,std::string_view grade,flo
         face->setPosition({side/2-(base.width/2-anchor.x)*scale,side/2-(base.height/2-anchor.y)*scale});
         card->addChild(face,5);
     }
+    topEdge(card,tone,std::max(2.f,side*.035f));
     return card;
 }
 }

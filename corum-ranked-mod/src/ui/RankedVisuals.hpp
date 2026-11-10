@@ -510,6 +510,14 @@ inline CCNode* slab(
     return root;
 }
 
+// A coloured strip along a node's top edge (badge frames).
+inline void topEdge(CCNode* node, ccColor3B color, float thickness) {
+    auto const size = node->getContentSize();
+    auto* edge = CCLayerColor::create({color.r, color.g, color.b, 255}, size.width, thickness);
+    edge->setPosition({0.0f, size.height - thickness});
+    node->addChild(edge, 4);
+}
+
 // Captions on a slab, and display titles, lean with it.
 inline void leanLabel(CCNode* caption) {
     if (caption) caption->setSkewX(SlabSkew);
