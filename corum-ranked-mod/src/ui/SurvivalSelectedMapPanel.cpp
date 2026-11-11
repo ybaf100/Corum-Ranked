@@ -31,8 +31,9 @@ SurvivalSelectedMapPanel* SurvivalSelectedMapPanel::create(std::function<void(in
     delete p;return nullptr;
 }
 CCNode* SurvivalSelectedMapPanel::readyFace(bool enabled,bool retry,bool start){
-    (void)start;auto const& r=m_layout.ready;auto* face=surface({r.w,r.h},{},retry?Steel:ccc3(255,237,139),retry?SurfaceRaised:Gold,255,true);
-    auto* label=menuLabel(i18n::text(retry?"retry":"survival-reenter",retry?"RETRY":"RE-ENTER"),.34f,{r.w/2,r.h/2},retry?Text:Ink,FontWeight::Black);
+    // S2 board: RE-ENTER is the filled lime slab, RETRY the outlined one.
+    (void)start;auto const& r=m_layout.ready;auto* face=slab({r.w,r.h},{},retry?ccc3(58,63,78):AccentFill,retry,Ink);
+    auto* label=menuLabel(i18n::text(retry?"retry":"survival-reenter",retry?"RETRY":"RE-ENTER"),.34f,{r.w/2,r.h/2},retry?Text:AccentInk,FontWeight::Black);
     fitSurvivalSingleLine(label,r.w-16,r.h-10,.34f);face->addChild(label,5);if(!enabled)grayButtonVisual(face);return face;
 }
 void SurvivalSelectedMapPanel::build(CCSize size,bool thumbnail,bool ldm){
@@ -43,7 +44,10 @@ void SurvivalSelectedMapPanel::build(CCSize size,bool thumbnail,bool ldm){
     m_difficulty=nullptr;m_levelId=-1;m_metadataRevision=0;m_mapMetadata={};
     m_creatorText.clear();m_statusText.clear();m_songText.clear();
     removeAllChildrenWithCleanup(true);m_thumbnail=thumbnail;m_ldmSupported=ldm;m_layout=survivalSelectionLayout(size.width,size.height,thumbnail,ldm);m_built=true;
-    auto const& r=m_layout;auto* panel=surface({r.panel.w,r.panel.h},center(r.panel),Steel,Surface,250,true);addChild(panel,0);
+    // S2 board panel (.panel.rule): a flat surface with a lime top rule.
+    auto const& r=m_layout;
+    auto* panel=CCLayerColor::create({Surface.r,Surface.g,Surface.b,255},r.panel.w,r.panel.h);panel->setPosition({r.panel.x,r.panel.y});addChild(panel,0);
+    auto* rule=CCLayerColor::create({Accent.r,Accent.g,Accent.b,255},r.panel.w,1.5f*r.scale);rule->setPosition({r.panel.x,r.panel.top()-1.5f*r.scale});addChild(rule,1);
     auto caption=[&](SurvivalRect rect,ccColor3B color,FontWeight weight){auto* value=menuLabel("",.25f,center(rect),color,weight);addChild(value,5);return value;};
     m_title=caption(r.title,Text,FontWeight::Black);m_creator=caption(r.creator,TextMuted,FontWeight::SemiBold);
     m_rating=caption({r.creator.x+r.creator.w*.70f,r.creator.y,r.creator.w*.30f,r.creator.h},Gold,FontWeight::ExtraBold);m_rating->setID("survival-selected-map-rating"_spr);
@@ -54,7 +58,7 @@ void SurvivalSelectedMapPanel::build(CCSize size,bool thumbnail,bool ldm){
     m_progressTrack=CCLayerColor::create(ccc4(255,255,255,40),r.readiness.w,3*r.scale);m_progressTrack->setPosition({r.readiness.x,r.panel.y+1*r.scale});addChild(m_progressTrack,6);
     m_progressFill=CCLayerColor::create(ccc4(Accent.r,Accent.g,Accent.b,235),r.readiness.w,3*r.scale);m_progressFill->setAnchorPoint({0,0});m_progressFill->ignoreAnchorPointForPosition(false);
     m_progressFill->setPosition({r.readiness.x,r.panel.y+1*r.scale});m_progressFill->setScaleX(0);m_progressFill->setID("survival-download-progress"_spr);addChild(m_progressFill,7);
-    m_countdown=caption(r.ready,Gold,FontWeight::Black);m_countdown->setID("survival-automatic-entry-countdown"_spr);
+    m_countdown=caption(r.ready,Accent,FontWeight::Black);m_countdown->setID("survival-automatic-entry-countdown"_spr);
     // Verified native frame used by Geode ModsLayer; never an emoji substitute.
     m_star=CCSprite::createWithSpriteFrameName("GJ_starsIcon_001.png");
     if(m_star){m_star->setScale(std::min(12*r.scale/m_star->getContentSize().height,12*r.scale/m_star->getContentSize().width));m_star->setPosition({r.metadata.cx()-12*r.scale,r.metadata.cy()-12*r.scale});addChild(m_star,5);}
@@ -118,7 +122,7 @@ void SurvivalSelectedMapPanel::present(CCSize size,bool thumbnail,SurvivalMatchV
     if(!metadata.featureScore && view.certificate["featureScore"].isNumber())metadata.featureScore=static_cast<int>(view.certificate["featureScore"].asInt().unwrapOr(0));
     if(!metadata.epic && view.certificate["epic"].isNumber())metadata.epic=static_cast<int>(view.certificate["epic"].asInt().unwrapOr(0));
     auto const title=native?std::string(level->m_levelName):i18n::text("downloading-map","DOWNLOADING MAP...");
-    if(title!=m_title->getString()){m_title->setString(title.c_str());fitFullMenuLabel(m_title,r.title.w,r.title.h,.43f);}
+    if(title!=m_title->getString()){m_title->setString(title.c_str());fitFullMenuLabel(m_title,r.title.w,r.title.h,34.f/64.f);}
     auto creator=native?"by "+std::string(level->m_creatorName):i18n::text("survival-map-data-pending","Map data pending");
     if(creator!=m_creatorText){m_creatorText=creator;line(m_creator,creator,{r.creator.x,r.creator.y,r.creator.w*.68f,r.creator.h},.22f,true);}
     auto const revision=RankedMapDetails::get().revision();

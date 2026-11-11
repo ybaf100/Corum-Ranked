@@ -3810,5 +3810,65 @@
   "all-maps-complete": {
     "en": "ALL {} MAPS COMPLETE",
     "ko": "전체 {}개 맵 완료"
+  },
+  "survival-vote-heading": {
+    "en": "DIFFICULTY VOTE",
+    "ko": "난이도 투표"
+  },
+  "survival-vote-private": {
+    "en": "VOTES AND COUNTS STAY HIDDEN.",
+    "ko": "투표 내용과 표 수는 공개되지 않습니다."
+  },
+  "survival-vote-matched": {
+    "en": "{} PLAYERS MATCHED",
+    "ko": "{}명 매칭 완료"
+  },
+  "my-pick": {
+    "en": "MY PICK",
+    "ko": "내 선택"
+  },
+  "survival-field-line": {
+    "en": "{} SURVIVING · TOP {} ADVANCE",
+    "ko": "{}명 생존 · 상위 {}명 통과"
+  },
+  "survival-rank-final": {
+    "en": "RANK FINAL",
+    "ko": "순위 확정"
+  },
+  "survival-lp-applying": {
+    "en": "APPLYING LP...",
+    "ko": "LP 적용 중..."
+  },
+  "survival-match-continues": {
+    "en": "THE MATCH GOES ON",
+    "ko": "경기는 계속 진행 중입니다"
+  },
+  "survival-view-result": {
+    "en": "VIEW RESULT",
+    "ko": "결과 보기"
+  },
+  "survival-rounds-count": {
+    "en": "{} ROUNDS",
+    "ko": "{}라운드"
+  },
+  "survival-winner": {
+    "en": "WINNER",
+    "ko": "우승"
+  },
+  "survival-of-field": {
+    "en": "OF {}",
+    "ko": "{}명 중"
+  },
+  "survival-badges-earned": {
+    "en": "ROUND BADGES +{}",
+    "ko": "라운드 뱃지 +{}"
+  },
+  "survival-continue-result": {
+    "en": "CONTINUE · MY RESULT",
+    "ko": "계속 · 내 결과"
+  },
+  "rank": {
+    "en": "RANK",
+    "ko": "순위"
   }
 }

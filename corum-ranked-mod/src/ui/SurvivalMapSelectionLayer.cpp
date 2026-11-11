@@ -36,7 +36,7 @@ struct ThumbnailCard {
         placeholder=CCSprite::createWithSpriteFrameName("GJ_playBtn_001.png");
         if(placeholder){placeholder->setPosition(image->getPosition());placeholder->setScale(std::min(width*.22f/placeholder->getContentSize().width,height*.40f/placeholder->getContentSize().height));viewport->addChild(placeholder);}
         shade=CCLayerColor::create({11, 12, 16,160},width-4,height-4);shade->setPosition({2,2});face->addChild(shade,5);
-        trim=CCLayerColor::create({Gold.r,Gold.g,Gold.b,255},width-8,2);trim->setPosition({4,height-4});face->addChild(trim,6);
+        trim=CCLayerColor::create({Accent.r,Accent.g,Accent.b,255},width-8,2);trim->setPosition({4,height-4});face->addChild(trim,6);
     }
     void set(CCTexture2D* next){if(placeholder)placeholder->setVisible(next==nullptr);image->setVisible(next!=nullptr);if(texture==next)return;texture=next;if(!next)return;
         image->setTexture(next);auto const size=next->getContentSize();image->setTextureRect({0,0,size.width,size.height});
@@ -63,13 +63,10 @@ bool SurvivalMapSelectionLayer::init(std::function<void(int)> action){
     auto const size=CCDirector::sharedDirector()->getWinSize();if(!initWithColor({13, 14, 19,255},size.width,size.height))return false;
     setID("survival-map-selection"_spr);m_action=std::move(action);m_sceneGeneration=++sceneSequence;
     addBackdrop(this,size);
-    auto* fragments=CCDrawNode::create();addChild(fragments,-10);
-    for(int i=0;i<8;++i){auto const x=size.width*(i%2?.92f:.08f),y=size.height*(.18f+i*.085f);
-        CCPoint ray[]{{size.width/2,size.height*.48f},{x-13,y-8},{x+13,y+8}};
-        fragments->drawPolygon(ray,3,{.15f,.30f,.65f,.11f},0,{0,0,0,0});
-    }
-    m_header=menuLabel("NEXT UP!",.83f,{},Text,FontWeight::Black);addChild(m_header,15);
-    m_subtitle=menuLabel("MAP SELECTION",.23f,{},Accent,FontWeight::ExtraBold);addChild(m_subtitle,15);
+    m_header=menuLabel("NEXT UP!",.83f,{},Text,FontWeight::Black);m_header->setAnchorPoint({0,.5f});addChild(m_header,15);
+    m_subtitle=menuLabel("MAP SELECTION",.23f,{},TextMuted,FontWeight::SemiBold);m_subtitle->setAnchorPoint({0,.5f});addChild(m_subtitle,15);
+    m_roundChip=CCLayerColor::create({AccentFill.r,AccentFill.g,AccentFill.b,255},20,12);addChild(m_roundChip,15);
+    m_roundChipLabel=menuLabel("R1",15.f/64.f,{},AccentInk,FontWeight::Black);addChild(m_roundChipLabel,16);
     m_clock=menuLabel("",.25f,{},Gold,FontWeight::Black);addChild(m_clock,16);
     m_hint=menuLabel("",.18f,{},TextMuted,FontWeight::SemiBold);addChild(m_hint,15);
     m_finalId=menuLabel("",.8f,{},Gold,FontWeight::Black,countdownFont());addChild(m_finalId,15);
@@ -251,18 +248,31 @@ void SurvivalMapSelectionLayer::present(SurvivalMatchView const& view,RoundPrepa
     auto clock=(finalHeader || view.state=="COUNTDOWN" || view.state=="PLAYING")?survivalBoardClock(view.state,countdown,remaining):std::string{};
     if(auto wait=SurvivalRuntime::get().selectedPanelWaitMs();wait && *wait>0)
         clock=fmt::format(fmt::runtime(i18n::text("survival-entry-wait","ALL READY · ENTERING IN {}s")),(*wait+999)/1000);
-    auto const header=finalHeader?i18n::text("survival-selected-map","SELECTED MAP"):std::string("NEXT UP!");if(header!=m_header->getString())m_header->setString(header.c_str());
-    m_header->setPosition({r.header.cx(),r.header.cy()});fitFullMenuLabel(m_header,r.header.w,r.header.h,finalHeader?.48f:.83f);
-    m_header->setSkewX(finalHeader?0:-5);
+    // S2 board header (72 px): the .num chip (R2 / FN / DM), the leaning
+    // brand (ROUND 2 / FINAL / DEATH MATCH) and the field line after it; the
+    // clock keeps its place on the right.
+    auto const phaseName=view.phase=="TIEBREAK"?i18n::text("death-match","DEATH MATCH"):view.phase=="FINAL"?i18n::text("final","FINAL"):fmt::format("ROUND {}",std::max(1,view.roundNumber));
+    auto const chipText=view.phase=="TIEBREAK"?std::string("DM"):view.phase=="FINAL"?std::string("FN"):fmt::format("R{}",std::max(1,view.roundNumber));
+    if(chipText!=m_roundChipLabel->getString())m_roundChipLabel->setString(chipText.c_str());
+    auto const chipW=m_roundChipLabel->getScaledContentSize().width+8*r.scale,chipH=12*r.scale;
+    m_roundChip->setContentSize({chipW,chipH});m_roundChip->setPosition({r.header.x,r.header.cy()-chipH/2});
+    m_roundChipLabel->setPosition({r.header.x+chipW/2,r.header.cy()});
+    auto const header=finalHeader?phaseName:std::string("NEXT UP!");if(header!=m_header->getString())m_header->setString(header.c_str());
+    auto const clockRoom=clock.empty()?0.f:150*r.scale;
+    m_header->setPosition({r.header.x+chipW+8*r.scale,r.header.cy()});fitFullMenuLabel(m_header,std::max(80.f,(r.header.w-clockRoom)*.48f),r.header.h*.7f,30.f/64.f);
+    m_header->setSkewX(SlabSkew);
     if(!clock.empty()){
-        auto const phase=view.phase=="TIEBREAK"?std::string("DEATH MATCH"):view.phase=="FINAL"?std::string("FINAL"):fmt::format("ROUND {}",view.roundNumber);
-        auto const clockText=phase+"\n"+i18n::text(clock,clock);if(clockText!=m_clock->getString())m_clock->setString(clockText.c_str());
+        auto const clockText=phaseName+"\n"+i18n::text(clock,clock);if(clockText!=m_clock->getString())m_clock->setString(clockText.c_str());
         // Size the complete two-line block without a leftover wrapping width.
         // Center its actual glyph bounds inside an inset box, also in FINAL/DM.
         m_clock->setAnchorPoint({.5f,.5f});m_clock->setPosition({r.header.right()-74*r.scale,r.header.cy()});fitSingle(m_clock,140*r.scale,r.header.h,.27f);
-        m_header->setPosition({r.header.cx(),r.header.cy()});fitFullMenuLabel(m_header,std::max(80.f,r.header.w-304*r.scale),r.header.h,finalHeader?.48f:.83f);
     }m_clock->setVisible(!clock.empty());
-    auto const subtitle=finalHeader?std::string("SURVIVAL"):context.levelId==0 && !view.mapError.empty()?i18n::text("survival-map-retry","MAP SEARCH FAILED · RETRYING..."):std::string("MAP SELECTION");if(subtitle!=m_subtitle->getString())m_subtitle->setString(subtitle.c_str());m_subtitle->setPosition({r.subtitle.cx(),r.subtitle.cy()});fitFullMenuLabel(m_subtitle,r.subtitle.w,r.subtitle.h,.20f);
+    auto const field=view.targetQualifiers>0 && view.roundPlayerCount>0
+        ?fmt::format(fmt::runtime(i18n::text("survival-field-line","{} SURVIVING · TOP {} ADVANCE")),view.roundPlayerCount,view.targetQualifiers):std::string("SURVIVAL");
+    auto const subtitle=context.levelId==0 && !view.mapError.empty()?i18n::text("survival-map-retry","MAP SEARCH FAILED · RETRYING..."):finalHeader?field:std::string("MAP SELECTION");
+    if(subtitle!=m_subtitle->getString())m_subtitle->setString(subtitle.c_str());
+    auto const subtitleX=m_header->getPositionX()+m_header->getScaledContentSize().width+10*r.scale;
+    m_subtitle->setPosition({subtitleX,r.header.cy()});fitFullMenuLabel(m_subtitle,std::max(40.f,r.header.right()-clockRoom-subtitleX),r.header.h*.5f,13.f/64.f);
     auto hint=m_fallback?i18n::text("survival-thumbnail-unavailable","Thumbnail unavailable; showing the server level ID."):
         i18n::text("survival-thumbnail-hint","(i) Install Level Thumbnails for map previews and a richer selection reveal.");
     if(hint!=m_hint->getString())m_hint->setString(hint.c_str());m_hint->setPosition({r.hint.cx(),r.hint.cy()});fitFullMenuLabel(m_hint,r.hint.w,r.hint.h,.17f);

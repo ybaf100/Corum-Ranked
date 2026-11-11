@@ -11,6 +11,8 @@ class SurvivalMapSelectionLayer final : public cocos2d::CCLayerColor {
     SurvivalMapSelectionTimeline m_timeline;
     SurvivalSelectedMapPanel* m_panel=nullptr;
     cocos2d::CCLabelBMFont *m_header=nullptr,*m_subtitle=nullptr,*m_clock=nullptr,*m_hint=nullptr,*m_finalId=nullptr,*m_pendingLabel=nullptr;
+    // S2 header: the round number chip (.num) left of the leaning brand.
+    cocos2d::CCLayerColor* m_roundChip=nullptr;cocos2d::CCLabelBMFont* m_roundChipLabel=nullptr;
     std::function<void(int)> m_action;
     std::uint64_t m_sceneGeneration=0;
     std::uint64_t m_appEpoch=0;

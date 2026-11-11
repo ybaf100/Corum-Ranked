@@ -19,6 +19,9 @@ class SurvivalDifficultyVote final : public cocos2d::CCNode {
         CCMenuItemSpriteExtra* item = nullptr;
         cocos2d::CCNodeRGBA* body = nullptr;
         cocos2d::CCNode* chrome = nullptr;
+        // S1: the lime inset outline and MY PICK chip of the picked card.
+        cocos2d::CCNode* outline = nullptr;
+        cocos2d::CCNode* pick = nullptr;
         // Chrome layers with their own alpha: CCLayerColor does not follow the
         // cascaded opacity, so they are faded explicitly.
         std::vector<std::pair<cocos2d::CCLayerColor*, GLubyte>> layers;
@@ -27,6 +30,17 @@ class SurvivalDifficultyVote final : public cocos2d::CCNode {
     std::array<Card, 4> m_cards{};
     cocos2d::CCLabelBMFont* m_title = nullptr;
     cocos2d::CCLabelBMFont* m_status = nullptr;
+    // S1 page: the ink ground over the board, the header (round number,
+    // DIFFICULTY VOTE, matched count, time panel) and the confirm footer.
+    cocos2d::CCLayerColor* m_ground = nullptr;
+    cocos2d::CCNode* m_page = nullptr;
+    std::vector<std::pair<cocos2d::CCLayerColor*, GLubyte>> m_pageLayers;
+    cocos2d::CCLabelBMFont* m_matched = nullptr;
+    cocos2d::CCLabelBMFont* m_timer = nullptr;
+    cocos2d::CCLayerColor* m_barFill = nullptr;
+    cocos2d::CCNode* m_bar = nullptr;
+    float m_barWidth = 0.0f;
+    int m_matchedTotal = -1;
     cocos2d::CCMenu* m_menu = nullptr;
     std::function<void(std::string const&)> m_vote;
     SurvivalVoteStage m_stage = SurvivalVoteStage::Hidden;
