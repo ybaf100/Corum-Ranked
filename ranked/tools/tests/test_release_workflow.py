@@ -94,7 +94,8 @@ class ReleaseWorkflowTest(unittest.TestCase):
         # [no-deploy] remain opt-outs.
         cases = [('[publish-r2] [deploy-lightsail]', 'false', True, True), ('[build only] [deploy-lightsail]', 'false', False, True),
                  ('[publish-r2] [no-deploy]', 'false', True, False), ('[no-deploy]', 'false', False, False), ('ordinary', 'false', False, True),
-                 ('ordinary', 'true', True, True), ('[no-deploy]', 'true', True, False), ('[build only]', 'true', False, True)]
+                 ('ordinary', 'true', True, True), ('[no-deploy]', 'true', True, False), ('[build only]', 'true', False, True),
+                 ('subject\n\nbody mentions [no-deploy] and [build only]', 'true', True, True)]
         for message, changed, publish, deploy in cases:
             with tempfile.NamedTemporaryFile() as out, patch.dict(os.environ, {'MESSAGE':message, 'PUBLISH':'false', 'AUTO_DEPLOY':'false', 'EVENT':'push', 'VERSION_CHANGED':changed, 'GITHUB_OUTPUT':out.name}):
                 exec(code, {})

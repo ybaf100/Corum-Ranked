@@ -47,7 +47,9 @@ jobs:
         run: |
           python3 - <<'PY'
           import os
-          message = os.environ['MESSAGE']
+          # Markers count only in the subject line, so a body that merely
+          # mentions one cannot switch a stage off.
+          message = os.environ['MESSAGE'].split('\n', 1)[0]
           release = os.environ['EVENT'] == 'push' and os.environ.get('VERSION_CHANGED') == 'true'
           publish = '[build only]' not in message and (os.environ['PUBLISH'] == 'true' or '[publish-r2]' in message or '[deploy-lightsail]' in message or release)
           deploy = '[no-deploy]' not in message and (os.environ['EVENT'] in ('push', 'workflow_dispatch') or os.environ['AUTO_DEPLOY'] == 'true' or '[deploy-lightsail]' in message)
