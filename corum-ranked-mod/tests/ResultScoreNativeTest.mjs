@@ -736,7 +736,8 @@ int main() {
     assert(static_cast<CCLabelBMFont*>(f.root.children.back())->text=="2 WINS");
 }
 `);
-    assert.match(method(popupSource,'void renderModeCard('),/addRankStatus\(profile,[^;]+,false,!survival\)/);
+    // L1/L2 show streak and demotion as chips (no shared status line on the lobby).
+    assert.match(method(popupSource,'void renderModeCard('),/i18n::streak\(/);assert.match(method(popupSource,'void renderModeCard('),/tr\("demotion-warning", "DEMOTION WARNING"\)/);
     assert.doesNotMatch(method(popupSource,'void addPlayerCard('),/addRankStatus\(profile,[^;]+,true\)/);
 });
 
@@ -1009,12 +1010,9 @@ int main() {
     assert.match(method(popupSource,'void addRoundOptions('),/addJukeboxButton\(\{size.width \/ 2.0f \+ 116.0f, y\}/);
     assert.match(method(popupSource,'void addPlayerCard('),/center.x \+ \(self \? -55 : 55\)/);
     const main=method(popupSource,'void renderModeCard(');
-    // L1 card: trophy top-right, status under the leaning title, rank in the stat row.
-    assert.match(main,/emblemAt \{leftCenter.x \+ 50.0f, leftCenter.y \+ 52.0f\}/);
-    assert.match(main,/\{66.0f, 66.0f\}/);
-    assert.match(main,/addRankStatus\(profile,\{colX,leftCenter.y \+ 24.0f\}/);
-    assert.match(main,/rankValue->setID\("ranked-profile-standing"_spr\)/);
-    assert(-82+96<50-66/2&&-54+68<50-66/2); // the status line ends left of the trophy in both halves
+    // L1 half: the 190 px trophy at the top right, the rank (or streak) in the stat row.
+    assert.match(main,/auto const trophy = px\(190\.0f\);/);
+    assert.match(main,/thirdValue->setID\("ranked-profile-standing"_spr\)/);
 });
 
 test('division grades skip promotion assembly; Gold goals use title cutoffs and Champion uses rank',()=>{

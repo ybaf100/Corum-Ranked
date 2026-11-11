@@ -32,8 +32,8 @@ int main(){
 `));
 test('tier bar is wired under both start buttons and fades with the panel',()=>{
  const popup=readFileSync(join(root,'src/RankedPopup.cpp'),'utf8'),bar=readFileSync(join(root,'src/ui/TierProgressBar.cpp'),'utf8');
- assert.match(popup,/addTierProgress\(view, survival, \{rightCenter\.x, rightCenter\.y \+ 33\.0f\}\)/);assert.match(popup,/if \(!view\.placement\.required\) addLadder\(false\)/);
- assert.match(popup,/if \(!retry\) addLadder\(true\)/);
+ assert.match(popup,/addDivisionLadder\(m_root, \{ladderX, ladderTop - 19\.0f\}, ladderW, division, progress\.fill/);
+ assert.match(popup,/auto const progress = tierProgressFor\(view, survival\);/);
  assert.match(bar,/getDisplayedOpacity\(\)/);assert.match(bar,/achievementPastelAt\(position, seconds\)/);assert.match(bar,/RankBadgeDisplay::Matched/);
 });
 test('Survival promotion plays its tier motion first: promotion -> podium -> score -> result',()=>{
@@ -45,7 +45,7 @@ test('Survival promotion plays its tier motion first: promotion -> podium -> sco
 test('lobby animates any LP change since the last visit: digit roll, tier bar, emblem hand-over',()=>{
  const popup=readFileSync(join(root,'src/RankedPopup.cpp'),'utf8'),motion=readFileSync(join(root,'src/ui/LobbyScoreTransition.cpp'),'utf8');
  assert.match(popup,/readSeen\("card", survival\)/);assert.match(popup,/auto const\* what = compact \? "cardbar" : "bar";/);assert.match(popup,/writeSeen\(what, survival, nowTier, nowLp\)/);
- assert.match(popup,/RollingNumber::create\(seen\.lp, view\.profileScore, "", 0\.34f/);
+ assert.match(popup,/RollingNumber::create\(seen\.lp, view\.profileScore, "", scale/);
  assert.match(popup,/LobbyTierTransition::create\(group, oldEmblem, emblem, oldTier, tier, bloom, up\)/);
  assert.match(popup,/bar->animateFrom\(std::move\(from\), up\)/);
  // Lobby nodes are driven per frame: no CCEase/CCFade actions on them.
@@ -93,10 +93,8 @@ test('tier bar draws the thin gold / Mythic frame with a travelling gloss and a 
 test('lobby mode card shows a compact tier bar (bar and caption) where it has room',()=>{
  const popup=readFileSync(join(root,'src/RankedPopup.cpp'),'utf8');
  const card=popup.slice(popup.indexOf('    void renderModeCard('),popup.indexOf('    struct SeenScore {'));
- assert.match(card,/auto const cardBar = !placement && !profile\.promotion\.active && \(survival \? source\.survival\.loaded : view\.profileScoreVisible\)/);
- assert.match(card,/cardBarKind != corum::ranked::TierProgressKind::Promotion/);
- assert.match(card,/if \(cardBar\) addTierProgress\(source, survival, \{barX, barY \+ 2\.0f\}, 150\.0f, true\);/);
- assert.match(card,/leftCenter\.y - \(hasTitle \? 73\.0f : 64\.0f\)/);
+ assert.match(card,/progress\.kind != corum::ranked::TierProgressKind::Hidden/);
+ assert.match(card,/addSkewBar\(m_root, \{cx, y \+ 6\.0f\}, blockW, px\(12\.0f\), progress\.fill, tone\);/);
  const bar=readFileSync(join(root,'src/ui/TierProgressBar.cpp'),'utf8');
  assert.match(bar,/auto const row = m_compact \? -11\.0f : -14\.0f;/);assert.match(bar,/if \(!m_compact\) \{/);
 });

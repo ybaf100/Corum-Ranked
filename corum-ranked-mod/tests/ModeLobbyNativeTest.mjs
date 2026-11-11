@@ -113,134 +113,28 @@ int main(){using namespace corum::ranked::ui;
  }
 }`));
 
-test('actual lobby action callbacks move cards continuously and reverse the same path with input locked',()=>{
- const popup=read('src/RankedPopup.cpp');
- run(`
-#include <cassert>
-#include <cmath>
-#include <functional>
-#include <vector>
-#include <string>
-#include "domain/RankedMode.hpp"
-using GLubyte=unsigned char;
-namespace cocos2d {
-struct CCPoint{float x=0,y=0;};struct CCSize{float width=480,height=320;};
-struct CCActionInterval;
-struct CCNode{virtual ~CCNode()=default;std::string id;std::vector<CCNode*> children;std::vector<CCActionInterval*> actions;CCPoint position;float sx=1,sy=1;bool visible=true;
- auto*getChildren(){return &children;}CCNode*getChildByID(std::string const&s){for(auto*n:children)if(n->id==s)return n;return nullptr;}CCNode*getParent(){return this;}void setVisible(bool v){visible=v;}void setZOrder(int){}void setPosition(CCPoint p){position=p;}void setScale(float s){sx=sy=s;}void runAction(CCActionInterval*);void step(float);};
-struct CCRGBAProtocol{virtual ~CCRGBAProtocol()=default;virtual void updateDisplayedOpacity(GLubyte)=0;virtual bool isCascadeOpacityEnabled()=0;virtual GLubyte getDisplayedOpacity()=0;};
-struct CCLayerColor:CCNode,CCRGBAProtocol{int real=255,displayed=255;void setOpacity(GLubyte v){real=v;}GLubyte getOpacity(){return real;}void updateDisplayedOpacity(GLubyte v)override{displayed=std::lround(real*v/255.f);}bool isCascadeOpacityEnabled()override{return false;}GLubyte getDisplayedOpacity()override{return displayed;}};
-struct CCMenu:CCNode{bool touch=true;int cancels=0;void setTouchEnabled(bool v){touch=v;}};
-struct CCActionInterval{CCNode*target=nullptr;virtual ~CCActionInterval()=default;bool initWithDuration(float){return true;}void autorelease(){}virtual void startWithTarget(CCNode*t){target=t;}virtual void update(float){}};
-void CCNode::runAction(CCActionInterval*a){actions.push_back(a);a->startWithTarget(this);}void CCNode::step(float t){auto copy=actions;for(auto*a:copy)a->update(t);if(t==1){actions.clear();for(auto*a:copy)delete a;}}
-struct CCMoveTo:CCActionInterval{CCPoint from,to;static auto*create(float,CCPoint p){auto*a=new CCMoveTo;a->to=p;return a;}void startWithTarget(CCNode*t)override{CCActionInterval::startWithTarget(t);from=t->position;}void update(float t)override{target->position={from.x+(to.x-from.x)*t,from.y+(to.y-from.y)*t};}};
-struct CCScaleTo:CCActionInterval{float fx=0,fy=0,x=0,y=0;static auto*create(float,float x,float y){auto*a=new CCScaleTo;a->x=x;a->y=y;return a;}void startWithTarget(CCNode*t)override{CCActionInterval::startWithTarget(t);fx=t->sx;fy=t->sy;}void update(float t)override{target->sx=fx+(x-fx)*t;target->sy=fy+(y-fy)*t;}};
-struct CCEaseSineInOut:CCActionInterval{CCActionInterval*inner=nullptr;~CCEaseSineInOut(){delete inner;}static auto*create(CCActionInterval*a){auto*e=new CCEaseSineInOut;e->inner=a;return e;}void startWithTarget(CCNode*t)override{inner->startWithTarget(t);}void update(float t)override{inner->update((1-std::cos(t*3.14159265f))/2);}};
-struct CCDelayTime:CCActionInterval{static auto*create(float){return new CCDelayTime;}};
-struct CallFuncExt:CCActionInterval{std::function<void()>fn;template<class F>static auto*create(F fn){auto*a=new CallFuncExt;a->fn=fn;return a;}void update(float t)override{if(t==1)fn();}};
-struct CCSequence:CCActionInterval{CCActionInterval*delay=nullptr,*call=nullptr;~CCSequence(){delete delay;delete call;}static auto*create(CCActionInterval*d,CCActionInterval*c,std::nullptr_t){auto*a=new CCSequence;a->delay=d;a->call=c;return a;}void startWithTarget(CCNode*t)override{delay->startWithTarget(t);call->startWithTarget(t);}void update(float t)override{delay->update(t);call->update(t);}};
-struct CCDirector{CCSize size;static auto*sharedDirector(){static CCDirector d;return &d;}CCSize getWinSize(){return size;}};
-}
-using namespace cocos2d;
-std::string operator""_spr(char const*s,std::size_t n){return {s,n};}
-template<class T>auto const&CCArrayExt(std::vector<CCNode*>*v){return *v;}template<class T>T typeinfo_cast(CCNode*n){return dynamic_cast<T>(n);}template<class T>struct WeakRef{T*ptr;WeakRef(T*p):ptr(p){}T*lock()const{return ptr;}};
-using CCAction=CCActionInterval;using CCEaseSineIn=CCEaseSineInOut;using CCEaseSineOut=CCEaseSineInOut;
-namespace geode{template<class T>struct Ref{T*ptr=nullptr;Ref()=default;explicit Ref(T*p):ptr(p){}Ref&operator=(T*p){ptr=p;return *this;}T*data()const{return ptr;}T*operator->()const{return ptr;}explicit operator bool()const{return ptr!=nullptr;}};}
-namespace geode::cocos{template<class T>auto const&CCArrayExt(std::vector<CCNode*>*v){return *v;}}
-using geode::Ref;
-namespace corum::ranked::ui{void cancelMenuTouch(CCMenu*m){++m->cancels;}void fadeModeLobbySurfaces(CCNode*,float,bool){}struct LobbyHover{void setActive(bool){}};}
-${strip(read('src/ui/ModeLobbyMotion.hpp'))}
-enum class RuntimeStage{Ready,Queued,Matched};struct RuntimeView{RuntimeStage stage;};
-struct Owner:CCNode{
- corum::ranked::ModeLobbyTransition m_modeTransition;CCLayerColor survival,solo,panel,survivalControls,soloControls;
- CCLayerColor *m_lobbySurvival=&survival,*m_lobbySolo=&solo,*m_lobbyPanel=&panel,*m_lobbyContents=nullptr;
- corum::ranked::ui::LobbyHover*m_lobbyHover=nullptr;void refreshLobbyHover(){}
- CCMenu survivalMenu,soloMenu,panelMenu,menu,settings;
- CCMenu toolbar;CCMenu*m_menu=&menu,*m_settingsMenu=&settings,*m_lobbyToolbar=&toolbar;bool m_uiFadingOut=false,m_returnToModesAfterQueue=false,m_modeNoticeOpen=false;std::string m_renderedUiKey;
- bool m_queueShown=false,m_queueAnimating=false,queueActive=false;CCMenu*m_queueMenu=nullptr;bool lobbyQueueActive()const{return queueActive;}
- enum class Page{Live,History};Page m_page=Page::Live;
- int headerUpdates=0;std::string presentationKey(){return "selected";}void updateModeLobbyHeader(){++headerUpdates;}
- Owner(){survivalControls.id=soloControls.id="ranked-mode-entry-controls";survivalControls.children={&survivalMenu};soloControls.children={&soloMenu};survival.children={&survivalControls};solo.children={&soloControls};panel.children={&panelMenu};}
- ${method(popup,'    void setLobbyNodeInput(')}
- ${method(popup,'    void syncLobbyInput(')}
- ${method(popup,'    void animateModeLobby(')}
- ${method(popup,'    void resumeModeSelectionAfterQueue(')}
- void step(float t){survival.step(t);solo.step(t);panel.step(t);survivalControls.step(t);soloControls.step(t);}
-};
-int main(){using namespace corum::ranked;
- for(auto mode:{RankedMode::Survival,RankedMode::SoloRanked}){
-  Owner o;auto l=modeLobbyLayout(480,320);o.survival.position={l.leftX,l.centerY};o.solo.position={l.rightX,l.centerY};
-  o.panel.sx=o.panel.sy=l.scale;o.panel.real=0;o.panel.visible=false;
-  assert(o.m_modeTransition.select(mode));o.animateModeLobby(mode,true);
-  assert(!o.menu.touch&&!o.settings.touch&&!o.survivalMenu.touch&&!o.soloMenu.touch&&!o.panelMenu.touch);
-  assert(!o.toolbar.touch);
-  assert(o.solo.position.x==l.rightX&&o.survival.position.x==l.leftX&&o.panel.sx==l.scale);
-  o.step(.25f);float quarterX=o.solo.position.x,quarterSurvivalX=o.survival.position.x,quarterPanelX=o.panel.position.x;
-  int quarterSurvivalAlpha=o.survival.real,quarterMenuAlpha=o.panel.real;
-  // Fade out first: nothing has moved yet, the leaving card is fading in place, the menu is not shown.
-  if(mode==RankedMode::SoloRanked){assert(o.panel.sx==l.scale&&std::abs(o.panel.position.x-(l.rightX-94*l.scale))<.001f&&o.panel.real==0);
-   assert(o.survival.position.x==l.leftX&&o.survival.real>0&&o.survival.real<255);}
-  // Survival: the menu emerges from behind the Survival card, fully opaque, while Solo still shows.
-  else assert(o.survival.position.x==l.leftX&&o.survival.real==255&&o.solo.real==255&&o.panel.real==255&&
-   std::abs(o.panel.position.x-(l.leftX+(l.rightX-l.leftX)*.25f-94*l.scale))<.001f);
-  assert(quarterX==l.rightX);
-  assert(!o.m_modeTransition.back()&&!o.m_modeTransition.select(mode));
-  o.step(.5f);assert(!o.panelMenu.touch);
-  // Then the move: the leaving card is gone and the menu has not appeared; Solo slides.
-  if(mode==RankedMode::SoloRanked)assert(o.solo.position.x>l.leftX&&o.solo.position.x<l.rightX&&o.survival.real==0&&o.panel.real==0);
-  else assert(o.solo.real>0&&o.solo.real<255&&o.panel.real==255&&o.panel.position.x<l.rightX-94*l.scale);
-  if(mode==RankedMode::SoloRanked){o.step(.85f);assert(o.panel.real>0&&o.panel.real<255&&std::abs(o.panel.position.x-(l.rightX-94*l.scale))<.001f);}
-  else{o.step(.85f);assert(o.panel.real==255&&o.solo.real<255&&o.panel.position.x>l.leftX-94*l.scale&&o.panel.position.x<l.rightX-94*l.scale);}
-  if(mode==RankedMode::SoloRanked)assert(o.solo.position.x==l.leftX);
-  o.step(1);
-  assert(!o.m_modeTransition.moving()&&o.menu.touch&&o.panelMenu.touch&&!o.survivalMenu.touch&&!o.soloMenu.touch);
-  assert(o.panel.sx==l.scale&&o.panel.real==255);
-  auto& controls=mode==RankedMode::Survival?o.survivalControls:o.soloControls;
-  assert(controls.real==0&&!controls.visible&&o.toolbar.touch);
-  if(mode==RankedMode::SoloRanked)assert(o.solo.position.x==l.leftX&&!o.survival.visible);else assert(!o.solo.visible);
-  assert(o.m_modeTransition.back());o.animateModeLobby(mode,false);assert(!o.menu.touch&&!o.panelMenu.touch);
-  o.step(.75f);assert(std::abs(o.solo.position.x-quarterX)<.001f&&std::abs(o.panel.position.x-quarterPanelX)<.001f&&std::abs(o.survival.position.x-quarterSurvivalX)<.001f&&o.survival.real==quarterSurvivalAlpha&&o.panel.real==quarterMenuAlpha);
-  o.step(1);assert(!o.m_modeTransition.selected()&&!o.m_modeTransition.moving()&&!o.panel.visible);
-  assert(o.solo.position.x==l.rightX&&o.survival.position.x==l.leftX&&o.solo.visible&&o.survival.visible);
-  assert(o.menu.touch&&o.survivalMenu.touch&&o.soloMenu.touch&&!o.panelMenu.touch&&o.headerUpdates==2);
-  assert(controls.real==255&&controls.visible&&o.toolbar.touch);
- }
- Owner o;auto l=modeLobbyLayout(480,320);o.survival.position={l.leftX,l.centerY};o.solo.position={l.rightX,l.centerY};o.panel.sx=l.scale;
- assert(o.m_modeTransition.select(RankedMode::SoloRanked));o.animateModeLobby(RankedMode::SoloRanked,true);o.step(1);
- o.m_returnToModesAfterQueue=true;o.resumeModeSelectionAfterQueue({RuntimeStage::Queued});assert(!o.m_modeTransition.moving());
- o.m_uiFadingOut=true;o.resumeModeSelectionAfterQueue({RuntimeStage::Ready});assert(o.m_returnToModesAfterQueue);
- o.m_uiFadingOut=false;o.resumeModeSelectionAfterQueue({RuntimeStage::Ready});assert(!o.m_returnToModesAfterQueue&&o.m_modeTransition.moving());
- o.resumeModeSelectionAfterQueue({RuntimeStage::Ready});assert(o.panel.actions.size()==1);o.step(1);assert(!o.m_modeTransition.selected());
- assert(o.m_modeTransition.select(RankedMode::SoloRanked));o.animateModeLobby(RankedMode::SoloRanked,true);o.step(1);
- o.m_returnToModesAfterQueue=true;o.resumeModeSelectionAfterQueue({RuntimeStage::Matched});
- assert(!o.m_returnToModesAfterQueue&&!o.m_modeTransition.moving()&&o.m_modeTransition.selected()==RankedMode::SoloRanked);
-}
- `);
-});
-
-test('mode lobby owns Cocos actions and defers full UI replacement while moving',()=>{
+test('L1 <-> L2/L3 are separate pages: fade out, rebuild for the selection, fade in, input locked meanwhile',()=>{
  const popup=read('src/RankedPopup.cpp');
  const animate=method(popup,'    void animateModeLobby(');
- assert.match(animate,/ModeLobbySlide::create\(duration,m_lobbySurvival,m_lobbySolo,layout,mode,opening\)/);
- assert.match(animate,/CCSequence::create\(motion, CallFuncExt::create/);assert.match(animate,/constexpr float duration = corum::ranked::ModeLobbySeconds;/);
- assert.doesNotMatch(animate,/CCScaleTo|CCMoveTo|removeAllChildren/);
- assert.match(animate,/setZOrder\(5\)/);
+ assert.match(animate,/setLobbyNodeInput\(m_lobbySurvival,false\); setLobbyNodeInput\(m_lobbySolo,false\); setLobbyNodeInput\(m_lobbyPanel,false\);/);
+ assert.match(animate,/ModeLobbyFade::create\(out, 0, corum::ranked::ui::ModeLobbyEase::SineIn\)/);
+ assert.match(animate,/self->m_modeTransition\.finish\(\);\s*self->m_renderedUiKey\.clear\(\);\s*self->render\(\);/);
+ assert.match(animate,/ModeLobbyFade::create\(0\.22f, 255, corum::ranked::ui::ModeLobbyEase::SineOut\)/);
+ assert.match(animate,/self->syncLobbyInput\(\); self->refreshLobbyHover\(\);/);
+ assert.doesNotMatch(animate,/ModeLobbySlide/);
  assert.match(method(popup,'    bool prepareUiTransition('),/if \(m_modeTransition.moving\(\) \|\| \(!matched && m_queueAnimating\)\).*return false/);
  assert.match(method(popup,'    void render()'),/m_modeTransition.moving\(\)/);
  assert.match(method(popup,'    void onCloseLayer('),/m_modeTransition.back\(\).*animateModeLobby\(mode,false\)/);
  const card=method(popup,'    void renderModeCard(');
- assert.match(card,/hitArea->setContentSize\(\{188,210\}\)/);
- assert.match(card,/select->setEnabled\(source.stage == RuntimeStage::Ready\)/);
+ // L1 halves: whole-half hit areas; no hit area on the L2/L3 left section.
+ assert.match(card,/select->setEnabled\(source.stage == RuntimeStage::Ready && !selected\)/);
  assert.match(card,/survival-card-select/);assert.match(card,/solo-ranked-card-select/);
- assert.doesNotMatch(card,/survival-entry|solo-ranked-entry|mode-browse/);
+ assert.match(card,/addSlantedFill\(m_root, x0, x1, y0, y1, survival \? px\(64\.0f\) : 0\.0f, survival \? 0\.0f : px\(64\.0f\)/);
+ assert.match(card,/fontScale\(64\.0f\)/);assert.match(card,/px\(190\.0f\)/);
  const panel=method(popup,'    void renderModePanel(');
- assert.match(card,/makeNeonPanel\(\{188.0f, 210.0f\}/);
- assert.match(panel,/makeNeonPanel\(\{188.0f, 210.0f\}/);
- assert.match(panel,/makeNeonPanel\(\{188,210\}/);
- assert.match(panel,/rightCenter.x - 82.0f,rightCenter.y \+ 88.0f/);assert.match(panel,/heroSlab\(\{164.0f, 42.0f\}/);
- assert.match(panel,/rankIcon_1_001\.png/);assert.doesNotMatch(panel,/GJ_highscoreBtn_001\.png/);
+ assert.match(panel,/heroSlab\(heroSize, playLive/);
  assert.match(panel,/queue->setEnabled\(online\)/);
- assert.match(panel,/online=view\.survivalEnabled && view\.survival\.onlineAvailable/);
+ assert.match(panel,/auto const online = view\.survivalEnabled && view\.survival\.onlineAvailable/);
  assert.match(panel,/CorumRankedLayer::onSurvivalQueue/);
 });
 

@@ -3566,5 +3566,49 @@
   "to-lobby": {
     "en": "LOBBY",
     "ko": "로비로"
+  },
+  "lp-to-next-tier": {
+    "en": "{} LP TO NEXT TIER",
+    "ko": "다음 티어까지 {} LP"
+  },
+  "stat-streak": {
+    "en": "STREAK",
+    "ko": "연승"
+  },
+  "solo-mode-line": {
+    "en": "1V1 · BEST OF 3",
+    "ko": "1대1 · 3판 2선승"
+  },
+  "solo-start-line": {
+    "en": "FIND A 1V1 MATCH · ONE PRIVATE BAN · BEST OF 3",
+    "ko": "1대1 상대 찾기 · 맵 밴 1회 · 3판 2선승"
+  },
+  "promotion-short": {
+    "en": "PROMOTION",
+    "ko": "승격전"
+  },
+  "season-rank-format": {
+    "en": "SEASON RANK #{}",
+    "ko": "시즌 순위 #{}"
+  },
+  "season-rank-none": {
+    "en": "SEASON RANK -",
+    "ko": "시즌 순위 -"
+  },
+  "elim-fx": {
+    "en": "ELIMINATION EFFECT",
+    "ko": "탈락 효과"
+  },
+  "hud-editor": {
+    "en": "UI SETTINGS",
+    "ko": "UI 설정"
+  },
+  "tier-guide": {
+    "en": "TIER GUIDE",
+    "ko": "티어 안내"
+  },
+  "badges": {
+    "en": "BADGES",
+    "ko": "뱃지"
   }
 }

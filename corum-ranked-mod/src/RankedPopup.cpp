@@ -76,6 +76,7 @@
 #include <Geode/binding/MusicDownloadManager.hpp>
 #include <Geode/ui/ScrollLayer.hpp>
 #include <Geode/ui/Notification.hpp>
+#include <tuple>
 #include <Geode/binding/SimplePlayer.hpp>
 #include <Geode/ui/LoadingSpinner.hpp>
 
@@ -2427,6 +2428,63 @@ class CorumRankedLayer final : public CCLayerColor {
         m_root->addChild(group,3); return group;
     }
 
+    // ---- L row, ported from the boards: artifact px / 2 = points, and a CSS
+    // font size of N px is label scale N / 64. Lobby groups sit at the origin
+    // at scale 1 and draw in screen points.
+    static constexpr float kLobbyHeader = 36.0f, kLobbyFooter = 38.0f;
+    static float px(float value) { return value / 2.0f; }
+    static float fontScale(float cssPx) { return cssPx / 64.0f; }
+
+    // A slanted panel from 2-point colour strips (lobby fades reach them).
+    // `topInsetLeft/BottomInsetLeft` cut the left edge, the right ones the right edge.
+    void addSlantedFill(CCNode* parent, float x0, float x1, float y0, float y1, float cutRightBottom, float cutLeftTop,
+        ccColor3B color, GLubyte alpha = 255, int z = 1) {
+        constexpr float step = 2.0f;
+        for (float y = y0; y < y1; y += step) {
+            auto const t = (y + step / 2.0f - y0) / std::max(1.0f, y1 - y0);
+            auto const left = x0 + cutLeftTop * t, right = x1 - cutRightBottom * (1.0f - t);
+            auto* strip = CCLayerColor::create({color.r, color.g, color.b, alpha}, std::max(0.0f, right - left), std::min(step, y1 - y));
+            strip->setPosition({left, y}); parent->addChild(strip, z);
+        }
+    }
+
+    // Skewed progress bar (.bar / .ladder segment): track and fill.
+    void addSkewBar(CCNode* parent, CCPoint leftCenter, float width, float height, float fill, ccColor3B color, int z = 6) {
+        auto* track = CCLayerColor::create({32, 35, 46, 255}, width, height);
+        track->setPosition({leftCenter.x, leftCenter.y - height / 2.0f}); track->setSkewX(20.0f); parent->addChild(track, z);
+        auto const filled = std::clamp(fill, 0.0f, 1.0f) * width;
+        if (filled > 0.5f) {
+            auto* bar = CCLayerColor::create({color.r, color.g, color.b, 255}, filled, height);
+            bar->setPosition({leftCenter.x, leftCenter.y - height / 2.0f}); bar->setSkewX(20.0f); parent->addChild(bar, z + 1);
+        }
+    }
+
+    // III · II · I ladder: passed divisions full, the current one partly.
+    void addDivisionLadder(CCNode* parent, CCPoint leftCenter, float width, int division, float fill, ccColor3B color, bool numerals) {
+        constexpr float gap = 2.5f, height = 6.0f;
+        auto const segment = (width - 2.0f * gap) / 3.0f;
+        for (int i = 0; i < 3; ++i) {
+            auto const amount = i + 1 < division ? 1.0f : i + 1 == division ? fill : 0.0f;
+            addSkewBar(parent, {leftCenter.x + static_cast<float>(i) * (segment + gap), leftCenter.y}, segment, height, amount, color);
+            if (numerals) {
+                auto const lit = i + 1 == division;
+                parent->addChild(makeLabel(i == 0 ? "III" : i == 1 ? "II" : "I", fontScale(13.0f),
+                    {leftCenter.x + static_cast<float>(i) * (segment + gap) + segment / 2.0f, leftCenter.y - 9.0f},
+                    lit ? corum::ranked::ui::Accent : corum::ranked::ui::TextMuted, lit ? "black" : "semibold"), 6);
+            }
+        }
+    }
+
+    // A chip (.chip / .chip.sm): a skewed fill with dark or muted text.
+    void addChip(CCNode* parent, std::string const& text, CCPoint leftCenter, ccColor3B fill, ccColor3B ink, float cssPx = 13.0f) {
+        auto* label = makeLabel(text, fontScale(cssPx), {0, 0}, ink, "black");
+        auto const width = label->getScaledContentSize().width + px(20.0f), height = px(cssPx * 1.6f);
+        auto* face = CCLayerColor::create({fill.r, fill.g, fill.b, 255}, width, height);
+        face->setPosition({leftCenter.x, leftCenter.y - height / 2.0f}); face->setSkewX(8.0f); parent->addChild(face, 6);
+        label->setPosition({leftCenter.x + width / 2.0f, leftCenter.y}); parent->addChild(label, 7);
+    }
+
+    // The L1 halves, and the selected mode's left section on L2 / L3.
     void renderModeCard(RuntimeView const& source, corum::ranked::RankedMode mode, CCLayerColor* group) {
         auto const survival = mode == corum::ranked::RankedMode::Survival;
         auto view = source;
@@ -2442,221 +2500,188 @@ class CorumRankedLayer final : public CCLayerColor {
         }
         auto* savedRoot = m_root; auto* savedMenu = m_menu;
         m_root = group; m_menu = CCMenu::create(); m_menu->setPosition(CCPointZero); group->addChild(m_menu,20);
-        auto const leftCenter = CCPointZero;
-        RankedProfileView profile;
-        profile.displayedTier = view.profileTier;
-        if (view.profileScoreVisible) profile.visibleRankedScore = view.profileScore;
-        profile.placementGames = view.placementGames;
-        profile.placementGamesRequired = view.placementGamesRequired;
-        profile.placementResults = view.placementResults;
-        profile.resultStreak = view.resultStreak;
-        profile.promotion = view.promotion;
-        profile.demotionWarning = view.demotionWarning;
-        profile.equippedTitle = view.achievements.equippedTitle;
-
-        auto* profilePanel = makeNeonPanel({188.0f, 210.0f}, leftCenter, tierColor(upper(view.profileTier)), kDeepPanel, 246);
-        profilePanel->setID("ranked-profile-panel"_spr);
-        m_root->addChild(profilePanel, 1);
-        // L1: each mode is a borderless half with a slanted inner edge
-        // (Survival's right edge, Solo's left edge), as two halves of one
-        // screen. Built from 2-point strips of colour layers so the lobby
-        // fades reach it; the boxed surface stays only as the layout anchor.
-        profilePanel->setVisible(false);
-        {
-            constexpr float width = 188.0f, height = 210.0f, slant = 40.0f, step = 2.0f;
-            auto const fill = corum::ranked::ui::Surface;
-            auto const rows = static_cast<int>(height / step);
-            for (int row = 0; row < rows; ++row) {
-                auto const t = (static_cast<float>(row) + 0.5f) / static_cast<float>(rows);
-                auto const inset = slant * (survival ? 1.0f - t : t);
-                auto* strip = CCLayerColor::create({fill.r, fill.g, fill.b, 255}, width - inset, step);
-                strip->setPosition({survival ? -width / 2.0f : -width / 2.0f + inset, -height / 2.0f + step * static_cast<float>(row)});
-                m_root->addChild(strip, 1);
-            }
-            // A tier-coloured rule along the outer top edge, like the artifact's half headers.
-            auto const tone = tierColor(upper(view.profileTier));
-            auto* rule = CCLayerColor::create({tone.r, tone.g, tone.b, 255}, 64.0f, 3.0f);
-            rule->setPosition({survival ? -width / 2.0f : width / 2.0f - 64.0f, height / 2.0f - 3.0f});
-            rule->setID("ranked-profile-half-rule"_spr); m_root->addChild(rule, 2);
-        }
-        // L1 broadcast card, left-aligned: number chip and subtitle, the trophy
-        // top-right on a slanted tier band, the big leaning mode title, a
-        // TIER / LP / RANK stat row, the bar row and an ENTER slab. The whole
-        // card stays one hit area.
-        // Solo's slanted left edge cuts in at the top, so its column starts further right.
-        auto const colX = survival ? -82.0f : -54.0f;
-        auto const lpX = colX + (survival ? 74.0f : 66.0f), rankX = colX + (survival ? 118.0f : 112.0f);
-        auto const barX = survival ? -12.0f : 12.0f;
-        auto const bandColor = tierColor(upper(view.profileTier));
-        auto* tierBand = CCLayerColor::create({bandColor.r, bandColor.g, bandColor.b, 30});
-        tierBand->setContentSize({62.0f, 206.0f});
-        tierBand->setPosition({leftCenter.x + (survival ? -12.0f : 18.0f), leftCenter.y - 103.0f});
-        tierBand->setSkewX(corum::ranked::ui::SlabSkew);
-        tierBand->setID("ranked-profile-tier-band"_spr);
-        m_root->addChild(tierBand, 2);
-        if (profile.promotion.active) addPromotionAura(leftCenter, {188.0f, 210.0f});
-        auto* chip = CCLayerColor::create({corum::ranked::ui::Accent.r, corum::ranked::ui::Accent.g, corum::ranked::ui::Accent.b, 255}, 18.0f, 11.0f);
-        chip->setPosition({colX, 87.0f}); m_root->addChild(chip, 6);
-        m_root->addChild(makeLabel(survival ? "01" : "02", 0.20f, {colX + 9.0f, 92.5f}, corum::ranked::ui::AccentInk, "black"), 7);
-        auto* subtitle = makeLabel(survival ? fmt::format(fmt::runtime(tr("survival-online-ready-format","2-{} PLAYERS")),source.survivalPlayerCount)
-            : tr("competitive-ladder","COMPETITIVE 1V1 LADDER"), 0.19f, {colX + 23.0f, 92.5f}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f});
-        corum::ranked::ui::fitMenuLabelWidth(subtitle, survival ? 92.0f : 64.0f, 0.19f, 0.12f); m_root->addChild(subtitle, 7);
-        auto standing = view.profileScoreVisible ? view.standing : corum::ranked::StandingView{};
-        // After any LP change since the last visit: roll the LP digits, and on a
-        // tier change hand the emblem and tier name over smoothly.
+        auto const size = CCDirector::sharedDirector()->getWinSize();
+        auto const selected = m_modeTransition.selected().has_value();
         auto const nowTier = upper(view.profileTier);
-        SeenScore seen;
-        if (view.profileScoreVisible && profile.placementGames >= profile.placementGamesRequired) {
-            seen = readSeen("card", survival);
-            writeSeen("card", survival, nowTier, view.profileScore);
-        }
-        auto const tierShift = seen.valid && !seen.tier.empty() && seen.tier != nowTier;
-        auto const lpShift = seen.valid && seen.lp != view.profileScore;
-        CCPoint const emblemAt {leftCenter.x + 50.0f, leftCenter.y + 52.0f};
-        CCNode* oldEmblem = nullptr;CCNode* bloom = nullptr;
-        if (tierShift) {
-            bloom = corum::ranked::ui::createRankBadgeBackdrop(nowTier, {108.0f, 108.0f}, corum::ranked::ui::RankBadgeDisplay::Matched);
-            bloom->setPosition(emblemAt);m_root->addChild(bloom, 3);
-            oldEmblem = corum::ranked::ui::createAnimatedRankBadge(seen.tier, {66.0f, 66.0f}, corum::ranked::ui::RankBadgeDisplay::Large);
-            oldEmblem->setPosition(emblemAt);m_root->addChild(oldEmblem, 4);
-        }
-        auto* emblem = corum::ranked::ui::createAnimatedRankBadge(
-            view.profileTier,
-            {66.0f, 66.0f},
-            corum::ranked::ui::RankBadgeDisplay::Large
-        );
-        emblem->setPosition(emblemAt);
-        m_root->addChild(emblem, 4);
-        // Separate seasons: each card carries its own timer above the card.
-        auto const& cardSeason = survival ? source.survivalSeason : source.soloSeason;
-        auto const perCardTimer = !seasonShared(source) && cardSeason.targetAtMs.has_value();
-        if (perCardTimer) if (auto* timer = corum::ranked::ui::SeasonTimer::create(true)) {
-            timer->setPosition({0, 113}); m_root->addChild(timer, 8);
-            if (survival) m_seasonSurvival = timer; else m_seasonSolo = timer;
-        }
-        // The big leaning title: SURVIVAL on one line, SOLO / RANKED on two.
-        auto const addTitleLine = [&](char const* text, float y) {
-            auto* line = makeLabel(text, 0.56f, {colX, y}, corum::ranked::ui::Text, "black", {0.0f, 0.5f});
-            corum::ranked::ui::leanLabel(line);
-            corum::ranked::ui::fitMenuLabelWidth(line, survival ? 94.0f : 68.0f, 0.56f, 0.30f); m_root->addChild(line, 8);
-        };
-        if (survival) addTitleLine("SURVIVAL", 54.0f); else { addTitleLine("SOLO", 64.0f); addTitleLine("RANKED", 44.0f); }
-        addRankStatus(profile,{colX,leftCenter.y + 24.0f},0.22f,survival ? 96.0f : 68.0f,false,!survival);
-        if (auto* status = m_root->getChildByID("ranked-profile-status-line"_spr)) {
-            status->setAnchorPoint({0.0f, 0.5f});
-        }
-        // Stat row: TIER (with the III / II / I division bar), LP and RANK.
-        auto const statCaption = [&](char const* key, char const* fallback, float x) {
-            m_root->addChild(makeLabel(tr(key, fallback), 0.16f, {x, 8.0f}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f}), 7);
-        };
-        statCaption("stat-tier", "TIER", colX); statCaption("stat-lp", "LP", lpX); statCaption("stat-rank", "RANK", rankX);
+        auto const tone = tierColor(nowTier);
         auto const division = nowTier.size() > 1 && nowTier.back() >= '1' && nowTier.back() <= '3' ? '4' - nowTier.back() : 0;
-        auto* tier = makeLabel(division ? corum::ranked::rankTierBase(nowTier) : corum::ranked::rankTierDisplay(nowTier), 0.34f,
-            {colX, -5.0f}, tierColor(nowTier), "black", {0.0f, 0.5f});
-        corum::ranked::ui::fitMenuLabelWidth(tier, 60.0f, 0.34f, 0.20f);
-        m_root->addChild(tier, 4);
-        if (division) addDivisionBar(division, tierColor(nowTier), {colX + 26.0f, -16.0f}, 52.0f);
-        if (tierShift && oldEmblem) {
-            auto* oldTier = makeLabel(corum::ranked::rankTierDisplay(seen.tier), 0.34f, {colX, -5.0f}, tierColor(seen.tier), "black", {0.0f, 0.5f});
-            corum::ranked::ui::fitMenuLabelWidth(oldTier, 68.0f, 0.34f, 0.20f);m_root->addChild(oldTier, 4);
-            auto const up = corum::ranked::rankTierOrder(nowTier) > corum::ranked::rankTierOrder(seen.tier);
-            if (auto* motion = corum::ranked::ui::LobbyTierTransition::create(group, oldEmblem, emblem, oldTier, tier, bloom, up))
-                m_root->addChild(motion);
-        }
-        auto const placement = profile.placementGames < profile.placementGamesRequired;
-        CCPoint const lpAt {lpX, -5.0f};
-        if (!view.profileScoreVisible || placement) {
-            m_root->addChild(makeLabel("-", 0.34f, lpAt, corum::ranked::ui::TextMuted, "black", {0.0f, 0.5f}), 4);
-        } else if (lpShift && view.profileTier != "GOLD") {
-            // Changed LP: each changed digit spins into place.
-            if (auto* rolling = corum::ranked::ui::RollingNumber::create(seen.lp, view.profileScore, "", 0.34f, corum::ranked::ui::Text)) {
-                if (rolling->getContentSize().width > 40.0f) rolling->setScale(40.0f / rolling->getContentSize().width);
-                rolling->setPosition({lpAt.x + rolling->getContentSize().width * rolling->getScale() / 2.0f, lpAt.y}); m_root->addChild(rolling, 4);
+        auto const placement = view.placementGames < view.placementGamesRequired;
+        auto const standing = view.profileScoreVisible ? view.standing : corum::ranked::StandingView{};
+        auto const progress = tierProgressFor(source, survival);
+        // After any LP change since the last visit the LP digits roll.
+        SeenScore seen;
+        if (view.profileScoreVisible && !placement) { seen = readSeen("card", survival); writeSeen("card", survival, nowTier, view.profileScore); }
+        auto const lpShift = seen.valid && seen.lp != view.profileScore;
+        auto const addLp = [&](CCPoint at, float scale, CCPoint anchor) {
+            if (!view.profileScoreVisible || placement) {
+                m_root->addChild(makeLabel("-", scale, at, corum::ranked::ui::TextMuted, "black", anchor), 6); return;
             }
+            if (lpShift) if (auto* rolling = corum::ranked::ui::RollingNumber::create(seen.lp, view.profileScore, "", scale, corum::ranked::ui::Text)) {
+                rolling->setPosition({at.x + rolling->getContentSize().width * (0.5f - anchor.x), at.y}); m_root->addChild(rolling, 6); return;
+            }
+            m_root->addChild(makeLabel(fmt::format("{}", view.profileScore), scale, at, corum::ranked::ui::Text, "black", anchor), 6);
+        };
+        CCPoint hitCenter; CCSize hitSize;
+
+        if (!selected) {
+            // L1 half: Survival left (right edge slants in at the bottom), Solo
+            // right (left edge slants in at the top); content stacks from the bottom.
+            auto const halfW = (size.width + px(56.0f)) / 2.0f;
+            auto const x0 = survival ? 0.0f : size.width - halfW, x1 = survival ? halfW : size.width;
+            auto const y0 = kLobbyFooter, y1 = size.height - kLobbyHeader;
+            addSlantedFill(m_root, x0, x1, y0, y1, survival ? px(64.0f) : 0.0f, survival ? 0.0f : px(64.0f), corum::ranked::ui::Surface);
+            auto* band = CCLayerColor::create({tone.r, tone.g, tone.b, 41}, px(200.0f), y1 - y0);
+            band->setPosition({x1 - (survival ? px(96.0f) : px(44.0f)) - px(200.0f), y0}); band->setSkewX(8.0f);
+            band->setID("ranked-profile-tier-band"_spr); m_root->addChild(band, 2);
+            auto const trophy = px(190.0f);
+            CCPoint const emblemAt {x1 - (survival ? px(84.0f) : px(28.0f)) - trophy / 2.0f, y1 - px(14.0f) - trophy / 2.0f};
+            // On a tier change since the last visit the old trophy hands over.
+            auto const tierShift = seen.valid && !seen.tier.empty() && seen.tier != nowTier;
+            CCNode* oldEmblem = nullptr; CCNode* bloom = nullptr;
+            if (tierShift) {
+                bloom = corum::ranked::ui::createRankBadgeBackdrop(nowTier, {trophy * 1.3f, trophy * 1.3f}, corum::ranked::ui::RankBadgeDisplay::Matched);
+                bloom->setPosition(emblemAt); m_root->addChild(bloom, 3);
+                oldEmblem = corum::ranked::ui::createAnimatedRankBadge(seen.tier, {trophy * 0.82f, trophy * 0.82f}, corum::ranked::ui::RankBadgeDisplay::Large);
+                oldEmblem->setPosition(emblemAt); m_root->addChild(oldEmblem, 4);
+            }
+            auto* emblem = corum::ranked::ui::createAnimatedRankBadge(view.profileTier, {trophy * 0.82f, trophy * 0.82f}, corum::ranked::ui::RankBadgeDisplay::Large);
+            emblem->setPosition(emblemAt); m_root->addChild(emblem, 4);
+            auto const cx = x0 + (survival ? px(28.0f) : px(96.0f));
+            // Bottom up: ENTER, the bar block, the stat row, the title, the number row.
+            float y = y0 + px(26.0f) + px(27.0f);
+            auto* enter = corum::ranked::ui::slab({px(140.0f), px(54.0f)}, {cx + px(70.0f), y}, corum::ranked::ui::AccentFill);
+            enter->setID("ranked-profile-enter"_spr); m_root->addChild(enter, 6);
+            m_root->addChild(makeLabel(tr("mode-enter","ENTER"), fontScale(20.0f), {cx + px(58.0f), y}, corum::ranked::ui::AccentInk, "black"), 7);
+            if (auto* arrow = corum::ranked::ui::chevron(5.0f, 2.0f, corum::ranked::ui::AccentInk)) { arrow->setPosition({cx + px(108.0f), y}); m_root->addChild(arrow, 7); }
+            if (source.stage != RuntimeStage::Ready) enter->setVisible(false);
+            y += px(27.0f) + px(16.0f);
+            // Bar block (300 px wide): caption row, bar, warning or series line.
+            auto const blockW = px(300.0f);
+            if (placement) {
+                auto const total = std::max(1, view.placement.active ? view.placement.totalStages : view.placementGamesRequired);
+                auto const done = std::max(view.placementGames, static_cast<int>(view.placement.stageResults.size()));
+                m_root->addChild(makeLabel(fmt::format("{} {} / {}", tr("placement", "PLACEMENT"), done, total), fontScale(13.0f), {cx, y + 12.0f}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f}), 6);
+                addSkewBar(m_root, {cx, y + 3.0f}, blockW, px(12.0f), static_cast<float>(done) / static_cast<float>(total), corum::ranked::ui::Accent);
+            } else if (survival && !source.survival.loaded) {
+                m_root->addChild(makeLabel(source.survival.error.empty() ? tr("syncing", "SYNCING...") : tr("connection-issue", "CONNECTION ISSUE"),
+                    fontScale(13.0f), {cx, y + 6.0f}, kGold, "semibold", {0.0f, 0.5f}), 6);
+            } else if (view.promotion.active) {
+                addChip(m_root, tr("promotion-short", "PROMOTION"), {cx, y + 14.0f}, kGold, corum::ranked::ui::AccentInk);
+                auto* need = makeLabel(fmt::format("{} · {}", upper(view.promotion.targetTier), corum::ranked::i18n::promotionMatch(view.promotion.winsRequired)),
+                    fontScale(13.0f), {cx + 50.0f, y + 14.0f}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f});
+                corum::ranked::ui::fitMenuLabelWidth(need, blockW - 50.0f, fontScale(13.0f), 0.12f); m_root->addChild(need, 6);
+                auto const slots = std::clamp(view.promotion.gamesRequired, 1, 9);
+                for (int i = 0; i < slots; ++i) {
+                    auto const result = i < static_cast<int>(view.promotion.results.size()) ? view.promotion.results[static_cast<std::size_t>(i)] : std::string();
+                    auto const win = result == "WIN", loss = result == "LOSS";
+                    addChip(m_root, win ? tr("win-short", "W") : loss ? tr("lose-short", "L") : std::string("-"), {cx + static_cast<float>(i) * 22.0f, y + 1.0f},
+                        win ? corum::ranked::ui::AccentFill : loss ? kRed : ccc3(32, 35, 46), win || loss ? corum::ranked::ui::AccentInk : corum::ranked::ui::TextMuted);
+                }
+            } else if (progress.kind != corum::ranked::TierProgressKind::Hidden) {
+                auto const caption = progress.nextTier.empty() ? fmt::format("{} LP", view.profileScore)
+                    : fmt::format(fmt::runtime(tr("lp-to-next-tier", "{} LP TO NEXT TIER")), progress.remaining);
+                m_root->addChild(makeLabel(caption, fontScale(13.0f), {cx, y + 16.0f}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f}), 6);
+                if (view.demotionWarning) addChip(m_root, tr("demotion-warning", "DEMOTION WARNING"), {cx + blockW - 52.0f, y + 16.0f}, kRed, corum::ranked::ui::AccentInk);
+                addSkewBar(m_root, {cx, y + 6.0f}, blockW, px(12.0f), progress.fill, tone);
+                if (survival && source.survival.warningRecoveryLp)
+                    m_root->addChild(makeLabel(fmt::format(fmt::runtime(tr("lp-warning-recovery","Clears at {} LP")), *source.survival.warningRecoveryLp),
+                        fontScale(13.0f), {cx, y - 4.0f}, kRed, "semibold", {0.0f, 0.5f}), 6);
+            }
+            y += px(62.0f) + px(10.0f);
+            // Stat row: TIER / LP / RANK (Survival) or STREAK (Solo).
+            auto const statGap = px(28.0f);
+            auto const tierText = division ? fmt::format("{} {}", corum::ranked::rankTierBase(nowTier), division == 1 ? "III" : division == 2 ? "II" : "I")
+                : corum::ranked::rankTierDisplay(nowTier);
+            auto* tierValue = makeLabel(tierText, fontScale(24.0f), {cx, y + 6.0f}, tone, "black", {0.0f, 0.5f});
+            corum::ranked::ui::fitMenuLabelWidth(tierValue, 80.0f, fontScale(24.0f), 0.2f); m_root->addChild(tierValue, 6);
+            auto const lpX = cx + tierValue->getScaledContentSize().width + statGap;
+            m_root->addChild(makeLabel(tr("stat-tier", "TIER"), fontScale(13.0f), {cx, y + 20.0f}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f}), 6);
+            m_root->addChild(makeLabel(tr("stat-lp", "LP"), fontScale(13.0f), {lpX, y + 20.0f}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f}), 6);
+            addLp({lpX, y + 6.0f}, fontScale(24.0f), {0.0f, 0.5f});
+            auto const thirdX = lpX + 46.0f + statGap;
+            auto const streak = view.resultStreak;
+            auto const third = survival ? (standing.rank ? fmt::format("#{}", *standing.rank) : std::string("-"))
+                : (streak >= 2 ? corum::ranked::i18n::streak(streak, true) : standing.rank ? fmt::format("#{}", *standing.rank) : std::string("-"));
+            m_root->addChild(makeLabel(survival || streak < 2 ? tr("stat-rank", "RANK") : tr("stat-streak", "STREAK"), fontScale(13.0f), {thirdX, y + 20.0f},
+                corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f}), 6);
+            auto* thirdValue = makeLabel(third, fontScale(24.0f), {thirdX, y + 6.0f}, !survival && streak >= 2 ? corum::ranked::ui::Accent : corum::ranked::ui::Text, "black", {0.0f, 0.5f});
+            thirdValue->setID("ranked-profile-standing"_spr); m_root->addChild(thirdValue, 6);
+            if (tierShift && oldEmblem) {
+                auto* oldTier = makeLabel(corum::ranked::rankTierDisplay(seen.tier), fontScale(24.0f), {cx, y + 6.0f}, tierColor(seen.tier), "black", {0.0f, 0.5f});
+                m_root->addChild(oldTier, 6);
+                auto* tier = tierValue;
+                auto const up = corum::ranked::rankTierOrder(nowTier) > corum::ranked::rankTierOrder(seen.tier);
+                if (auto* motion = corum::ranked::ui::LobbyTierTransition::create(group, oldEmblem, emblem, oldTier, tier, bloom, up))
+                    m_root->addChild(motion);
+            }
+            y += px(48.0f) + px(10.0f);
+            // The mode title (64 px, leaning), SOLO / RANKED on two lines.
+            auto const addTitle = [&](char const* text, float lineY) {
+                auto* line = makeLabel(text, fontScale(64.0f), {cx, lineY}, corum::ranked::ui::Text, "black", {0.0f, 0.5f});
+                corum::ranked::ui::leanLabel(line); corum::ranked::ui::fitMenuLabelWidth(line, x1 - cx - px(104.0f), fontScale(64.0f), 0.4f);
+                m_root->addChild(line, 8);
+            };
+            if (survival) { addTitle("SURVIVAL", y + 16.0f); y += 32.0f; }
+            else { addTitle("RANKED", y + 15.0f); addTitle("SOLO", y + 44.0f); y += 59.0f; }
+            y += px(10.0f);
+            // Number row: 01 / 02 chip and the mode's line.
+            addChip(m_root, survival ? "01" : "02", {cx, y + 6.0f}, corum::ranked::ui::AccentFill, corum::ranked::ui::AccentInk, 15.0f);
+            auto* line = makeLabel(survival ? fmt::format(fmt::runtime(tr("survival-online-ready-format","2-{} PLAYERS")), source.survivalPlayerCount)
+                : tr("solo-mode-line", "1V1 · BEST OF 3"), fontScale(15.0f), {cx + 24.0f, y + 6.0f}, corum::ranked::ui::TextMuted, "extrabold", {0.0f, 0.5f});
+            corum::ranked::ui::fitMenuLabelWidth(line, emblemAt.x - trophy * 0.4f - cx - 24.0f, fontScale(15.0f), 0.12f); m_root->addChild(line, 6);
+            // Separate seasons: each half carries its own timer at the top.
+            auto const& cardSeason = survival ? source.survivalSeason : source.soloSeason;
+            if (!seasonShared(source) && cardSeason.targetAtMs.has_value()) if (auto* timer = corum::ranked::ui::SeasonTimer::create(true)) {
+                timer->setPosition({cx + 50.0f, y1 - 12.0f}); m_root->addChild(timer, 8);
+                if (survival) m_seasonSurvival = timer; else m_seasonSolo = timer;
+            }
+            hitCenter = {(x0 + x1) / 2.0f, (y0 + y1) / 2.0f}; hitSize = {x1 - x0 - px(32.0f), y1 - y0};
         } else {
-            auto* rating = makeLabel(fmt::format("{}", view.profileScore), 0.34f, lpAt, corum::ranked::ui::Text, "black", {0.0f, 0.5f});
-            corum::ranked::ui::fitMenuLabelWidth(rating, 40.0f, 0.34f, 0.20f);
-            m_root->addChild(rating, 4);
-        }
-        auto* rankValue = makeLabel(standing.rank ? fmt::format("#{}", *standing.rank) : std::string("-"), 0.34f, {rankX, -5.0f},
-            standing.rank ? corum::ranked::ui::Text : corum::ranked::ui::TextMuted, "black", {0.0f, 0.5f});
-        corum::ranked::ui::fitMenuLabelWidth(rankValue, 30.0f, 0.34f, 0.20f);
-        rankValue->setID("ranked-profile-standing"_spr); m_root->addChild(rankValue, 8);
-        // Bar row: placement stages, promotion marks, syncing, or the tier bar.
-        constexpr float barY = -32.0f;
-        if (placement) {
-            auto const completedStages = std::max(
-                profile.placementGames,
-                static_cast<int>(view.placement.stageResults.size())
-            );
-            auto const placementStageTotal = view.placement.active ? view.placement.totalStages : profile.placementGamesRequired;
-            addPlacementProgress(completedStages, std::max(1, placementStageTotal), {barX, barY}, 16.0f, 0.28f);
-        } else if (survival && !view.survival.loaded) {
-            auto* pending = makeLabel(view.survival.error.empty() ? tr("syncing", "SYNCING...") : tr("connection-issue", "CONNECTION ISSUE"), 0.22f, {colX, barY}, kGold, "semibold", {0.0f, 0.5f});
-            m_root->addChild(pending,4);
-        } else if (profile.promotion.active) {
-            addRatingMarks(profile.promotion.results, profile.promotion.gamesRequired, {barX, barY}, 16.0f, 0.28f,
-                survival ? &source.survival.promotionRanks : nullptr);
-            if (survival) {
-                // The requirement sits right under the series it belongs to.
-                auto const& sur = source.survival;
-                auto const required = sur.promotionRequiredRank > 0 ? sur.promotionRequiredRank : sur.promotionTop16;
-                auto const text = required<=1 ? tr("survival-promotion-win","Promotion: win a match") :
-                    fmt::format(fmt::runtime(tr("survival-promotion-requirement","Promotion: finish rank {} or better")),required);
-                auto* condition = makeLabel(text,0.18f,{colX,barY - 13.0f},kGold,"semibold",{0.0f,0.5f});
-                corum::ranked::ui::fitMenuLabelWidth(condition,146,0.18f,0.12f); m_root->addChild(condition,8);
+            // L2 / L3 left section: trophy, season rank, tier name, division
+            // ladder, LP, streak chip and record, from the bottom up.
+            auto const x0 = 0.0f, x1 = px(420.0f), y0 = 0.0f, y1 = size.height - kLobbyHeader;
+            addSlantedFill(m_root, x0, x1, y0, y1, px(64.0f), 0.0f, corum::ranked::ui::Surface);
+            auto const trophy = px(250.0f);
+            if (auto* emblem = corum::ranked::ui::createAnimatedRankBadge(view.profileTier, {trophy * 0.8f, trophy * 0.8f}, corum::ranked::ui::RankBadgeDisplay::Large)) {
+                emblem->setPosition({px(64.0f) + trophy / 2.0f, y1 - px(18.0f) - trophy / 2.0f}); m_root->addChild(emblem, 4);
             }
+            auto const cx = px(28.0f);
+            // Above the footer row (SETTINGS / DEBUG / FREE PLAY stay reachable).
+            float y = kLobbyFooter + 8.0f;
+            // Streak chip and record.
+            float recordX = cx;
+            if (std::abs(view.resultStreak) >= 2) {
+                auto const text = corum::ranked::i18n::streak(std::abs(view.resultStreak), view.resultStreak > 0);
+                addChip(m_root, text, {cx, y}, view.resultStreak > 0 ? corum::ranked::ui::AccentFill : kRed, corum::ranked::ui::AccentInk);
+                recordX += 52.0f;
+            }
+            if (view.demotionWarning) { addChip(m_root, tr("demotion-warning", "DEMOTION WARNING"), {recordX, y}, kRed, corum::ranked::ui::AccentInk); recordX += 76.0f; }
+            auto* record = makeLabel(survival ? corum::ranked::survivalRecordText(source.survival.wins, source.survival.losses, corum::ranked::i18n::isKorean())
+                : corum::ranked::matchRecordText(view.profileWins, view.profileLosses, corum::ranked::i18n::isKorean()), fontScale(13.0f), {recordX, y},
+                corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f});
+            corum::ranked::ui::fitMenuLabelWidth(record, x1 - px(64.0f) - recordX - 8.0f, fontScale(13.0f), 0.12f);
+            record->setID("ranked-profile-record"_spr); m_root->addChild(record, 6);
+            y += 19.0f;
+            // LP (34 px) and the LP unit.
+            addLp({cx, y}, fontScale(34.0f), {0.0f, 0.5f});
+            m_root->addChild(makeLabel("LP", fontScale(14.0f), {cx + 62.0f, y - 2.0f}, corum::ranked::ui::TextMuted, "extrabold", {0.0f, 0.5f}), 6);
+            y += 22.0f;
+            // Division ladder (200 px) with numerals.
+            if (division) addDivisionLadder(m_root, {cx, y + 6.0f}, px(200.0f), division, progress.fill, tone, true);
+            y += 22.0f;
+            // Tier name (56 px, leaning) and the season rank above it.
+            auto* tierName = makeLabel(division ? corum::ranked::rankTierBase(nowTier) : corum::ranked::rankTierDisplay(nowTier), fontScale(56.0f), {cx, y + 12.0f}, tone, "black", {0.0f, 0.5f});
+            corum::ranked::ui::leanLabel(tierName); corum::ranked::ui::fitMenuLabelWidth(tierName, x1 - px(104.0f) - cx, fontScale(56.0f), 0.3f); m_root->addChild(tierName, 6);
+            y += 30.0f;
+            m_root->addChild(makeLabel(standing.rank ? fmt::format(fmt::runtime(tr("season-rank-format", "SEASON RANK #{}")), *standing.rank) : tr("season-rank-none", "SEASON RANK -"),
+                fontScale(13.0f), {cx, y}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f}), 6);
+            hitCenter = {-1000.0f, -1000.0f}; hitSize = {1.0f, 1.0f};
         }
-        auto const hasTitle = view.achievements.equippedTitle.active;
-        // The compact tier bar (bar and caption) fills the bar row where it has
-        // room: not during placement or a promotion series (their marks sit
-        // there) or while Survival is syncing.
-        auto const cardBarKind = tierProgressFor(source, survival).kind;
-        auto const cardBar = !placement && !profile.promotion.active && (survival ? source.survival.loaded : view.profileScoreVisible)
-            && cardBarKind != corum::ranked::TierProgressKind::Hidden && cardBarKind != corum::ranked::TierProgressKind::Promotion;
-        if (cardBar) addTierProgress(source, survival, {barX, barY + 2.0f}, 150.0f, true);
-        if (survival && !source.survival.profile.promotion.active && source.survival.warningRecoveryLp) {
-            auto const text = fmt::format(fmt::runtime(tr("lp-warning-recovery","Clears at {} LP")),*source.survival.warningRecoveryLp);
-            auto* condition = makeLabel(text,0.17f,{colX,barY - 17.0f},kRed,"semibold",{0.0f,0.5f});
-            corum::ranked::ui::fitMenuLabelWidth(condition,146,0.17f,0.12f); m_root->addChild(condition,8);
-        }
-        if (hasTitle) {
-            auto* equippedTitle = makeLabel(
-                achievementTitleText(view.achievements.equippedTitle),
-                0.20f,
-                {colX, leftCenter.y - 60.0f},
-                achievementTitleColor(view.achievements.equippedTitle),
-                "semibold",
-                {0.0f, 0.5f}
-            );
-            corum::ranked::ui::fitMenuLabelWidth(equippedTitle, 146.0f, 0.20f, 0.14f);
-            equippedTitle->setID("ranked-profile-equipped-title"_spr);
-            m_root->addChild(equippedTitle, 4);
-            corum::ranked::ui::styleAchievementText(equippedTitle,view.achievements.equippedTitle.level.value_or(corum::ranked::achievementRarityTier(view.achievements.equippedTitle.rarity)));
-        }
-
-        auto* record = makeLabel(survival?corum::ranked::survivalRecordText(source.survival.wins,source.survival.losses,corum::ranked::i18n::isKorean()):corum::ranked::matchRecordText(view.profileWins,view.profileLosses,
-            corum::ranked::i18n::isKorean()),0.20f,{colX,leftCenter.y - (hasTitle ? 73.0f : 64.0f)},
-            corum::ranked::ui::TextMuted,"semibold",{0.0f,0.5f});
-        corum::ranked::ui::fitMenuLabelWidth(record,146,0.20f,0.14f);
-        record->setID("ranked-profile-record"_spr); m_root->addChild(record,8);
-
-        // ENTER slab: a visual cue only; the full-card hit area below enters.
-        auto* enter = corum::ranked::ui::slab({62.0f, 17.0f}, {colX + 31.0f, -90.0f}, corum::ranked::ui::AccentFill);
-        enter->setID("ranked-profile-enter"_spr); m_root->addChild(enter, 6);
-        auto* enterText = makeLabel(tr("mode-enter","ENTER"), 0.24f, {colX + 27.0f, -90.0f}, corum::ranked::ui::AccentInk, "black");
-        corum::ranked::ui::fitMenuLabelWidth(enterText, 40.0f, 0.24f, 0.16f); m_root->addChild(enterText, 7);
-        if (auto* arrow = corum::ranked::ui::chevron(4.0f, 1.6f, corum::ranked::ui::AccentInk)) {
-            arrow->setPosition({colX + 52.0f, -90.0f}); m_root->addChild(arrow, 7);
-        }
-        if (source.stage != RuntimeStage::Ready) enter->setVisible(false), enterText->setVisible(false);
-
-        // A transparent full-card hit area unifies entry and OFF browsing.
-        // Match admission remains separately gated on both client and server.
-        auto* hitArea = CCNode::create(); hitArea->setContentSize({188,210});
+        // Whole-half hit area on L1 (entry and OFF browsing); none on L2 / L3.
+        auto* hitArea = CCNode::create(); hitArea->setContentSize(hitSize);
         auto* select = CCMenuItemSpriteExtra::create(hitArea,this,menu_selector(CorumRankedLayer::onSelectMode));
-        select->setTag(static_cast<int>(mode)); select->setPosition(CCPointZero);
-        select->setEnabled(source.stage == RuntimeStage::Ready);
+        select->setTag(static_cast<int>(mode)); select->setPosition(hitCenter);
+        select->setEnabled(source.stage == RuntimeStage::Ready && !selected); select->setVisible(!selected);
         select->setID(survival ? "survival-card-select"_spr : "solo-ranked-card-select"_spr); m_menu->addChild(select);
         m_root = savedRoot; m_menu = savedMenu;
     }
@@ -2748,6 +2773,21 @@ class CorumRankedLayer final : public CCLayerColor {
         writeSeen(what, survival, nowTier, nowLp);
     }
 
+    // A ghost / filled skewed button (.btn.ghost / .btn) of a fixed size.
+    CCMenuItemSpriteExtra* boardButton(std::string const& text, CCSize box, CCPoint center, SEL_MenuHandler selector, float cssPx,
+        bool filled, std::string const& id, bool enabled = true) {
+        auto* face = corum::ranked::ui::slab(box, {}, filled ? corum::ranked::ui::AccentFill : ccc3(58, 63, 78), !filled, corum::ranked::ui::Ink);
+        auto* label = makeLabel(text, fontScale(cssPx), {box.width / 2.0f, box.height / 2.0f},
+            filled ? corum::ranked::ui::AccentInk : corum::ranked::ui::Text, filled ? "black" : "extrabold");
+        corum::ranked::ui::fitMenuLabelWidth(label, box.width - 10.0f, fontScale(cssPx), 0.12f); face->addChild(label, 5);
+        if (!enabled) corum::ranked::ui::grayButtonVisual(face);
+        auto* item = CCMenuItemSpriteExtra::create(face, this, selector);
+        item->setPosition(center); item->setEnabled(enabled); item->setID(id);
+        m_menu->addChild(item); return item;
+    }
+
+    // L2 / L3 right section: name and title (or the demotion warning), the
+    // season ladder, the hero START slab with its line, and the tool row.
     void renderModePanel(RuntimeView const& view, corum::ranked::RankedMode mode) {
         if (!m_lobbyPanel) return;
         setLobbyNodeInput(m_lobbyPanel,false);
@@ -2756,137 +2796,127 @@ class CorumRankedLayer final : public CCLayerColor {
         m_lobbyContents=CCLayerColor::create({0,0,0,255},0,0);m_lobbyContents->setID("ranked-mode-panel-contents"_spr);
         m_lobbyContents->setCascadeOpacityEnabled(true);m_lobbyPanel->addChild(m_lobbyContents,10);
         m_root = m_lobbyContents; m_menu = CCMenu::create(); m_menu->setPosition(CCPointZero); m_root->addChild(m_menu,20);
-        auto const rightCenter = CCPoint{94,0};
-        // L2 / L3 panel: MATCHMAKING eyebrow and player name, the season
-        // ladder, one wide hero start slab with its caption, and the tool
-        // row (map pool or elimination effect, UI editor, tier guide).
-        auto const addPanelHead = [&](ccColor3B accent) {
-            auto* actionTitle = makeLabel(tr("matchmaking", "MATCHMAKING"), 0.22f, {rightCenter.x - 82.0f,rightCenter.y + 88.0f}, accent, "semibold", {0.0f, 0.5f});
-            corum::ranked::ui::fitMenuLabelWidth(actionTitle,110,0.22f,0.16f);
-            m_root->addChild(actionTitle, 4);
+        auto const size = CCDirector::sharedDirector()->getWinSize();
+        auto const survival = mode == corum::ranked::RankedMode::Survival;
+        auto const x0 = px(420.0f) + px(12.0f), x1 = size.width - px(28.0f), width = x1 - x0;
+        auto const top = size.height - kLobbyHeader - px(8.0f);
+        // Row 1: name and equipped title, or the demotion warning (Survival).
+        auto const warning = survival ? view.survival.profile.demotionWarning : view.demotionWarning;
+        if (survival && warning) {
+            auto* rule = CCLayerColor::create({32, 35, 46, 255}, width, 30.0f); rule->setPosition({x0, top - 30.0f}); m_root->addChild(rule, 1);
+            auto* edge = CCLayerColor::create({kRed.r, kRed.g, kRed.b, 255}, width, 1.0f); edge->setPosition({x0, top - 1.0f}); m_root->addChild(edge, 2);
+            m_root->addChild(makeLabel(tr("demotion-warning", "DEMOTION WARNING"), fontScale(16.0f), {x0 + 8.0f, top - 10.0f}, corum::ranked::ui::Text, "extrabold", {0.0f, 0.5f}), 4);
+            if (view.survival.warningRecoveryLp)
+                m_root->addChild(makeLabel(fmt::format(fmt::runtime(tr("lp-warning-recovery","Clears at {} LP")), *view.survival.warningRecoveryLp),
+                    fontScale(13.0f), {x0 + 8.0f, top - 22.0f}, kRed, "semibold", {0.0f, 0.5f}), 4);
+        } else {
             auto* account = GJAccountManager::get();
-            auto const name = account ? std::string(account->m_username) : std::string();
-            if (!name.empty()) {
-                auto* player = makeLabel(name, 0.36f, {rightCenter.x - 82.0f, rightCenter.y + 74.0f}, corum::ranked::ui::Text, "black", {0.0f, 0.5f});
-                corum::ranked::ui::fitMenuLabelWidth(player, 122.0f, 0.36f, 0.2f);
-                player->setID("ranked-panel-player-name"_spr); m_root->addChild(player, 4);
+            auto* player = makeLabel(account ? std::string(account->m_username) : std::string(), fontScale(34.0f), {x0, top - 9.0f}, corum::ranked::ui::Text, "black", {0.0f, 0.5f});
+            corum::ranked::ui::fitMenuLabelWidth(player, width * 0.45f, fontScale(34.0f), 0.2f);
+            player->setID("ranked-panel-player-name"_spr); m_root->addChild(player, 4);
+            if (view.achievements.equippedTitle.active) {
+                auto* title = makeLabel(achievementTitleText(view.achievements.equippedTitle), fontScale(15.0f),
+                    {x0 + player->getScaledContentSize().width + 7.0f, top - 11.0f}, achievementTitleColor(view.achievements.equippedTitle), "extrabold", {0.0f, 0.5f});
+                corum::ranked::ui::fitMenuLabelWidth(title, width * 0.3f, fontScale(15.0f), 0.1f); m_root->addChild(title, 4);
             }
-        };
-        auto const addLadder = [&](bool survival) {
-            if (tierProgressFor(view, survival).kind == corum::ranked::TierProgressKind::Hidden) return false;
-            auto* caption = makeLabel(tr("season-ladder", "SEASON LADDER"), 0.18f, {rightCenter.x - 82.0f, rightCenter.y + 60.0f}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f});
-            corum::ranked::ui::fitMenuLabelWidth(caption, 120.0f, 0.18f, 0.12f); m_root->addChild(caption, 4);
-            addTierProgress(view, survival, {rightCenter.x, rightCenter.y + 33.0f});
-            return true;
-        };
-        auto const startCaption = [&](std::string const& text, bool live) {
-            auto* label = makeLabel(text, 0.40f, {}, live ? corum::ranked::ui::AccentInk : corum::ranked::ui::TextMuted, "black");
-            corum::ranked::ui::fitMenuLabelWidth(label, 112.0f, 0.40f, 0.22f);
-            return label;
-        };
-        if (mode == corum::ranked::RankedMode::SoloRanked) {
-        auto* actionPanel = makeNeonPanel({188.0f, 210.0f}, rightCenter, kSteel, kDeepPanel, 246);
-        m_lobbyPanel->addChild(actionPanel, 1);
-        auto* leaderboardFace = corum::ranked::ui::surface({30,30},{},kGold,kDeepPanel2,250,true);
-        if (auto* icon = CCSprite::createWithSpriteFrameName("rankIcon_1_001.png")) {
-            corum::ranked::ui::fitRankSprite(icon,{24,24}); icon->setPosition({15,15}); leaderboardFace->addChild(icon,5);
         }
-        auto* leaderboard = CCMenuItemSpriteExtra::create(leaderboardFace,this,menu_selector(CorumRankedLayer::onLeaderboard));
-        leaderboard->setPosition({rightCenter.x + 73,rightCenter.y + 80});
-        leaderboard->setID("ranked-leaderboard-trophy"_spr); m_menu->addChild(leaderboard);
-        addPanelHead(kAccent);
+        // Header buttons on the right of row 1: HISTORY and ACHIEVEMENTS / BADGES.
+        boardButton(tr("history", "HISTORY"), {px(110.0f), px(34.0f)}, {x1 - px(55.0f) - px(118.0f), top - 9.0f}, menu_selector(CorumRankedLayer::onHistory),
+            14.0f, false, "ranked-panel-history"_spr);
+        if (survival) boardButton(tr("badges", "BADGES"), {px(110.0f), px(34.0f)}, {x1 - px(55.0f), top - 9.0f}, menu_selector(CorumRankedLayer::onBadgeCollection),
+            14.0f, false, "ranked-panel-badges"_spr);
+        else boardButton(tr("achievement-trophy", "TROPHY"), {px(110.0f), px(34.0f)}, {x1 - px(55.0f), top - 9.0f}, menu_selector(CorumRankedLayer::onAchievements),
+            14.0f, false, "ranked-panel-achievements"_spr);
 
-        if (view.stage == RuntimeStage::Ready || view.stage == RuntimeStage::Queued || view.stage == RuntimeStage::JoiningQueue) {
-            // The start button: the one hero slab of the lobby.
-            auto const playLive = view.stage == RuntimeStage::Ready && (view.soloEnabled || view.placement.active);
-            auto const startText = view.placement.required
-                ? (view.placement.active && view.placement.state == "STAGE_RESULT"
-                    ? tr("continue-placement", "CONTINUE PLACEMENT")
-                    : tr("start-placement", "START PLACEMENT"))
-                : tr("start-queue", "START QUEUE");
-            auto* playCircle = corum::ranked::ui::heroSlab({164.0f, 42.0f}, playLive, startCaption(startText, playLive));
-            auto* play = CCMenuItemSpriteExtra::create(
-                playCircle,
-                this,
-                view.placement.required
-                    ? (view.placement.active && view.placement.state == "STAGE_RESULT"
-                        ? menu_selector(CorumRankedLayer::onContinuePlacement)
-                        : menu_selector(CorumRankedLayer::onOpenPlacement))
-                    : menu_selector(CorumRankedLayer::onJoin)
-            );
-            play->setPosition({rightCenter.x, rightCenter.y - 12.0f});
-            play->setEnabled(playLive);
-            play->setID("ranked-start-button"_spr);
-            m_menu->addChild(play);
-            if (!view.placement.required) addLadder(false);
-            auto* actionHint = makeLabel(
-                view.placement.required
-                    ? (view.placement.active && view.placement.state == "STAGE_RESULT"
-                        ? fmt::format("STAGE {} / {} SAVED", view.placement.currentStageIndex, view.placement.totalStages)
-                        : tr("choose-first-pool", "CHOOSE YOUR FIRST STAGE POOL"))
-                    : tr("find-match", "FIND A 1V1 MATCH"),
-                0.20f,
-                {rightCenter.x, rightCenter.y - 43.0f},
-                corum::ranked::ui::TextMuted,
-                "semibold"
-            );
-            corum::ranked::ui::fitMenuLabelWidth(actionHint,170,0.20f,0.14f);
-            m_root->addChild(actionHint, 4);
-            // Tool row: map pool, UI editor, tier guide.
-            addMapPoolButton({rightCenter.x - 56.0f, rightCenter.y - 78.0f});
-            addHudEditorButton({rightCenter.x, rightCenter.y - 78.0f},
-                view.stage == RuntimeStage::Ready && !lobbyQueueActive(), "ranked-hud-editor-button"_spr);
-            auto* guideFace=corum::ranked::ui::surface({34,34},{},kGold,kDeepPanel2,250,true);
-            auto* guideBadge=corum::ranked::ui::createAnimatedRankBadge("GOLD",{22,22},corum::ranked::ui::RankBadgeDisplay::Matched);
-            guideBadge->setPosition({17,20});guideFace->addChild(guideBadge,5);
-            auto* guideCaption = makeLabel(tr("tier-guide-short","TIERS"),0.17f,{17,6},kGold,"semibold");
-            corum::ranked::ui::fitMenuLabelWidth(guideCaption,30,0.17f,0.1f); guideFace->addChild(guideCaption,5);
-            auto* guide=CCMenuItemSpriteExtra::create(guideFace,this,menu_selector(CorumRankedLayer::onTierGuide));
-            guide->setPosition({rightCenter.x + 56.0f,rightCenter.y - 78.0f});guide->setID("ranked-tier-guide-gold"_spr);m_menu->addChild(guide);
-        } else if (view.stage == RuntimeStage::Queued || view.stage == RuntimeStage::JoiningQueue) {
-            auto* spinner = LoadingSpinner::create(58.0f);
-            spinner->setPosition({rightCenter.x, rightCenter.y + 18.0f});
-            m_root->addChild(spinner, 4);
-            auto* queueing = makeLabel(tr("searching", "SEARCHING..."), 0.44f, {rightCenter.x, rightCenter.y - 40.0f}, kGold, "black");
-            m_root->addChild(queueing, 4);
-            addButton(tr("leave-queue", "LEAVE QUEUE"), {rightCenter.x, rightCenter.y - 75.0f}, menu_selector(CorumRankedLayer::onLeave), true, 0.56f);
-        } else if (view.stage == RuntimeStage::Loading) {
-            auto* spinner = LoadingSpinner::create(58.0f);
-            spinner->setPosition({rightCenter.x, rightCenter.y + 18.0f});
-            m_root->addChild(spinner, 4);
-            auto* loading = makeLabel(tr("syncing", "SYNCING..."), 0.44f, {rightCenter.x, rightCenter.y - 40.0f}, kGold, "black");
-            m_root->addChild(loading, 4);
-        } else {
-            auto* failed = makeLabel(tr("connection-issue", "CONNECTION ISSUE"), 0.34f, {rightCenter.x, rightCenter.y - 12.0f}, kRed, "black");
-            m_root->addChild(failed, 4);
-            addButton(tr("retry", "RETRY"), {rightCenter.x, rightCenter.y - 58.0f}, menu_selector(CorumRankedLayer::onRetry), false, 0.66f);
+        // Row 2: season ladder with the current and next tier marks.
+        auto const progress = tierProgressFor(view, survival);
+        auto const ladderTop = top - 50.0f;
+        if (progress.kind != corum::ranked::TierProgressKind::Hidden) {
+            m_root->addChild(makeLabel(tr("season-ladder", "SEASON LADDER"), fontScale(14.0f), {x0, ladderTop}, corum::ranked::ui::TextMuted, "extrabold", {0.0f, 0.5f}), 4);
+            if (!progress.nextTier.empty()) {
+                auto* remaining = makeLabel(fmt::format(fmt::runtime(tr("lp-to-next-tier", "{} LP TO NEXT TIER")), progress.remaining), fontScale(16.0f),
+                    {x1, ladderTop}, kGold, "extrabold", {1.0f, 0.5f});
+                m_root->addChild(remaining, 4);
+            }
+            auto const iconSize = px(44.0f);
+            if (auto* mark = corum::ranked::ui::createAnimatedRankBadge(progress.tier, {iconSize, iconSize}, corum::ranked::ui::RankBadgeDisplay::Matched)) {
+                mark->setPosition({x0 + iconSize / 2.0f, ladderTop - 22.0f}); m_root->addChild(mark, 4);
+            }
+            if (!progress.nextTier.empty()) if (auto* next = corum::ranked::ui::createAnimatedRankBadge(progress.nextTier, {iconSize, iconSize}, corum::ranked::ui::RankBadgeDisplay::Matched)) {
+                next->setPosition({x1 - iconSize / 2.0f, ladderTop - 22.0f}); m_root->addChild(next, 4);
+            }
+            auto const nowTier = upper(progress.tier);
+            auto const division = nowTier.size() > 1 && nowTier.back() >= '1' && nowTier.back() <= '3' ? '4' - nowTier.back() : 0;
+            auto const ladderX = x0 + iconSize + px(12.0f), ladderW = width - 2.0f * (iconSize + px(12.0f));
+            if (division) addDivisionLadder(m_root, {ladderX, ladderTop - 19.0f}, ladderW, division, progress.fill, tierColor(nowTier), true);
+            else addSkewBar(m_root, {ladderX, ladderTop - 19.0f}, ladderW, px(12.0f), progress.fill, tierColor(nowTier));
         }
 
-        } else {
-            m_lobbyPanel->addChild(makeNeonPanel({188,210},rightCenter,kAccent,kDeepPanel,246),1);
-            addPanelHead(kAccent);
-            auto* face = corum::ranked::ui::surface({30,30},{},kGold,kDeepPanel2,250,true);
-            if (auto* icon = CCSprite::createWithSpriteFrameName("rankIcon_1_001.png")) {
-                corum::ranked::ui::fitRankSprite(icon,{24,24}); icon->setPosition({15,15}); face->addChild(icon,5);
-            }
-            auto* leaderboard = CCMenuItemSpriteExtra::create(face,this,menu_selector(CorumRankedLayer::onLeaderboard));
-            leaderboard->setPosition({167,80}); leaderboard->setID("survival-leaderboard-trophy"_spr); m_menu->addChild(leaderboard);
-            auto const online=view.survivalEnabled && view.survival.onlineAvailable && view.stage==RuntimeStage::Ready;
-            auto* playCircle = corum::ranked::ui::heroSlab({164.0f, 42.0f}, online, startCaption(tr("start-queue", "START QUEUE"), online));
-            auto* queue = CCMenuItemSpriteExtra::create(playCircle,this,menu_selector(CorumRankedLayer::onSurvivalQueue));
-            queue->setPosition({94,-12}); m_menu->addChild(queue);
-            queue->setEnabled(online); queue->setID("survival-start-button"_spr);
-            auto const retry = !view.survival.loaded || !view.survival.error.empty();
-            if (!retry) addLadder(true);
-            if (retry) {
-                addButton(tr("retry","RETRY"),{94,-43},menu_selector(CorumRankedLayer::onRetrySurvival),false,0.44f);
+        // Row 3: the hero START slab and its line.
+        auto const heroY = size.height / 2.0f - 8.0f;
+        auto const heroSize = CCSize{width, px(96.0f)};
+        auto const startLabel = [&](std::string const& text, bool live) {
+            auto* label = makeLabel(text, fontScale(34.0f), {}, live ? corum::ranked::ui::AccentInk : corum::ranked::ui::TextMuted, "black");
+            corum::ranked::ui::fitMenuLabelWidth(label, width - 70.0f, fontScale(34.0f), 0.2f); return label;
+        };
+        if (!survival) {
+            if (view.stage == RuntimeStage::Ready || view.stage == RuntimeStage::Queued || view.stage == RuntimeStage::JoiningQueue) {
+                auto const playLive = view.stage == RuntimeStage::Ready && (view.soloEnabled || view.placement.active);
+                auto const startText = view.placement.required
+                    ? (view.placement.active && view.placement.state == "STAGE_RESULT" ? tr("continue-placement", "CONTINUE PLACEMENT") : tr("start-placement", "START PLACEMENT"))
+                    : tr("start-queue", "START QUEUE");
+                auto* play = CCMenuItemSpriteExtra::create(corum::ranked::ui::heroSlab(heroSize, playLive, startLabel(startText, playLive)), this,
+                    view.placement.required
+                        ? (view.placement.active && view.placement.state == "STAGE_RESULT" ? menu_selector(CorumRankedLayer::onContinuePlacement) : menu_selector(CorumRankedLayer::onOpenPlacement))
+                        : menu_selector(CorumRankedLayer::onJoin));
+                play->setPosition({x0 + width / 2.0f, heroY}); play->setEnabled(playLive); play->setID("ranked-start-button"_spr); m_menu->addChild(play);
+                auto* line = makeLabel(view.placement.required
+                        ? (view.placement.active && view.placement.state == "STAGE_RESULT"
+                            ? fmt::format("STAGE {} / {} SAVED", view.placement.currentStageIndex, view.placement.totalStages) : tr("choose-first-pool", "CHOOSE YOUR FIRST STAGE POOL"))
+                        : tr("solo-start-line", "FIND A 1V1 MATCH · ONE PRIVATE BAN · BEST OF 3"),
+                    fontScale(13.0f), {x0 + width / 2.0f, heroY - heroSize.height / 2.0f - 9.0f}, corum::ranked::ui::TextMuted, "semibold");
+                corum::ranked::ui::fitMenuLabelWidth(line, width, fontScale(13.0f), 0.12f); m_root->addChild(line, 4);
             } else {
-                auto* details = makeLabel(online?fmt::format(fmt::runtime(tr("survival-online-ready-format","2-{} PLAYERS")),view.survivalPlayerCount):tr("mode-disabled","MODE DISABLED"),0.20f,{94,-43.0f},corum::ranked::ui::TextMuted,"semibold");
-                corum::ranked::ui::fitMenuLabelWidth(details,170,0.20f,0.14f); m_root->addChild(details,5);
+                m_root->addChild(makeLabel(tr("connection-issue", "CONNECTION ISSUE"), fontScale(24.0f), {x0 + width / 2.0f, heroY}, kRed, "black"), 4);
+                addButton(tr("retry", "RETRY"), {x0 + width / 2.0f, heroY - 34.0f}, menu_selector(CorumRankedLayer::onRetry), false, 0.6f);
             }
-            // Tool row: elimination effect and UI editor.
-            addEliminationFxButton({66,-78});
-            addHudEditorButton({122,-78},view.stage==RuntimeStage::Ready && !lobbyQueueActive(),"survival-hud-editor-button"_spr);
+        } else {
+            auto const online = view.survivalEnabled && view.survival.onlineAvailable && view.stage == RuntimeStage::Ready;
+            auto const heroW = width * 0.62f;
+            auto* queue = CCMenuItemSpriteExtra::create(corum::ranked::ui::heroSlab({heroW, heroSize.height}, online, startLabel(tr("start-queue", "START QUEUE"), online)),
+                this, menu_selector(CorumRankedLayer::onSurvivalQueue));
+            queue->setPosition({x0 + heroW / 2.0f, heroY}); queue->setEnabled(online); queue->setID("survival-start-button"_spr); m_menu->addChild(queue);
+            auto const sideX = x0 + heroW + px(36.0f);
+            if (!view.survival.loaded || !view.survival.error.empty()) {
+                addButton(tr("retry","RETRY"), {sideX + 40.0f, heroY}, menu_selector(CorumRankedLayer::onRetrySurvival), false, 0.44f);
+            } else {
+                auto* players = makeLabel(online ? fmt::format(fmt::runtime(tr("survival-online-ready-format","2-{} PLAYERS")), view.survivalPlayerCount) : tr("mode-disabled","MODE DISABLED"),
+                    fontScale(16.0f), {sideX, heroY + 7.0f}, corum::ranked::ui::Text, "extrabold", {0.0f, 0.5f});
+                corum::ranked::ui::fitMenuLabelWidth(players, x1 - sideX, fontScale(16.0f), 0.12f); m_root->addChild(players, 4);
+                auto* small = makeLabel(fmt::format(fmt::runtime(tr("survival-queue-short-format","AFTER {}s, SMALLER FIELDS MAY START")), corum::ranked::SurvivalRuntime::get().queue().maxWaitSeconds),
+                    fontScale(13.0f), {sideX, heroY - 8.0f}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f});
+                corum::ranked::ui::fitMenuLabelWidth(small, x1 - sideX, fontScale(13.0f), 0.1f); m_root->addChild(small, 4);
+            }
+        }
+
+        // Row 4: tool buttons (.btn.ghost.sm, equal widths).
+        auto const hudEnabled = view.stage == RuntimeStage::Ready && !lobbyQueueActive();
+        std::vector<std::tuple<std::string, SEL_MenuHandler, std::string, bool>> tools;
+        if (survival) {
+            tools.emplace_back(tr("elim-fx", "ELIMINATION EFFECT"), menu_selector(CorumRankedLayer::onEliminationFx), "survival-elimination-fx-button", true);
+            tools.emplace_back(tr("hud-editor", "UI SETTINGS"), menu_selector(CorumRankedLayer::onHudEditor), "survival-hud-editor-button", hudEnabled);
+            tools.emplace_back(tr("leaderboard", "LEADERBOARD"), menu_selector(CorumRankedLayer::onLeaderboard), "survival-leaderboard-trophy", true);
+        } else {
+            tools.emplace_back(tr("map-pool", "MAP POOL"), menu_selector(CorumRankedLayer::onMapPool), "ranked-map-pool-button", true);
+            tools.emplace_back(tr("hud-editor", "UI SETTINGS"), menu_selector(CorumRankedLayer::onHudEditor), "ranked-hud-editor-button", hudEnabled);
+            tools.emplace_back(tr("tier-guide", "TIER GUIDE"), menu_selector(CorumRankedLayer::onTierGuide), "ranked-tier-guide-gold", true);
+            tools.emplace_back(tr("leaderboard", "LEADERBOARD"), menu_selector(CorumRankedLayer::onLeaderboard), "ranked-leaderboard-trophy", true);
+        }
+        auto const gap = px(8.0f), toolW = (width - gap * static_cast<float>(tools.size() - 1)) / static_cast<float>(tools.size());
+        for (std::size_t index = 0; index < tools.size(); ++index) {
+            auto const& [text, selector, id, enabled] = tools[index];
+            boardButton(text, {toolW, px(42.0f)}, {x0 + toolW / 2.0f + static_cast<float>(index) * (toolW + gap), kLobbyFooter + px(21.0f) + 4.0f}, selector, 16.0f, false,
+                std::string(GEODE_MOD_ID) + "/" + id, enabled);
         }
         m_root = savedRoot; m_menu = savedMenu;
     }
@@ -2988,26 +3018,83 @@ class CorumRankedLayer final : public CCLayerColor {
         return corum::ranked::i18n::runtimeStatus(view.status);
     }
 
+    // L header (.hdr, 72 px): back, then RANKED or the mode's number chip and
+    // name; season in the middle; population and KO / EN on the right.
+    void addLobbyHeader(RuntimeView const& view, std::optional<corum::ranked::RankedMode> mode) {
+        auto const size = CCDirector::sharedDirector()->getWinSize();
+        auto const y = size.height - kLobbyHeader / 2.0f;
+        float x = px(28.0f) + px(48.0f) + px(16.0f);
+        if (mode) {
+            addChip(m_root, *mode == corum::ranked::RankedMode::Survival ? "01" : "02", {x, y}, corum::ranked::ui::AccentFill, corum::ranked::ui::AccentInk, 15.0f);
+            x += 22.0f;
+        }
+        auto* brand = makeLabel(!mode ? "RANKED" : *mode == corum::ranked::RankedMode::Survival ? "SURVIVAL" : "SOLO RANKED", fontScale(30.0f), {x, y},
+            corum::ranked::ui::Text, "black", {0.0f, 0.5f});
+        corum::ranked::ui::leanLabel(brand); brand->setID("ranked-screen-title"_spr); m_root->addChild(brand, 6);
+        // KO / EN (.lang): two 24 x 22 boxes at the right edge.
+        auto const korean = corum::ranked::i18n::isKorean();
+        auto const langBox = [&](char const* text, bool on, float cx, SEL_MenuHandler selector, char const* id) {
+            auto* face = CCLayerColor::create(on ? ccc4(166, 222, 36, 255) : ccc4(0, 0, 0, 0), px(48.0f), px(44.0f));
+            auto* border = CCLayerColor::create({43, 47, 60, 255}, px(48.0f), 1.0f); border->setPosition({0.0f, px(44.0f) - 1.0f}); face->addChild(border);
+            auto* bottom = CCLayerColor::create({43, 47, 60, 255}, px(48.0f), 1.0f); face->addChild(bottom);
+            face->addChild(makeLabel(text, fontScale(14.0f), {px(24.0f), px(22.0f)}, on ? corum::ranked::ui::AccentInk : corum::ranked::ui::TextMuted, "black"), 2);
+            auto* item = CCMenuItemSpriteExtra::create(face, this, selector);
+            item->setPosition({cx, y}); item->setID(std::string(GEODE_MOD_ID) + "/" + id); m_menu->addChild(item);
+        };
+        langBox("EN", !korean, size.width - px(28.0f) - px(24.0f), menu_selector(CorumRankedLayer::onEnglish), "ranked-language-english");
+        langBox("KO", korean, size.width - px(28.0f) - px(72.0f), menu_selector(CorumRankedLayer::onKorean), "ranked-language-korean");
+        if (auto* population = corum::ranked::ui::LobbyPopulationView::create()) {
+            population->setID("ranked-lobby-population"_spr); population->setPosition({size.width - px(28.0f) - px(96.0f) - 60.0f, y});
+            population->updatePopulation({view.lobbyOffline, view.lobbyOnline, view.lobbyPopulationKnown}); m_root->addChild(population, 7);
+        }
+        // Season: the shared timer, or the open mode's own timer, centred.
+        m_seasonShared = nullptr; m_seasonSolo = nullptr; m_seasonSurvival = nullptr;
+        auto const& season = mode && *mode == corum::ranked::RankedMode::Survival ? view.survivalSeason : view.soloSeason;
+        if ((seasonShared(view) || mode) && season.targetAtMs) if (auto* timer = corum::ranked::ui::SeasonTimer::create(false)) {
+            timer->setPosition({size.width / 2.0f + 20.0f, y}); m_root->addChild(timer, 7);
+            if (seasonShared(view)) m_seasonShared = timer;
+            else if (*mode == corum::ranked::RankedMode::Survival) m_seasonSurvival = timer; else m_seasonSolo = timer;
+        }
+    }
+
+    // Footer face (.foot button): fill, 3 px top rule and caption; resized in place.
+    static void layoutFooterFace(CCNode* face, float width) {
+        constexpr float height = 26.0f;
+        face->setContentSize({width, height});
+        if (auto* fill = typeinfo_cast<CCLayerColor*>(face->getChildByTag(1))) fill->setContentSize({width, height});
+        if (auto* rule = typeinfo_cast<CCLayerColor*>(face->getChildByTag(2))) { rule->setContentSize({width, 1.5f}); rule->setPosition({0.0f, height - 1.5f}); }
+        if (auto* label = typeinfo_cast<CCLabelBMFont*>(face->getChildByTag(3))) {
+            label->setPosition({width / 2.0f, height / 2.0f}); corum::ranked::ui::fitMenuLabelWidth(label, width - 12.0f, fontScale(16.0f), 0.12f);
+        }
+    }
+    CCNode* makeFooterFace(std::string const& text) {
+        auto* face = CCNode::create(); face->setAnchorPoint({0.5f, 0.5f});
+        auto* fill = CCLayerColor::create({23, 25, 34, 255}, 10.0f, 26.0f); fill->setTag(1); face->addChild(fill, 0);
+        auto* rule = CCLayerColor::create({43, 47, 60, 255}, 10.0f, 1.5f); rule->setTag(2); face->addChild(rule, 1);
+        auto* label = makeLabel(text, fontScale(16.0f), {}, corum::ranked::ui::Text, "extrabold"); label->setTag(3); face->addChild(label, 2);
+        layoutFooterFace(face, 100.0f); return face;
+    }
+
     void renderLobbyTools(RuntimeView const& view) {
         auto const size = CCDirector::sharedDirector()->getWinSize();
         m_lobbyToolbar = CCMenu::create(); m_lobbyToolbar->setPosition(CCPointZero);
         m_lobbyToolbar->setID("ranked-mode-toolbar"_spr); m_root->addChild(m_lobbyToolbar,20);
         auto* savedMenu = m_menu; m_menu = m_lobbyToolbar;
-        auto* historyVisual = makeActionButtonVisual(tr("history", "HISTORY"),false,false,true);
-        historyVisual->setScale(0.66f);
+        // L1 footer (.foot): HISTORY, ACHIEVEMENTS (with the unclaimed badge),
+        // LEADERBOARD and SETTINGS share the width.
+        auto* historyVisual = makeFooterFace(tr("history", "HISTORY"));
         auto* history = CCMenuItemSpriteExtra::create(historyVisual,this,menu_selector(CorumRankedLayer::onHistory));
-        auto const historyWidth = history->getContentSize().width;
-        history->setPosition({size.width - 20 - historyWidth / 2,size.height - 28}); history->setID("ranked-lobby-history"_spr); m_menu->addChild(history);
-        auto* trophyVisual = makeActionButtonVisual(tr("achievement-trophy", "TROPHY"),false,false,true); trophyVisual->setScale(0.66f);
+        history->setID("ranked-lobby-history"_spr); m_menu->addChild(history);
+        auto* trophyVisual = makeFooterFace(tr("achievements", "ACHIEVEMENTS"));
         auto* trophy = CCMenuItemSpriteExtra::create(trophyVisual,this,menu_selector(CorumRankedLayer::onAchievements));
-        trophy->setPosition({size.width - 28 - historyWidth - trophy->getContentSize().width / 2,size.height - 28}); trophy->setID("ranked-achievement-trophy"_spr); m_menu->addChild(trophy);
+        trophy->setID("ranked-achievement-trophy"_spr); m_menu->addChild(trophy);
         auto const badgeText = corum::ranked::achievementBadgeText(view.achievements.unclaimedRewardCount);
         if (!badgeText.empty()) {
-            auto const trophySize = trophyVisual->getContentSize();
-            auto* badge = corum::ranked::ui::menuPill(badgeText,{badgeText == "99+" ? 38.0f : 26.0f,19},
-                {trophySize.width - 5,trophySize.height - 4},kRed,0.27f,corum::ranked::ui::Text,true);
-            badge->setID("ranked-achievement-notification-badge"_spr); trophyVisual->addChild(badge,10);
+            auto* badge = corum::ranked::ui::menuPill(badgeText,{badgeText == "99+" ? 30.0f : 20.0f,14},{0,0},kRed,0.22f,corum::ranked::ui::Text,true);
+            badge->setID("ranked-achievement-notification-badge"_spr); badge->setTag(4); trophyVisual->addChild(badge,10);
         }
+        auto* leaderboard = CCMenuItemSpriteExtra::create(makeFooterFace(tr("leaderboard", "LEADERBOARD")),this,menu_selector(CorumRankedLayer::onLeaderboard));
+        leaderboard->setID("ranked-lobby-leaderboard"_spr); m_menu->addChild(leaderboard);
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH) || defined(CORUM_RANKED_DEBUG_SPECTATE)
         if (view.stage == RuntimeStage::Ready) {
             auto* debug = addButton(tr("debug","DEBUG"),{96,30},menu_selector(CorumRankedLayer::onDebugMenu),true,0.54f);
@@ -3021,43 +3108,46 @@ class CorumRankedLayer final : public CCLayerColor {
         }
         m_lobbyToolbar->setVisible(true);
         m_menu = savedMenu;
-        auto const layout=corum::ranked::modeLobbyLayout(size.width,size.height);
-        auto const left=layout.leftX-94*layout.scale,right=layout.rightX+94*layout.scale;
+        // Status or error line under the header (no status bar on the boards).
         auto detail=lobbyMessage(view);
-        auto* statusPanel=makeNeonPanel({right-left,34},{(left+right)/2,27},view.error.empty()?kSteel:kRed,kDeepPanel2,238);
-        m_root->addChild(statusPanel,1);
-        auto* status=makeLabel(shorten(detail,90),.24f,{(left+right)/2,27},view.error.empty()?ccc3(220,228,244):kRed,"semibold");
-        m_mainStatusLabel=status;m_root->addChild(status,4);
+        auto* status=makeLabel(shorten(detail,90),fontScale(13.0f),{size.width/2,size.height-kLobbyHeader-6.0f},view.error.empty()?corum::ranked::ui::TextMuted:kRed,"semibold");
+        m_mainStatusLabel=status;status->setVisible(!view.error.empty());m_root->addChild(status,21);
         placeLobbyFooter();
     }
 
-    // Bottom bar: [DEBUG] [FREE PLAY] status text [SETTINGS]. FREE PLAY only
-    // while the Survival queue card is expanded and the queue is waiting.
+    // Footer row: on L1 the four navigation buttons; with a mode open they
+    // give way to [DEBUG] and, while queued, [FREE PLAY] plus SETTINGS.
     void placeLobbyFooter() {
         if (!m_lobbyToolbar) return;
-        auto const size=CCDirector::sharedDirector()->getWinSize();auto const layout=corum::ranked::modeLobbyLayout(size.width,size.height);
-        auto const left=layout.leftX-94*layout.scale,right=layout.rightX+94*layout.scale;
-        float textLeft=left+10,textRight=right-108,cursor=left+8;
-        if(auto* debug=typeinfo_cast<CCMenuItemSpriteExtra*>(m_lobbyToolbar->getChildByID("ranked-lobby-debug"_spr))) {
-            debug->setPosition({cursor+debug->getContentSize().width/2,27});
-            if(debug->isVisible()){cursor+=debug->getContentSize().width+8;textLeft=cursor;}
-        }
+        auto const size=CCDirector::sharedDirector()->getWinSize();
+        auto const mode=m_modeTransition.selected();
+        std::vector<CCNode*> row;
+        if(auto* debug=typeinfo_cast<CCMenuItemSpriteExtra*>(m_lobbyToolbar->getChildByID("ranked-lobby-debug"_spr)); debug && debug->isVisible()) row.push_back(debug);
         if(auto* freePlay=typeinfo_cast<CCMenuItemSpriteExtra*>(m_lobbyToolbar->getChildByID("ranked-lobby-free-play"_spr))) {
             auto const& survival=corum::ranked::SurvivalRuntime::get();
-            auto const mode=m_modeTransition.selected();
             auto const visible=m_page==Page::Live && mode && m_queueShown && !m_queueAnimating &&
                 (*mode==corum::ranked::RankedMode::Survival ? survival.canQueueFreePlay() : survival.canSoloQueueFreePlay());
             if(freePlay->isVisible()!=visible)freePlay->setVisible(visible);
-            freePlay->setPosition({cursor+freePlay->getContentSize().width/2,27});
-            if(visible){cursor+=freePlay->getContentSize().width+8;textLeft=cursor;}
+            if(visible) row.push_back(freePlay);
         }
-        if(auto* settings=m_settingsMenu?m_settingsMenu->getChildByID("ranked-settings-button"_spr):nullptr)
-            settings->setPosition({right-8-settings->getContentSize().width/2,27});
-        m_statusTextWidth=std::max(80.0f,textRight-textLeft);
-        if(m_mainStatusLabel){
-            m_mainStatusLabel->setPosition({(textLeft+textRight)/2,27});
-            corum::ranked::ui::fitMenuLabelWidth(m_mainStatusLabel,m_statusTextWidth,.24f,.16f);
+        auto const navVisible=!mode;
+        std::vector<CCMenuItemSpriteExtra*> nav;
+        for(auto const* id:{"ranked-lobby-history","ranked-achievement-trophy","ranked-lobby-leaderboard"})
+            if(auto* item=typeinfo_cast<CCMenuItemSpriteExtra*>(m_lobbyToolbar->getChildByID(std::string(GEODE_MOD_ID)+"/"+id))){item->setVisible(navVisible);if(navVisible)nav.push_back(item);}
+        auto* settings=m_settingsMenu?typeinfo_cast<CCMenuItemSpriteExtra*>(m_settingsMenu->getChildByID("ranked-settings-button"_spr)):nullptr;
+        auto const left=px(28.0f), right=size.width-px(28.0f), gap=4.0f, y=px(4.0f)+kLobbyFooter/2.0f-1.0f;
+        auto const count=static_cast<int>(row.size()+nav.size())+(settings?1:0);
+        auto const slot=(right-left-gap*static_cast<float>(std::max(0,count-1)))/static_cast<float>(std::max(1,count));
+        float x=left;
+        for(auto* item:row){item->setPosition({x+slot/2.0f,y});x+=slot+gap;}
+        for(auto* item:nav){
+            if(auto* face=item->getNormalImage()){layoutFooterFace(face,slot);item->setContentSize(face->getContentSize());face->setPosition({slot/2.0f,13.0f});
+                if(auto* badge=face->getChildByTag(4))badge->setPosition({slot-12.0f,24.0f});}
+            item->setPosition({x+slot/2.0f,y});x+=slot+gap;
         }
+        if(settings)settings->setPosition({x+slot/2.0f,y});
+        m_statusTextWidth=std::max(80.0f,size.width-120.0f);
+        if(m_mainStatusLabel) corum::ranked::ui::fitMenuLabelWidth(m_mainStatusLabel,m_statusTextWidth,fontScale(13.0f),.12f);
     }
 
     void resumeModeSelectionAfterQueue(RuntimeView const& view) {
@@ -3072,83 +3162,43 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     void updateModeLobbyHeader() {
-        auto const selected = m_modeTransition.selected();
-        // L2/L3 are their own pages in the board: the screen title names the
-        // chosen mode, and returns to RANKED on mode select.
-        if (m_root) if (auto* title = typeinfo_cast<CCLabelBMFont*>(m_root->getChildByID("ranked-screen-title"_spr))) {
-            auto const text = !selected ? std::string("RANKED")
-                : *selected == corum::ranked::RankedMode::Survival ? std::string("SURVIVAL") : std::string("SOLO RANKED");
-            title->setString(text.c_str());
-            corum::ranked::ui::fitMenuLabelWidth(title, CCDirector::sharedDirector()->getWinSize().width - 170.0f, 0.70f, 0.40f);
-        }
         if (m_lobbyToolbar) {
             m_lobbyToolbar->setVisible(true);
-            if (auto* history = typeinfo_cast<CCMenuItemSpriteExtra*>(m_lobbyToolbar->getChildByID("ranked-lobby-history"_spr))) {
-                auto* visual = makeActionButtonVisual(tr("history","HISTORY"),false,false,true);
-                visual->setScale(0.66f); history->setNormalImage(visual); history->updateSprite();
-                auto const size = CCDirector::sharedDirector()->getWinSize();
-                auto const historyWidth = history->getContentSize().width;
-                history->setPosition({size.width - 20 - historyWidth / 2,size.height - 28});
-                if (auto* trophy = m_lobbyToolbar->getChildByID("ranked-achievement-trophy"_spr))
-                    trophy->setPosition({size.width - 28 - historyWidth - trophy->getContentSize().width / 2,size.height - 28});
-            }
             if (auto* debug = m_lobbyToolbar->getChildByID("ranked-lobby-debug"_spr))
-                debug->setVisible(selected.has_value());
+                debug->setVisible(m_modeTransition.selected().has_value());
         }
         placeLobbyFooter();
     }
 
+    // L1 <-> L2 / L3 are separate pages: the lobby fades out, the page is
+    // rebuilt for the new selection, and it fades in.
     void animateModeLobby(corum::ranked::RankedMode mode, bool opening) {
-        updateModeLobbyHeader();
-        auto const layout = corum::ranked::modeLobbyLayout(CCDirector::sharedDirector()->getWinSize().width,CCDirector::sharedDirector()->getWinSize().height);
-        // Fade out, move, fade in (modeLobbyFrame); linear here, each phase eases itself.
-        constexpr float duration = corum::ranked::ModeLobbySeconds;
+        (void)mode; (void)opening;
         if(m_lobbyHover)m_lobbyHover->setActive(false);
-        if(opening && m_lobbyContents) {
-            corum::ranked::ui::setModeLobbyOpacity(m_lobbyContents,0);
-            m_lobbyContents->setVisible(false);
-        }
-        auto* other = mode == corum::ranked::RankedMode::Survival ? m_lobbySolo : m_lobbySurvival;
-        auto* selectedCard = mode == corum::ranked::RankedMode::Survival ? m_lobbySurvival : m_lobbySolo;
-        auto* entryControls = typeinfo_cast<CCLayerColor*>(selectedCard->getChildByID("ranked-mode-entry-controls"_spr));
         setLobbyNodeInput(m_lobbySurvival,false); setLobbyNodeInput(m_lobbySolo,false); setLobbyNodeInput(m_lobbyPanel,false);
         if (m_menu) { corum::ranked::ui::cancelMenuTouch(m_menu); m_menu->setTouchEnabled(false); }
         if (m_settingsMenu) { corum::ranked::ui::cancelMenuTouch(m_settingsMenu); m_settingsMenu->setTouchEnabled(false); }
         setLobbyNodeInput(m_lobbyToolbar,false);
-        if (entryControls) entryControls->setVisible(true);
-        selectedCard->setZOrder(5);
-        m_lobbyPanel->setZOrder(4);
-        other->setZOrder(3);
-        selectedCard->setVisible(true);
-        other->setVisible(true);
-        m_lobbyPanel->setVisible(true);
         m_renderedUiKey = presentationKey();
-        auto* motion = corum::ranked::ui::ModeLobbySlide::create(duration,m_lobbySurvival,m_lobbySolo,layout,mode,opening);
-        auto* sequence=CCSequence::create(motion, CallFuncExt::create([weak=WeakRef(this),opening,mode] {
-            auto self=weak.lock();if(!self || !self->getParent())return;
-            auto finish=[weak]{if(auto owner=weak.lock();owner && owner->getParent()){
-                owner->m_modeTransition.finish();owner->syncLobbyInput();owner->refreshLobbyHover();}};
-            if(opening) {
-                auto* hidden=mode==corum::ranked::RankedMode::Survival?self->m_lobbySolo:self->m_lobbySurvival;hidden->setVisible(false);
-                auto* card=mode==corum::ranked::RankedMode::Survival?self->m_lobbySurvival:self->m_lobbySolo;
-                if(auto* controls=card->getChildByID("ranked-mode-entry-controls"_spr))controls->setVisible(false);
-                if(self->m_lobbyContents) {
-                    corum::ranked::ui::fadeModeLobbySurfaces(self->m_lobbyContents,.18f,true);
-                    self->m_lobbyContents->setVisible(true);
-                    self->m_lobbyContents->runAction(CCSequence::create(
-                        corum::ranked::ui::ModeLobbyFade::create(.18f,255,corum::ranked::ui::ModeLobbyEase::SineOut),CallFuncExt::create(finish),nullptr));
-                }
-                else finish();
-            } else {self->m_lobbyPanel->setVisible(false);finish();}
-        }),nullptr);
-        if(!opening && m_lobbyContents) {
-            corum::ranked::ui::fadeModeLobbySurfaces(m_lobbyContents,.18f,false);
-            auto keep=Ref<CCAction>(sequence);
-            m_lobbyContents->runAction(CCSequence::create(corum::ranked::ui::ModeLobbyFade::create(.18f,0,corum::ranked::ui::ModeLobbyEase::SineIn),
-                CallFuncExt::create([weak=WeakRef(this),keep]{if(auto self=weak.lock();self && self->m_lobbyPanel){
-                    if(self->m_lobbyContents)self->m_lobbyContents->setVisible(false);
-                    self->m_lobbyPanel->runAction(keep.data());}}),nullptr));
-        } else m_lobbyPanel->runAction(sequence);
+        constexpr float out = 0.16f;
+        for (auto* group : {m_lobbySurvival, m_lobbySolo, m_lobbyPanel}) {
+            if (!group || !group->isVisible()) continue;
+            corum::ranked::ui::fadeModeLobbySurfaces(group, out, false);
+            group->runAction(corum::ranked::ui::ModeLobbyFade::create(out, 0, corum::ranked::ui::ModeLobbyEase::SineIn));
+        }
+        runAction(CCSequence::create(CCDelayTime::create(out + 0.02f), CallFuncExt::create([weak=WeakRef(this)] {
+            auto self = weak.lock(); if (!self || !self->getParent()) return;
+            self->m_modeTransition.finish();
+            self->m_renderedUiKey.clear();
+            self->render();
+            for (auto* group : {self->m_lobbySurvival, self->m_lobbySolo, self->m_lobbyPanel}) {
+                if (!group || !group->isVisible()) continue;
+                corum::ranked::ui::setModeLobbyOpacity(group, 0);
+                corum::ranked::ui::fadeModeLobbySurfaces(group, 0.22f, true);
+                group->runAction(corum::ranked::ui::ModeLobbyFade::create(0.22f, 255, corum::ranked::ui::ModeLobbyEase::SineOut));
+            }
+            self->syncLobbyInput(); self->refreshLobbyHover();
+        }), nullptr));
     }
 
     void refreshLobbyHover() {
@@ -3743,14 +3793,9 @@ class CorumRankedLayer final : public CCLayerColor {
 
     void renderMain(RuntimeView const& view) {
         auto const size = CCDirector::sharedDirector()->getWinSize();
-        addTopBack(true); addLanguageSelector();
-        // With a mode open, the title names it (L2/L3 pages); see updateModeLobbyHeader.
-        auto const openMode = m_modeTransition.selected();
-        addScreenHeader(!openMode ? "RANKED" : *openMode == corum::ranked::RankedMode::Survival ? "SURVIVAL" : "SOLO RANKED","",corum::ranked::ui::Text,kAccent);
-        if(auto* population=corum::ranked::ui::LobbyPopulationView::create()){
-            population->setID("ranked-lobby-population"_spr);population->setPosition({size.width/2,size.height-53});
-            population->updatePopulation({view.lobbyOffline,view.lobbyOnline,view.lobbyPopulationKnown});m_root->addChild(population,7);
-        }
+        auto const selected = m_modeTransition.selected();
+        addTopBack(true);
+        addLobbyHeader(view, selected);
         if (view.stage != RuntimeStage::Ready && view.stage != RuntimeStage::Queued && view.stage != RuntimeStage::JoiningQueue) {
             auto* message = makeLabel(lobbyMessage(view),0.30f,{size.width/2,size.height/2},kGold,"semibold");
             corum::ranked::ui::fitMenuLabelWidth(message,size.width-60,0.30f,0.17f); m_root->addChild(message,5);
@@ -3758,28 +3803,18 @@ class CorumRankedLayer final : public CCLayerColor {
             else addButton(tr("retry","RETRY"),{size.width/2,size.height/2-45},menu_selector(CorumRankedLayer::onRetry),false,0.65f);
             return;
         }
-        m_seasonShared = nullptr; m_seasonSolo = nullptr; m_seasonSurvival = nullptr;
-        if (seasonShared(view) && view.soloSeason.targetAtMs) {
-            // Both modes share the season: one timer between the title and the population.
-            if (auto* timer = corum::ranked::ui::SeasonTimer::create(false)) {
-                timer->setPosition({size.width / 2, size.height - 47});
-                m_root->addChild(timer, 7); m_seasonShared = timer;
-                if (auto* population = m_root->getChildByID("ranked-lobby-population"_spr)) population->setPositionY(size.height - 61);
-            }
-        }
-        auto const layout = corum::ranked::modeLobbyLayout(size.width,size.height);
-        auto const selected = m_modeTransition.selected();
-        m_lobbySurvival = makeLobbyGroup({selected == corum::ranked::RankedMode::SoloRanked ? layout.rightX : layout.leftX,layout.centerY},layout.scale,"survival-profile-card"_spr);
-        m_lobbySolo = makeLobbyGroup({selected == corum::ranked::RankedMode::SoloRanked ? layout.leftX : layout.rightX,layout.centerY},layout.scale,"solo-ranked-profile-card"_spr);
-        m_lobbyPanel = makeLobbyGroup({(selected ? layout.rightX : layout.leftX) - 94 * layout.scale,layout.centerY},layout.scale,"ranked-mode-menu-panel"_spr);
-        renderModeCard(view,corum::ranked::RankedMode::Survival,m_lobbySurvival);
-        renderModeCard(view,corum::ranked::RankedMode::SoloRanked,m_lobbySolo);
+        // L1 halves / L2-L3 page: lobby groups sit at the origin at scale 1.
+        m_lobbySurvival = makeLobbyGroup({0.0f,0.0f},1.0f,"survival-profile-half"_spr);
+        m_lobbySolo = makeLobbyGroup({0.0f,0.0f},1.0f,"solo-ranked-profile-half"_spr);
+        m_lobbyPanel = makeLobbyGroup({0.0f,0.0f},1.0f,"ranked-mode-menu-panel"_spr);
+        if (!selected || *selected == corum::ranked::RankedMode::Survival) renderModeCard(view,corum::ranked::RankedMode::Survival,m_lobbySurvival);
+        if (!selected || *selected == corum::ranked::RankedMode::SoloRanked) renderModeCard(view,corum::ranked::RankedMode::SoloRanked,m_lobbySolo);
         renderLobbyTools(view);
         updateSeasonTimers();
         if (selected) {
             renderModePanel(view,*selected);
             auto* hidden = *selected == corum::ranked::RankedMode::Survival ? m_lobbySolo : m_lobbySurvival;
-            corum::ranked::ui::setModeLobbyOpacity(hidden,0); hidden->setVisible(false); hidden->setZOrder(3);
+            hidden->setVisible(false);
             auto* card = *selected == corum::ranked::RankedMode::Survival ? m_lobbySurvival : m_lobbySolo;
             card->setZOrder(5); m_lobbyPanel->setZOrder(4);
             m_queueShown = lobbyQueueActive();

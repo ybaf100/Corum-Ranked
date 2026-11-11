@@ -62,17 +62,11 @@ int main(){using namespace corum::ranked;using namespace corum::ranked::ui;
    CCDirector::sharedDirector()->size=size;
    for(int repeat=0;repeat<3;repeat++)for(auto mode:{RankedMode::Survival,RankedMode::SoloRanked}){
     assert(o.m_modeTransition.select(mode));o.m_modeTransition.finish();o.updateModeLobbyHeader();
-    auto*normal=history->getNormalImage();auto*panel=normal->children[0];
-    // The quiet outlined slab in both channels: steel frame, upright caption.
-    assert(panel->color==SurfaceRaised&&panel->children[0]->color==kSteel);
-    assert(normal->children[1]->color==Text&&!normal->children[1]->leaning);
-    assert(std::abs(history->size.width-normal->size.width*.66f)<.001f);
-    assert(normal->anchor.x==.5f&&std::abs(normal->position.x-history->size.width/2)<.001f);
-    assert(std::abs(history->position.x+history->size.width/2-(size.width-20))<.001f);
-    assert(history->position.y==size.height-28&&trophy->position.y==history->position.y);
-    assert(std::abs(history->position.x-history->size.width/2-(trophy->position.x+trophy->size.width/2)-8)<.001f);
+    // L1: the toolbar stays visible and its buttons keep the footer
+    // placement (placeLobbyFooter) through channel entry and Back.
+    assert(o.m_lobbyToolbar->visible);
     auto position=history->position;assert(o.m_modeTransition.back());o.m_modeTransition.finish();o.updateModeLobbyHeader();
-    assert(history->position.x==position.x&&history->position.y==position.y);
+    assert(history->position.x==position.x&&history->position.y==position.y&&o.m_lobbyToolbar->visible);
    }
   }
   RuntimeView view;auto text=o.lobbyMessage(view);

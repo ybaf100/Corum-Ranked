@@ -459,11 +459,11 @@ test('equipped title stays separate from the shared streak/promotion/warning sta
     assert.match(status, /profile.demotionWarning/);
     assert.match(status, /tr\("your-rank"/);
     assert.doesNotMatch(status, /achievementTitleText|achievementTitleColor/);
-    assert.match(lobby, /equippedTitle->setID\("ranked-profile-equipped-title"_spr\)/);
-    assert.match(lobby, /addRankStatus\(profile/);
-    // The title sits under the bar row, above the record and the ENTER slab.
-    assert.match(lobby, /\{colX, leftCenter\.y - 60\.0f\}/);
-    assert.match(lobby, /addPlacementProgress/);
+    // The equipped title shows beside the name on the L2/L3 page; the L1 half
+    // carries the placement bar instead of a status row.
+    const panel = popup.slice(popup.indexOf('    void renderModePanel('), popup.indexOf('    // In-game HUD editor entry'));
+    assert.match(panel, /achievementTitleText\(view\.achievements\.equippedTitle\)/);
+    assert.match(lobby, /tr\("placement", "PLACEMENT"\)/);
     const card = popup.slice(popup.indexOf('    void addPlayerCard('), popup.indexOf('    void renderResources('));
     assert.match(card, /addRankStatus\(profile/);
     assert.doesNotMatch(card, /auto\* warning = makeLabel/);
