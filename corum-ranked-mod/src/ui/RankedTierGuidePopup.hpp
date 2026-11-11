@@ -11,7 +11,7 @@ public:
     void onClose(cocos2d::CCObject*) override;
     void onExit() override;
 private:
-    bool init();
+    bool init() override;
     void fetch();
     void render();
     void onRefresh(cocos2d::CCObject*);

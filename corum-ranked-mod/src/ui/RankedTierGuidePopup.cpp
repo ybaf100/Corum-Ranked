@@ -8,6 +8,7 @@
 #include "../domain/TierGuidePresentation.hpp"
 #include <algorithm>
 #include <chrono>
+#include <utility>
 
 using namespace geode::prelude;
 namespace corum::ranked::ui {
@@ -106,14 +107,15 @@ void RankedTierGuidePopup::render() {
         for(std::size_t i=0;i<cutoffs.size();++i)
             bands.push_back({cutoffs[i].tier,cutoffs[i].minimum,i+1<cutoffs.size()?std::optional<int>(cutoffs[i+1].minimum):std::nullopt});
     }else if(!m_solo.isNull()){
-        for(auto const& band:m_solo["tiers"].asArray().unwrapOr(std::vector<matjson::Value>{})){
+        std::vector<matjson::Value> const tiers=std::as_const(m_solo)["tiers"].asArray().unwrapOr(std::vector<matjson::Value>{});
+        for(auto const& band:tiers){
             auto const max=band["maxExclusive"].asInt();
             bands.push_back({band["tier"].asString().unwrapOr(""),static_cast<int>(band["minInclusive"].asInt().unwrapOr(0)),
                 max.isOk()?std::optional<int>(static_cast<int>(max.unwrap())):std::nullopt,
                 static_cast<int>(band["promotionGames"].asInt().unwrapOr(0)),static_cast<int>(band["promotionWinsRequired"].asInt().unwrapOr(0))});
         }
     }
-    auto const current=m_survival?view.survival.profile.displayedTier:view.profile.displayedTier;
+    auto const current=m_survival?view.survival.profile.displayedTier:view.profileTier;
     auto const columns=tierGuideColumns(bands);
     auto const columnWidth=(Width-Pad*2-ColumnGap*4)/5,top=246.f,bottom=100.f,height=top-bottom;
     for(std::size_t i=0;i<columns.size();++i){
