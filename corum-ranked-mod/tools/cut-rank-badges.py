@@ -2,8 +2,9 @@
 """Cut the lower-tier rank badges and rebuild their finished trophies.
 
 UNRANKED keeps only its core, drawn twice as large so it still reads at
-list size. RED keeps only its four spike arrows and its core, enlarged 1.8
-times so the arrows sit against it (its body layer is cleared).
+list size. RED loses the outer square frame of its body (the inner ring
+stays) and its spike arrows are drawn 0.78 times as large so they meet the
+ring.
 AQUA and BRONZE lose the middle of each
 side of their body layer (a horizontal and a vertical band through the
 centre); the narrower the band, the higher the tier. Ornament layers and the
@@ -35,11 +36,14 @@ LAYERS = {
 # side of the body layer.
 BODY_CUT = {'bronze': 45, 'aqua': 80}
 # Tiers whose body layer is cleared entirely.
-BODY_CLEARED = ('red',)
+BODY_CLEARED = ()
 # Cores enlarged around the canvas centre while they are still at their
 # original size (idempotent: an enlarged core is left alone):
 # tier -> (scale, original maximum width in canvas pixels).
-CORE_ENLARGE = {'unranked': (2.0, 300), 'red': (1.8, 400)}
+CORE_ENLARGE = {'unranked': (2.0, 300)}
+# RED: body kept inside this square radius; spikes scaled while still at
+# their original extent (idempotent).
+RED_RING_RADIUS, RED_SPIKE_SCALE, RED_SPIKE_ORIGINAL_MIN = 235, 0.78, 450
 
 
 def layer_path(tier, role):
@@ -75,23 +79,30 @@ def enlarge_core(tier, scale, original_max):
     save(path, np.asarray(big.crop((offset, offset, offset + CANVAS, offset + CANVAS))).copy())
 
 
-def keep_red_arrows():
-    # The four spike arrows only: the scattered pixels and hairlines of the
-    # spikes layer would float around the enlarged core.
-    path = layer_path('red', 'spikes')
-    pixels = load(path)
+def trim_red():
     yy, xx = np.mgrid[0:CANVAS, 0:CANVAS]
     centre = (CANVAS - 1) / 2.0
-    vertical = (np.abs(xx - centre) < 90) & ((yy < 200) | (yy > 820))
-    horizontal = (np.abs(yy - centre) < 120) & ((xx < 200) | (xx > 820))
-    pixels[~(vertical | horizontal)] = 0
-    save(path, pixels)
+    square = np.maximum(np.abs(xx - centre), np.abs(yy - centre))
+    body = load(layer_path('red', 'body'))
+    body[square >= RED_RING_RADIUS] = 0
+    save(layer_path('red', 'body'), body)
+    path = layer_path('red', 'spikes')
+    spikes = load(path)
+    ys, xs = np.nonzero(spikes[..., 3] > 16)
+    if max(centre - xs.min(), xs.max() - centre) < RED_SPIKE_ORIGINAL_MIN:
+        return
+    size = round(CANVAS * RED_SPIKE_SCALE)
+    offset = (CANVAS - size) // 2
+    small = Image.fromarray(spikes, 'RGBA').resize((size, size), Image.LANCZOS)
+    out = Image.new('RGBA', (CANVAS, CANVAS), (0, 0, 0, 0))
+    out.alpha_composite(small, (offset, offset))
+    save(path, np.asarray(out).copy())
 
 
 def cut():
     for tier, (scale, original_max) in CORE_ENLARGE.items():
         enlarge_core(tier, scale, original_max)
-    keep_red_arrows()
+    trim_red()
     for role in LAYERS['unranked']:
         if role == 'core':
             continue
