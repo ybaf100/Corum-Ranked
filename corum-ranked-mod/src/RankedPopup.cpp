@@ -4422,60 +4422,95 @@ class CorumRankedLayer final : public CCLayerColor {
             CCRemoveSelf::create(), nullptr));
     }
 
+    // M1 (match found), ported from the board: lime and red skewed fields
+    // behind you and the opponent, the big leaning VS with the mode chip in
+    // between, and MATCH FOUND at the top; the countdown to the ban or round 1
+    // sits under the centre line.
     void renderMatchFound(MatchView const& match) {
         auto const size = CCDirector::sharedDirector()->getWinSize();
         auto const ownA = match.side == "A";
-        // Entrance (once per match): the versus intro, then cards slide in from
-        // the sides, VS pops and the countdown box opens.
         auto const animate = m_matchFoundMotionKey != match.matchId && phaseSeconds() < 3.5;
         m_matchFoundMotionKey = match.matchId;
         auto const lead = animate ? kVersusSettle + 0.2f : 0.0f;
+        // Fields: 700 x 720 px at skewX(-12deg) with a 6 px inner rule.
+        auto const field = [&](bool left) {
+            auto const color = left ? ccc3(27, 36, 16) : ccc3(42, 18, 24);
+            auto const rule = left ? corum::ranked::ui::Accent : kRed;
+            auto const width = px(700.0f), x = left ? -px(80.0f) : size.width + px(80.0f) - width;
+            auto* fill = CCLayerColor::create({color.r, color.g, color.b, 255}, width, size.height + px(80.0f));
+            fill->setPosition({x, -px(40.0f)}); fill->setSkewX(12.0f); m_root->addChild(fill, 0);
+            auto* edge = CCLayerColor::create({rule.r, rule.g, rule.b, 255}, px(6.0f), size.height + px(80.0f));
+            edge->setPosition({left ? x + width - px(6.0f) : x, -px(40.0f)}); edge->setSkewX(12.0f); m_root->addChild(edge, 1);
+        };
+        field(true); field(false);
+        auto const dash = [&](float x, float y, float w, ccColor3B c, GLubyte a) {
+            auto* line = CCLayerColor::create({c.r, c.g, c.b, a}, w, px(3.0f)); line->setPosition({x, y}); m_root->addChild(line, 1);
+        };
+        dash(px(40.0f), size.height - px(150.0f), px(160.0f), corum::ranked::ui::Accent, 128);
+        dash(px(80.0f), size.height - px(420.0f), px(110.0f), corum::ranked::ui::Accent, 90);
+        dash(size.width - px(40.0f) - px(140.0f), size.height - px(190.0f), px(140.0f), kRed, 128);
+        dash(size.width - px(90.0f) - px(100.0f), size.height - px(460.0f), px(100.0f), kRed, 90);
+        // Top: MATCH FOUND chip.
+        addChip(m_root, tr("match-found", "MATCH FOUND"), {size.width / 2.0f - 34.0f, size.height - px(32.0f)}, corum::ranked::ui::AccentFill, corum::ranked::ui::AccentInk, 18.0f);
+        // Sides: you (left) and the opponent (right).
+        auto const sideW = (size.width - px(200.0f)) / 2.0f;
         auto* savedRoot = m_root; auto* savedMenu = m_menu;
         for (int side = 0; side < 2; ++side) {
+            auto const own = side == 0;
+            auto const sideA = own == ownA;
             auto* group = makeMotionGroup();
             m_root = group; m_menu = typeinfo_cast<CCMenu*>(group->getChildByID("ranked-motion-menu"_spr));
-            if (side == 0) addPlayerCard({100.0f, size.height / 2.0f - 2.0f}, match.playerAName, match.playerAProfile, ownA, match.playerAAccountId);
-            else addPlayerCard({size.width - 100.0f, size.height / 2.0f - 2.0f}, match.playerBName, match.playerBProfile, !ownA, match.playerBAccountId);
+            auto const cx = own ? sideW / 2.0f : size.width - sideW / 2.0f;
+            auto const cy = size.height / 2.0f;
+            m_root->addChild(makeLabel(own ? tr("you", "YOU") : tr("opponent", "OPPONENT"), fontScale(14.0f), {cx, cy + 57.0f},
+                own ? corum::ranked::ui::Accent : kRed, "extrabold"), 5);
+            CCNode* icon = own ? static_cast<CCNode*>(corum::ranked::ui::PlayerIcon::createLocal())
+                : static_cast<CCNode*>(corum::ranked::ui::PlayerIcon::createRemote(sideA ? match.playerAAccountId : match.playerBAccountId));
+            if (icon) { icon->setScale(1.25f); icon->setPosition({cx, cy + 30.0f}); m_root->addChild(icon, 5); }
+            auto* name = makeLabel(upper(sideA ? match.playerAName : match.playerBName), fontScale(44.0f), {cx, cy - 2.0f}, corum::ranked::ui::Text, "black");
+            corum::ranked::ui::leanLabel(name); corum::ranked::ui::fitMenuLabelWidth(name, sideW - 20.0f, fontScale(44.0f), 0.3f); m_root->addChild(name, 5);
+            auto const& profile = sideA ? match.playerAProfile : match.playerBProfile;
+            if (profile.equippedTitle.active) {
+                auto* title = makeLabel(achievementTitleText(profile.equippedTitle), fontScale(16.0f), {cx, cy - 22.0f}, achievementTitleColor(profile.equippedTitle), "extrabold");
+                corum::ranked::ui::fitMenuLabelWidth(title, sideW - 30.0f, fontScale(16.0f), 0.12f); m_root->addChild(title, 5);
+            }
+            auto const tier = upper(profile.displayedTier);
+            auto const chipText = profile.visibleRankedScore ? fmt::format("{}  {} LP", corum::ranked::rankTierDisplay(tier), *profile.visibleRankedScore)
+                : corum::ranked::rankTierDisplay(tier);
+            auto* chipLabel = makeLabel(chipText, fontScale(15.0f), {cx, cy - 38.0f}, tierColor(tier), "black");
+            auto const chipW = chipLabel->getScaledContentSize().width + px(24.0f);
+            auto* chip = CCLayerColor::create({32, 35, 46, 255}, chipW, px(26.0f)); chip->setPosition({cx - chipW / 2.0f, cy - 38.0f - px(13.0f)}); chip->setSkewX(8.0f);
+            m_root->addChild(chip, 4); m_root->addChild(chipLabel, 5);
             m_root = savedRoot; m_menu = savedMenu;
-            if (animate) { group->setPositionX(side == 0 ? -60.0f : 60.0f); revealGroup(group, lead + 0.05f, {side == 0 ? 60.0f : -60.0f, 0}, 0.45f); }
+            if (animate) { group->setPositionX(own ? -60.0f : 60.0f); revealGroup(group, lead + 0.05f, {own ? 60.0f : -60.0f, 0}, 0.45f); }
         }
-
-        addScreenHeader(
-            tr("match-found", "MATCH FOUND"),
-            match.mapBan ? tr("private-ban-phase", "PRIVATE BAN PHASE") : tr("no-ban-random-maps", "NO BAN  ·  MAPS DRAWN AT RANDOM"),
-            corum::ranked::ui::Text,
-            kAccent
-        );
-
-        auto* versus = makeLabel("VS", 0.40f, {size.width / 2.0f, size.height / 2.0f + 61.0f}, kGold, "display");
-        corum::ranked::ui::leanLabel(versus);
+        // Centre: VS (120 px, rotated and leaning), the mode chip and the ban line.
+        auto* versus = makeLabel("VS", fontScale(120.0f), {size.width / 2.0f, size.height / 2.0f + 22.0f}, corum::ranked::ui::Accent, "black");
+        versus->setRotation(-6.0f); corum::ranked::ui::leanLabel(versus);
+        auto* shadow = makeLabel("VS", fontScale(120.0f), {size.width / 2.0f + 3.0f, size.height / 2.0f + 19.0f}, corum::ranked::ui::Ink, "black");
+        shadow->setRotation(-6.0f); corum::ranked::ui::leanLabel(shadow); m_root->addChild(shadow, 4);
         m_root->addChild(versus, 5);
-        // M1: the mode chip under VS.
-        {
-            auto* chip = corum::ranked::ui::slab({96.0f, 13.0f}, {size.width / 2.0f, size.height / 2.0f + 41.0f}, corum::ranked::ui::AccentFill);
-            chip->setID("ranked-versus-mode-chip"_spr); m_root->addChild(chip, 5);
-            auto* chipText = makeLabel("SOLO RANKED · BO3", 0.17f, {size.width / 2.0f, size.height / 2.0f + 41.0f}, corum::ranked::ui::AccentInk, "black");
-            corum::ranked::ui::fitMenuLabelWidth(chipText, 88.0f, 0.17f, 0.11f); m_root->addChild(chipText, 6);
-        }
         if (animate) {
-            versus->setScale(0.0f);
-            versus->runAction(CCSequence::create(CCDelayTime::create(lead + 0.35f), CCEaseBackOut::create(CCScaleTo::create(0.32f, 0.40f)), nullptr));
+            auto const finalScale = versus->getScale();
+            for (auto* mark : {versus, shadow}) {
+                mark->setScale(0.0f);
+                mark->runAction(CCSequence::create(CCDelayTime::create(lead + 0.35f), CCEaseBackOut::create(CCScaleTo::create(0.32f, finalScale)), nullptr));
+            }
         }
         auto* centerGroup = makeMotionGroup();
         auto* outerRoot = m_root; m_root = centerGroup;
-
+        auto const chipLabelText = std::string("SOLO RANKED · BO3");
+        auto* modeLabel = makeLabel(chipLabelText, fontScale(15.0f), {}, corum::ranked::ui::AccentInk, "black");
+        auto const modeW = modeLabel->getScaledContentSize().width + px(24.0f);
+        addChip(m_root, chipLabelText, {size.width / 2.0f - modeW / 2.0f, size.height / 2.0f - 22.0f}, corum::ranked::ui::AccentFill, corum::ranked::ui::AccentInk, 15.0f);
+        auto* banLine = makeLabel(match.mapBan ? tr("private-ban-phase", "PRIVATE BAN PHASE") : tr("no-ban-random-maps", "NO BAN  ·  MAPS DRAWN AT RANDOM"),
+            fontScale(13.0f), {size.width / 2.0f, size.height / 2.0f - 38.0f}, corum::ranked::ui::Text, "semibold");
+        corum::ranked::ui::fitMenuLabelWidth(banLine, px(200.0f), fontScale(13.0f), 0.1f); m_root->addChild(banLine, 5);
         auto const left = std::max(0, 5 - static_cast<int>(std::floor(phaseSeconds())));
-        auto* countdownPlate = makeNeonPanel({116.0f, 58.0f}, {size.width / 2.0f, size.height / 2.0f - 2.0f}, left <= 2 ? kSideRed : kSteel, {21, 23, 29}, 236);
-        m_root->addChild(countdownPlate, 2);
-        auto* phase = makeLabel(match.mapBan ? tr("map-ban-in", "MAP BAN IN") : tr("round-one-in", "ROUND 1 IN"), 0.27f, {size.width / 2.0f, size.height / 2.0f + 14.0f}, kAccent, "semibold");
-        m_root->addChild(phase, 5);
-        auto* countdown = makeLabel(fmt::format("{}", left), 0.64f, {size.width / 2.0f, size.height / 2.0f - 8.0f}, left <= 2 ? kSideRed : kGold, "black");
-        m_matchFoundCountdownLabel = countdown;
-        m_root->addChild(countdown, 5);
-        auto* hint = makeLabel(match.mapBan ? tr("prepare-private-ban", "GET READY TO CHOOSE A PRIVATE BAN") : tr("prepare-round-one", "GET READY FOR ROUND 1"),
-            0.24f, {size.width / 2.0f, size.height / 2.0f - 35.0f}, ccc3(210, 219, 236), "semibold");
-        corum::ranked::ui::fitMenuLabelWidth(hint, 176.0f, 0.24f, 0.16f);
-        m_root->addChild(hint, 5);
+        m_root->addChild(makeLabel(match.mapBan ? tr("map-ban-in", "MAP BAN IN") : tr("round-one-in", "ROUND 1 IN"), fontScale(13.0f),
+            {size.width / 2.0f, size.height / 2.0f - 62.0f}, corum::ranked::ui::TextMuted, "semibold"), 5);
+        auto* countdown = makeLabel(fmt::format("{}", left), fontScale(34.0f), {size.width / 2.0f, size.height / 2.0f - 78.0f}, left <= 2 ? kSideRed : kGold, "black");
+        m_matchFoundCountdownLabel = countdown; m_root->addChild(countdown, 5);
         m_root = outerRoot;
         if (animate) {
             centerGroup->setPositionY(-10.0f); revealGroup(centerGroup, lead + 0.55f, {0, 10.0f}, 0.35f); addVersusIntro(match);
@@ -4485,128 +4520,133 @@ class CorumRankedLayer final : public CCLayerColor {
         }
     }
 
+    // M2 (map ban), ported from the board: a header with BAN MAP, both
+    // players' ban state and the timer; the instruction line; five map cards
+    // (thumbnail slot with the difficulty, title, creator, rating and length,
+    // BAN at the bottom). A ban lands instantly; the card fades and sinks.
     void renderBan(MatchView const& match) {
         auto const size = CCDirector::sharedDirector()->getWinSize();
         addTopBack(true);
-
-        addScreenHeader(
-            tr("ban-map", "BAN MAP"),
-            tr("choose-map-remove", "CHOOSE ONE MAP TO REMOVE"),
-            corum::ranked::ui::Text,
-            kAccent
-        );
-
-        auto const remaining = std::max<std::int64_t>(0, RankedRuntime::get().deadlineSeconds().value_or(0));
-        auto* timerPlate = makeNeonPanel({54.0f, 48.0f}, {size.width - 42.0f, size.height - 41.0f}, remaining <= 3 ? kSideRed : kSteel, {22, 24, 31}, 250);
-        m_root->addChild(timerPlate, 3);
-        auto* timer = makeLabel(fmt::format("{}", remaining), 0.58f, {size.width - 42.0f, size.height - 34.0f}, remaining <= 3 ? kSideRed : ccc3(245, 248, 255), "black");
-        m_banTimerLabel = timer;
-        m_root->addChild(timer, 6);
-        auto* timerCaption = makeLabel(tr("time-left", "TIME LEFT"), 0.24f, {size.width - 42.0f, size.height - 56.0f}, kAccent, "semibold");
-        m_root->addChild(timerCaption, 6);
-
-        // BO3 shows five candidates, a single game four.
+        auto const headerY = size.height - kLobbyHeader / 2.0f;
+        auto* brand = makeLabel(tr("ban-map", "BAN MAP"), fontScale(30.0f), {px(28.0f) + px(48.0f) + px(16.0f), headerY}, corum::ranked::ui::Text, "black", {0.0f, 0.5f});
+        corum::ranked::ui::leanLabel(brand); brand->setID("ranked-screen-title"_spr); m_root->addChild(brand, 6);
         auto const count = std::min<std::size_t>(5, match.candidateMaps.size());
-        auto const cardWidth = std::min(130.0f, (size.width - 34.0f) / static_cast<float>(std::max<std::size_t>(4, count)));
-        auto const cardHeight = std::min(170.0f, size.height - 122.0f);
-        auto const startX = size.width / 2.0f - cardWidth * static_cast<float>(count > 0 ? count - 1 : 0) / 2.0f;
-        auto const centerY = size.height / 2.0f + 2.0f;
-        // Entrance (once per match): the match-found box opens across the row,
-        // then the map cards rise in one after another.
+        m_root->addChild(makeLabel(fmt::format("BAN MAP · {} {}", count, tr("ban-one-of", "MAPS, BAN 1")), fontScale(13.0f),
+            {brand->getPositionX() + brand->getScaledContentSize().width + 10.0f, headerY}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f}), 6);
+        // Right: own state · vs · opponent state · timer panel.
+        auto const ownA = match.side == "A";
+        auto const ownBanned = !m_selectedBan.empty();
+        float right = size.width - px(28.0f);
+        {
+            constexpr float panelW = 46.0f, panelH = 28.0f;
+            auto* panel = CCLayerColor::create({23, 25, 34, 255}, panelW, panelH); panel->setPosition({right - panelW, headerY - panelH / 2.0f}); m_root->addChild(panel, 3);
+            auto* rule = CCLayerColor::create({corum::ranked::ui::Accent.r, corum::ranked::ui::Accent.g, corum::ranked::ui::Accent.b, 255}, panelW, 1.0f);
+            rule->setPosition({right - panelW, headerY + panelH / 2.0f - 1.0f}); m_root->addChild(rule, 4);
+            m_root->addChild(makeLabel(tr("time-left", "TIME LEFT"), fontScale(13.0f), {right - panelW / 2.0f, headerY + 7.0f}, corum::ranked::ui::TextMuted, "semibold"), 5);
+            auto const remaining = std::max<std::int64_t>(0, RankedRuntime::get().deadlineSeconds().value_or(0));
+            auto* timer = makeLabel(fmt::format("{}", remaining), fontScale(24.0f), {right - panelW / 2.0f, headerY - 5.0f}, remaining <= 3 ? kSideRed : corum::ranked::ui::Text, "black");
+            m_banTimerLabel = timer; m_root->addChild(timer, 6);
+            right -= panelW + 12.0f;
+        }
+        auto const playerState = [&](bool own) {
+            auto const sideA = own == ownA;
+            auto const done = own && ownBanned;
+            auto* chipText = makeLabel(done ? tr("ban-done", "BANNED") : tr("ban-choosing", "CHOOSING"), fontScale(13.0f), {}, done ? corum::ranked::ui::AccentInk : corum::ranked::ui::TextMuted, "black");
+            auto const chipW = chipText->getScaledContentSize().width + 10.0f;
+            addChip(m_root, done ? tr("ban-done", "BANNED") : tr("ban-choosing", "CHOOSING"), {right - chipW, headerY}, done ? corum::ranked::ui::AccentFill : ccc3(32, 35, 46),
+                done ? corum::ranked::ui::AccentInk : corum::ranked::ui::TextMuted);
+            right -= chipW + 5.0f;
+            auto* name = makeLabel(sideA ? match.playerAName : match.playerBName, fontScale(15.0f), {right, headerY}, corum::ranked::ui::Text, "extrabold", {1.0f, 0.5f});
+            corum::ranked::ui::fitMenuLabelWidth(name, 70.0f, fontScale(15.0f), 0.12f); m_root->addChild(name, 5);
+            right -= name->getScaledContentSize().width + 5.0f;
+            CCNode* icon = own ? static_cast<CCNode*>(corum::ranked::ui::PlayerIcon::createLocal())
+                : static_cast<CCNode*>(corum::ranked::ui::PlayerIcon::createRemote(sideA ? match.playerAAccountId : match.playerBAccountId));
+            if (icon) { icon->setScale(0.42f); icon->setPosition({right - 7.0f, headerY}); m_root->addChild(icon, 5); }
+            right -= 19.0f;
+        };
+        playerState(false);
+        m_root->addChild(makeLabel("vs", fontScale(15.0f), {right - 6.0f, headerY}, ccc3(111, 116, 134), "extrabold"), 5);
+        right -= 16.0f;
+        playerState(true);
+        // Instruction line (+ NO BAN on the right).
+        auto const lineY = size.height - kLobbyHeader - 9.0f;
+        auto* lead = makeLabel(tr("ban-instruction", "BAN ONE MAP."), fontScale(18.0f), {px(28.0f), lineY}, corum::ranked::ui::Text, "extrabold", {0.0f, 0.5f});
+        m_root->addChild(lead, 5);
+        auto* rest = makeLabel(tr("private-ban-notice", "YOUR BAN IS PRIVATE  |  REVEALED WHEN THE PHASE ENDS"), fontScale(15.0f),
+            {lead->getPositionX() + lead->getScaledContentSize().width + 6.0f, lineY}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f});
+        corum::ranked::ui::fitMenuLabelWidth(rest, size.width - px(28.0f) - 90.0f - rest->getPositionX(), fontScale(15.0f), 0.1f); m_root->addChild(rest, 5);
+        if (m_selectedBan == kNoBanChoice) addChip(m_root, tr("no-ban", "NO BAN"), {size.width - px(28.0f) - 60.0f, lineY}, kGold, corum::ranked::ui::AccentInk);
+        else if (m_pendingBan == kNoBanChoice) addChip(m_root, tr("banning", "BANNING..."), {size.width - px(28.0f) - 60.0f, lineY}, kGold, corum::ranked::ui::AccentInk);
+        else if (m_selectedBan.empty() && m_pendingBan.empty())
+            boardButton(tr("no-ban", "NO BAN"), {px(150.0f), px(34.0f)}, {size.width - px(28.0f) - px(75.0f), lineY}, menu_selector(CorumRankedLayer::onNoBan), 14.0f, false, "ranked-ban-none"_spr);
+
+        // Cards: five columns, 12 px gaps, between the line and an 18 px margin.
+        auto const gap = px(12.0f), x0 = px(28.0f), width = size.width - 2.0f * x0;
+        auto const cardW = (width - gap * 4.0f) / 5.0f;
+        auto const cardTop = lineY - 9.0f - px(16.0f), cardBottom = px(18.0f), cardH = cardTop - cardBottom;
+        auto const startX = size.width / 2.0f - (cardW + gap) * static_cast<float>(count > 0 ? count - 1 : 0) / 2.0f;
         auto const animate = m_banMotionKey != match.matchId;
         m_banMotionKey = match.matchId;
-        if (animate) {
-            auto* box = makeNeonPanel({size.width - 22.0f, cardHeight + 14.0f}, {size.width / 2.0f, centerY}, kSteel, {21, 23, 29}, 200);
-            box->setScaleX(116.0f / (size.width - 22.0f)); box->setScaleY(58.0f / (cardHeight + 14.0f));
-            box->runAction(CCSequence::create(CCEaseOut::create(CCScaleTo::create(0.30f, 1.0f), 3.0f), CCDelayTime::create(0.35f),
-                CallFuncExt::create([box] { corum::ranked::ui::fadeModeLobbySurfaces(box, 0.3f, false); }), CCDelayTime::create(0.32f), CCRemoveSelf::create(), nullptr));
-            m_root->addChild(box, 0);
-            holdForMotion(1.1f);
-        }
+        if (animate) holdForMotion(0.30f + 0.06f * static_cast<float>(count) + 0.4f);
         auto* savedRoot = m_root; auto* savedMenu = m_menu;
         for (std::size_t i = 0; i < count; ++i) {
             auto* group = makeMotionGroup();
             m_root = group; m_menu = typeinfo_cast<CCMenu*>(group->getChildByID("ranked-motion-menu"_spr));
-            if (animate) { group->setPositionY(-14.0f); revealGroup(group, 0.30f + 0.06f * static_cast<float>(i), {0, 14.0f}, 0.34f); }
-            auto const x = startX + cardWidth * static_cast<float>(i);
+            if (animate) { group->setPositionY(-14.0f); revealGroup(group, 0.10f + 0.06f * static_cast<float>(i), {0, 14.0f}, 0.34f); }
             auto const& candidate = match.candidateMaps[i];
-            auto const diffColor = difficultyColor(candidate.difficulty);
+            auto const x = startX + (cardW + gap) * static_cast<float>(i), left = x - cardW / 2.0f;
             auto const selected = m_selectedBan == candidate.canonicalLevelId;
             auto const pending = m_pendingBan == candidate.canonicalLevelId;
-            auto const accent = selected ? kRed : (pending ? kGold : kSteel);
-
-            auto* panel = makeNeonPanel({cardWidth - 5.0f, cardHeight}, {x, centerY}, accent, kDeepPanel, 248);
-            m_root->addChild(panel, 1);
-
-            auto* mapIndex = makeLabel(
-                fmt::format("{} {:02d}", tr("map", "MAP"), static_cast<int>(i + 1)),
-                0.22f,
-                {x, centerY + cardHeight / 2.0f - 13.0f},
-                selected ? kRed : (pending ? kGold : corum::ranked::ui::TextMuted),
-                "semibold"
-            );
-            m_root->addChild(mapIndex, 5);
-
-            // Decorative map emblem. This stays entirely inside base GD assets and
-            // gives each card a stronger visual anchor than title-only rectangles.
-            auto* emblemBack = makeNeonPanel({40.0f, 40.0f}, {x, centerY + 47.0f}, diffColor, {16, 17, 22}, 250);
-            m_root->addChild(emblemBack, 2);
-            auto* emblem = CCSprite::createWithSpriteFrameName("GJ_bigStar_001.png");
-            if (emblem) {
-                emblem->setScale(0.34f);
-                emblem->setColor(diffColor);
-                emblem->setPosition({x, centerY + 47.0f});
-                m_root->addChild(emblem, 4);
-            }
-
-            auto* map = makeLabel(candidate.title, 0.31f, {x, centerY + 13.0f}, corum::ranked::ui::Text, "semibold");
-            corum::ranked::ui::fitFullMenuLabel(map, cardWidth - 12.0f, 26.0f, 0.31f);
-            m_root->addChild(map, 4);
-
-            auto* difficultyPlate = makeNeonPanel({cardWidth - 22.0f, 38.0f}, {x, centerY - 20.0f}, diffColor, {24, 26, 34}, 245);
-            m_root->addChild(difficultyPlate, 2);
-            addMapDifficulty(candidate, {x, centerY - 12}, cardWidth - 28, 18);
-            auto const lengthMetadata=corum::ranked::ui::displayedMapMetadata(candidate.levelId,candidate.metadata);
-            auto* diff = makeLabel(corum::ranked::mapLengthText(lengthMetadata), 0.25f, {x, centerY - 27.0f}, corum::ranked::ui::Text, "semibold");
-            corum::ranked::ui::fitMenuLabelWidth(diff, cardWidth - 28.0f, 0.25f, 0.19f);
-            m_root->addChild(diff, 4);
-
-            auto const actionY = centerY - cardHeight / 2.0f + 21.0f;
+            auto* panel = CCLayerColor::create({23, 25, 34, 255}, cardW, cardH); panel->setPosition({left, cardBottom}); m_root->addChild(panel, 1);
+            // Thumbnail slot (120 px) with the difficulty.
+            auto const thumbH = px(120.0f);
+            auto* thumb = CCLayerColor::create({32, 35, 46, 255}, cardW, thumbH); thumb->setPosition({left, cardTop - thumbH}); m_root->addChild(thumb, 2);
+            addMapDifficulty(candidate, {x, cardTop - thumbH / 2.0f}, cardW - 16.0f, 22.0f);
+            if (selected) addChip(m_root, tr("ban", "BAN"), {left + 5.0f, cardTop - 9.0f}, kRed, corum::ranked::ui::AccentInk, 15.0f);
+            // Title (18 px), creator, rating and length.
+            float y = cardTop - thumbH - 6.0f - 6.0f;
+            auto* title = makeLabel(candidate.title, fontScale(18.0f), {left + 6.0f, y}, selected ? corum::ranked::ui::TextMuted : corum::ranked::ui::Text, "black", {0.0f, 0.5f});
+            corum::ranked::ui::fitMenuLabelWidth(title, cardW - 12.0f, fontScale(18.0f), 0.12f); m_root->addChild(title, 5);
             if (selected) {
-                auto* state = makeTextPlate(tr("banned", "BANNED"), {cardWidth - 18.0f, 24.0f}, {x, actionY}, kRed, 0.18f, kRed);
-                m_root->addChild(state, 3);
-                // The banned card fades back and sinks a little.
-                auto* veil = CCLayerColor::create({13, 14, 18, 0}, cardWidth - 5.0f, cardHeight);
-                veil->setPosition({x - (cardWidth - 5.0f) / 2.0f, centerY - cardHeight / 2.0f}); m_root->addChild(veil, 9);
+                auto* strike = CCLayerColor::create({169, 174, 189, 255}, title->getScaledContentSize().width, 1.0f);
+                strike->setPosition({left + 6.0f, y}); m_root->addChild(strike, 6);
+            }
+            y -= 12.0f;
+            if (!candidate.creator.empty()) {
+                auto* by = makeLabel("by " + candidate.creator, fontScale(13.0f), {left + 6.0f, y}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f});
+                corum::ranked::ui::fitMenuLabelWidth(by, cardW - 12.0f, fontScale(13.0f), 0.1f); m_root->addChild(by, 5);
+            }
+            y -= 12.0f;
+            auto const lengthMetadata = corum::ranked::ui::displayedMapMetadata(candidate.levelId, candidate.metadata);
+            auto* length = makeLabel(corum::ranked::mapLengthText(lengthMetadata), fontScale(13.0f), {left + 6.0f, y}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f});
+            corum::ranked::ui::fitMenuLabelWidth(length, cardW - 12.0f, fontScale(13.0f), 0.1f); m_root->addChild(length, 5);
+            // Bottom: BAN (outlined red), BANNING..., or BANNED.
+            auto const actionY = cardBottom + px(12.0f) + px(17.0f);
+            if (selected) {
+                m_root->addChild(makeLabel(tr("banned", "BANNED"), fontScale(13.0f), {x, actionY}, kRed, "extrabold"), 5);
+                auto* veil = CCLayerColor::create({13, 14, 18, 0}, cardW, cardH);
+                veil->setPosition({left, cardBottom}); m_root->addChild(veil, 9);
                 auto const dimKey = match.matchId + ":" + candidate.canonicalLevelId;
                 if (m_banDimKey != dimKey) {
                     m_banDimKey = dimKey;
-                    veil->runAction(CCFadeTo::create(0.28f, 150));
-                    group->runAction(CCEaseSineOut::create(CCMoveBy::create(0.32f, {0, -12.0f})));
-                } else { veil->setOpacity(150); group->setPositionY(group->getPositionY() - 12.0f); }
+                    veil->runAction(CCFadeTo::create(0.28f, 120));
+                    group->runAction(CCEaseSineOut::create(CCMoveBy::create(0.32f, {0, -8.0f})));
+                } else { veil->setOpacity(120); group->setPositionY(group->getPositionY() - 8.0f); }
             } else if (pending) {
-                auto* state = makeTextPlate(tr("banning", "BANNING..."), {cardWidth - 18.0f, 24.0f}, {x, actionY}, kGold, 0.16f, kGold);
-                m_root->addChild(state, 3);
+                m_root->addChild(makeLabel(tr("banning", "BANNING..."), fontScale(13.0f), {x, actionY}, kGold, "extrabold"), 5);
             } else if (m_selectedBan.empty() && m_pendingBan.empty()) {
-                auto* button = addButton(tr("ban", "BAN"), {x, actionY}, menu_selector(CorumRankedLayer::onBan), true, 0.46f);
-                button->setTag(static_cast<int>(i));
+                auto* face = corum::ranked::ui::slab({cardW - 12.0f, px(34.0f)}, {}, kRed, true, corum::ranked::ui::Ink);
+                auto* caption = makeLabel(tr("ban", "BAN"), fontScale(14.0f), {(cardW - 12.0f) / 2.0f, px(17.0f)}, ccc3(255, 217, 223), "black");
+                face->addChild(caption, 5);
+                auto* button = CCMenuItemSpriteExtra::create(face, this, menu_selector(CorumRankedLayer::onBan));
+                button->setPosition({x, actionY}); button->setTag(static_cast<int>(i)); m_menu->addChild(button);
+            } else {
+                auto* face = corum::ranked::ui::slab({cardW - 12.0f, px(34.0f)}, {x, actionY}, ccc3(32, 35, 46));
+                m_root->addChild(face, 4);
+                m_root->addChild(makeLabel(tr("ban", "BAN"), fontScale(14.0f), {x, actionY}, ccc3(126, 132, 150), "black"), 5);
             }
             m_root = savedRoot; m_menu = savedMenu;
         }
-
-        // NO BAN: confirm without removing a candidate (server null ban).
-        if (m_selectedBan == kNoBanChoice) {
-            m_root->addChild(makeTextPlate(tr("no-ban", "NO BAN"), {74.0f, 24.0f}, {size.width - 50.0f, 24.0f}, kGold, 0.20f, kGold), 3);
-        } else if (m_pendingBan == kNoBanChoice) {
-            m_root->addChild(makeTextPlate(tr("banning", "BANNING..."), {74.0f, 24.0f}, {size.width - 50.0f, 24.0f}, kGold, 0.16f, kGold), 3);
-        } else if (m_selectedBan.empty() && m_pendingBan.empty()) {
-            addButton(tr("no-ban", "NO BAN"), {size.width - 50.0f, 24.0f}, menu_selector(CorumRankedLayer::onNoBan), false, 0.42f, true);
-        }
-        auto* privacyPlate = makeNeonPanel({248.0f, 36.0f}, {size.width / 2.0f, 24.0f}, kSteel, {22, 24, 31}, 242);
-        m_root->addChild(privacyPlate, 1);
-        auto* privacy = makeLabel(tr("private-ban-notice", "YOUR BAN IS PRIVATE  |  REVEALED WHEN THE PHASE ENDS"), 0.25f, {size.width / 2.0f, 24.0f}, ccc3(215, 225, 242), "semibold");
-        corum::ranked::ui::fitMenuLabelWidth(privacy, 236.0f, 0.25f, 0.16f);
-        m_root->addChild(privacy, 4);
     }
 
     // Hidden group appears after `delay`, moving by `offset` while its text,

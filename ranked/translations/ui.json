@@ -3646,5 +3646,21 @@
   "score-range-format": {
     "en": "(SCORE RANGE +/-{})",
     "ko": "(점수 범위 +/-{})"
+  },
+  "ban-one-of": {
+    "en": "MAPS, BAN 1",
+    "ko": "개 중 1개"
+  },
+  "ban-done": {
+    "en": "BANNED",
+    "ko": "밴 완료"
+  },
+  "ban-choosing": {
+    "en": "CHOOSING",
+    "ko": "선택 중"
+  },
+  "ban-instruction": {
+    "en": "BAN ONE MAP.",
+    "ko": "맵 하나를 금지하세요."
   }
 }
