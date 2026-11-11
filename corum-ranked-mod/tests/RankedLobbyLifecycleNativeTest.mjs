@@ -107,6 +107,9 @@ struct CorumRankedLayer {
  void historyText(CCNode*p,std::string const&t,float s,CCPoint pos,float,int color=0,bool=false,CCPoint anchor={.5f,.5f}){auto*n=makeLabel(t,s,pos,color);n->setAnchorPoint(anchor);p->addChild(n);}
  void historyPlayerName(CCNode*,corum::ranked::SurvivalStanding const&,CCPoint,float,int,std::string const&,bool){}
  bool onHistoryPlayerTap(CCPoint,CCPoint){return false;}
+ static constexpr float kLobbyHeader=36,kHistoryRowHeight=32,kHistoryRowStep=35;
+ CCNode*historyRow(History const&,float w){auto*n=new CCNode;n->size={w,kHistoryRowHeight};return n;}
+ CCNode*historyPlacementRow(Stage const&,float w){auto*n=new CCNode;n->size={w,kHistoryRowHeight};return n;}
  enum class Page {HistoryList,HistoryDetail};Page m_page=Page::HistoryList;std::size_t m_historyIndex=0;CCNode*m_root=new CCNode;
  bool isRunning()const{return true;}~CorumRankedLayer(){delete m_root;}
  std::string tr(char const*,char const*english){return english;}
@@ -127,10 +130,10 @@ int main(){
   assert(menuFor(scroll,0)&&menuFor(scroll,29)&&!menuFor(scroll,30));
   // Stage rows can precede the first match: scroll to that exact row and retain its own tag.
   for(int index:{0,14,29}){
-   auto*menu=menuFor(scroll,index);assert(menu->size.height==112);
+   auto*menu=menuFor(scroll,index);assert(menu->size.height==32);
    scroll->scrollTo(scroll->size.height/2-menu->position.y);
    assert(menu->visible);
-   assert(menu->position.y==scroll->m_contentLayer->size.height-116-index*122);
+   assert(menu->position.y==scroll->m_contentLayer->size.height-34-index*35);
    layer.onHistoryDetail(menu);assert(layer.m_page==CorumRankedLayer::Page::HistoryDetail&&layer.m_historyIndex==std::size_t(index));
   }
   scroll->scrollToTop();if(stages==0)assert(menuFor(scroll,0)->visible);

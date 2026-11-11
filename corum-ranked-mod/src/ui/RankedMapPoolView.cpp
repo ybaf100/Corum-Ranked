@@ -315,12 +315,15 @@ void RankedMapPoolView::updateSummary() {
         return row == m_rows.end() ? i18n::text("map-pool-none", "None yet") : row->title;
     };
     auto const tile = [&](int index, std::string const& label, std::string const& value, ccColor3B accent) {
-        auto* box = surface({width, size.height}, {}, accent, SurfaceRaised, 240, false);
-        box->setAnchorPoint(CCPointZero);
+        // H5 summary (.panel): the caption over the 24 px value; the accent
+        // marks the top edge.
+        auto* box = CCLayerColor::create({Surface.r, Surface.g, Surface.b, 255}, width, size.height);
         box->setPosition({index * (width + 6), 0});
         m_summary->addChild(box);
-        caption(box, label, {7, size.height / 2}, 0.2f, width * 0.45f, TextMuted, FontWeight::SemiBold, 0);
-        caption(box, value, {width - 7, size.height / 2}, 0.27f, width * 0.5f, Text, FontWeight::Black, 1);
+        auto* edge = CCLayerColor::create({accent.r, accent.g, accent.b, 255}, width, 1.0f);
+        edge->setPosition({0, size.height - 1}); box->addChild(edge, 1);
+        caption(box, label, {7, size.height * 0.72f}, 13.f / 64.f, width - 14, TextMuted, FontWeight::SemiBold, 0);
+        caption(box, value, {7, size.height * 0.30f}, 24.f / 64.f, width - 14, Text, FontWeight::Black, 0);
     };
     tile(0, i18n::text("map-pool-total-rounds", "Rounds played"), mapPoolNumber(m_totalRounds), Steel);
     tile(1, i18n::text("map-pool-total-draws", "Draw rate"), mapPoolPercent(m_totalDrawRate), Steel);
@@ -348,8 +351,10 @@ void RankedMapPoolView::rebuildRows(bool keepOffset) {
     for (std::size_t position = 0; position < order.size(); ++position) {
         auto const index = order[position];
         auto const& map = m_rows[index];
-        auto* row = surface({width, kRowHeight}, {}, poolColor(map.pool), SurfaceRaised, 250, false);
-        row->setAnchorPoint(CCPointZero);
+        // H5 row (.tr): a flat surface with the pool colour on the left edge.
+        auto* row = CCLayerColor::create({Surface.r, Surface.g, Surface.b, 255}, width, kRowHeight);
+        auto const tone = poolColor(map.pool);
+        auto* edge = CCLayerColor::create({tone.r, tone.g, tone.b, 255}, 2.0f, kRowHeight); row->addChild(edge, 1);
         row->setPosition({4, height - 4 - (position + 1) * (kRowHeight + kRowGap)});
         row->setID("ranked-map-pool-row"_spr);
         m_scroll->m_contentLayer->addChild(row, 1);

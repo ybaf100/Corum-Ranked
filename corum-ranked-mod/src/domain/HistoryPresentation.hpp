@@ -103,7 +103,7 @@ struct HistoryLayout {
 inline bool historyReconnectNeeded(bool historyPage,bool error,bool hasSession,bool conflict) {return historyPage&&error&&!hasSession&&!conflict;}
 inline float historyMapPanelHeight(float width,bool thumbnail) {return thumbnail?(width>=300?224.f:300.f):204.f;}
 inline HistoryLayout historyLayout(float screenWidth,float screenHeight) {
-    HistoryLayout v;v.width=std::max(160.f,std::min(920.f,screenWidth-48));v.height=std::max(80.f,screenHeight-158);
+    HistoryLayout v;v.width=std::max(160.f,std::min(920.f,screenWidth-48));v.height=std::max(80.f,screenHeight-118); // H2: the board header and line tabs sit above
     v.split=v.width>=760 && screenWidth/screenHeight>=1.6f;v.mapWidth=v.split?std::clamp(v.width*.24f,156.f,206.f):v.width;
     v.ownWidth=v.split?154.f:v.width;v.boardWidth=v.split?v.width-v.mapWidth-v.ownWidth-16:v.width;
     return v;

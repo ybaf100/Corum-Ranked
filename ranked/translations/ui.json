@@ -3870,5 +3870,21 @@
   "rank": {
     "en": "RANK",
     "ko": "순위"
+  },
+  "no-title": {
+    "en": "NO TITLE",
+    "ko": "칭호 없음"
+  },
+  "title-hint": {
+    "en": "SHOWN AFTER YOUR NAME · PRESS TITLE ON AN ACHIEVEMENT",
+    "ko": "칭호는 이름 뒤에 표시됩니다 · 도전과제의 칭호를 누르세요"
+  },
+  "badge-showcase": {
+    "en": "ROUND BADGE SHOWCASE",
+    "ko": "라운드 뱃지 전시장"
+  },
+  "badge-total-earned": {
+    "en": "TOTAL EARNED",
+    "ko": "총 획득 수"
   }
 }

@@ -56,7 +56,8 @@ int main(){Layer layer;CCNode parent;
  }
 }
 `);
- assert.match(method(source,'    void renderHistoryList('),/auto const tint=historyRoundColor\(round\)/);
+ // H1 rows: the result chip and the left rule in the result colour.
+ assert.match(method(source,'    CCNode* historyRow('),/addChip\(face,chip/);
  assert.match(method(source,'    void renderHistoryDetail('),/survival\?std::optional<ccColor3B>\{historyRoundColor\(rounds\[i\]\)\}:std::nullopt/);
  assert.match(method(source,'    void historyOwnPanel('),/position,historyRoundColor\(round\)/);
 });

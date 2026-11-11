@@ -67,8 +67,13 @@ public:
         auto* clip=CCClippingNode::create(stencil);p->addChild(clip);p->m_content=CCNode::create();clip->addChild(p->m_content);
         for(std::size_t i=0;i<p->m_count;++i){
             auto const last=i==rows.size();
-            auto* cell=survivalCollectionBadge(last?0:static_cast<int>(rows[i]["nativeCode"].asInt().unwrapOr(0)),last?"ELIMINATED":"",76);
-            cell->setPosition({44.f+88*i,68});p->m_content->addChild(cell,5);
+            // H4 card (.panel): a flat surface behind each badge; the badge
+            // keeps its face, grade frame and the X for eliminations.
+            auto* card=CCLayerColor::create({Surface.r,Surface.g,Surface.b,255},80,108);card->setPosition({4.f+88*i,2});p->m_content->addChild(card,1);
+            auto const edge=last?Red:SurfaceSoft;
+            auto* rule=CCLayerColor::create({edge.r,edge.g,edge.b,255},80,1.5f);rule->setPosition({4.f+88*i,108.5f});p->m_content->addChild(rule,2);
+            auto* cell=survivalCollectionBadge(last?0:static_cast<int>(rows[i]["nativeCode"].asInt().unwrapOr(0)),last?"ELIMINATED":"",68);
+            cell->setPosition({44.f+88*i,66});p->m_content->addChild(cell,5);
             auto const count=last?eliminatedCount:survivalBadgeCollectionTotal(rows[i]["counts"]);
             auto* label=menuLabel(fmt::format("{}",count),.29f,{44.f+88*i,14},last?Red:Text,FontWeight::ExtraBold);
             fitFullMenuLabel(label,76,22,.29f);p->m_content->addChild(label,5);
@@ -84,16 +89,22 @@ public:
 };
 class BadgeCollection final:public Popup {
     std::string m_session;std::uint64_t m_generation=0;bool m_closed=false,m_busy=false;
-    matjson::Value m_data;CCNode* m_root=nullptr;CCLabelBMFont* m_status=nullptr;BadgeStrip* m_strip=nullptr;
+    matjson::Value m_data;CCNode* m_root=nullptr;CCLabelBMFont* m_status=nullptr;CCLabelBMFont* m_total=nullptr;BadgeStrip* m_strip=nullptr;
     geode::async::TaskHolder<web::WebResponse> m_request;
     bool init()override{
-        auto layout=rankedPopupLayout({480,260},CCDirector::sharedDirector()->getWinSize());if(!Popup::init(layout.size.width,layout.size.height))return false;
+        // H4 board page (568 x 320 canvas): ink ground, the leaning brand with
+        // its caption, TOTAL EARNED on the right, the badge strip and the hint.
+        auto layout=rankedPopupLayout({568,320},CCDirector::sharedDirector()->getWinSize());if(!Popup::init(layout.size.width,layout.size.height))return false;
         setID("survival-badge-collection"_spr);m_bgSprite->setVisible(false);m_root=rankedPopupContent(m_mainLayer,m_buttonMenu,layout);
-        m_root->addChild(surface({480,260},{240,130},Gold,Surface,242,true));
-        m_root->addChild(menuLabel(i18n::text("badge-collection","ROUND BADGES"),.39f,{240,231},Gold,FontWeight::Black));
-        m_status=menuLabel(i18n::text("loading","Loading..."),.24f,{240,190},TextMuted);m_root->addChild(m_status,5);
-        auto* hint=menuLabel(i18n::text("badge-drag","DRAG TO EXPLORE · TAP FOR DETAILS"),.22f,{240,60},TextMuted);fitFullMenuLabel(hint,440,20,.22f);m_root->addChild(hint,5);
-        auto* face=surface({120,26},{},Steel,SurfaceRaised,255,true);face->addChild(menuLabel(i18n::text("refresh","REFRESH"),.25f,{60,13},Text));auto* retry=CCMenuItemSpriteExtra::create(face,this,menu_selector(BadgeCollection::refresh));retry->setPosition({240,28});m_buttonMenu->addChild(retry);
+        auto* ground=CCLayerColor::create({Ink.r,Ink.g,Ink.b,255},568,320);m_root->addChild(ground,0);
+        auto* brand=menuLabel(i18n::text("badge-showcase","ROUND BADGE SHOWCASE"),30.f/64.f,{46,302},Text,FontWeight::Black);brand->setAnchorPoint({0,.5f});leanLabel(brand);
+        fitMenuLabelWidth(brand,250,30.f/64.f,.2f);m_root->addChild(brand,5);
+        m_status=menuLabel(i18n::text("loading","Loading..."),13.f/64.f,{46+brand->getScaledContentSize().width+10,302},TextMuted,FontWeight::SemiBold);m_status->setAnchorPoint({0,.5f});m_root->addChild(m_status,5);
+        auto* earnedCaption=menuLabel(i18n::text("badge-total-earned","TOTAL EARNED"),13.f/64.f,{554,309},TextMuted,FontWeight::SemiBold);earnedCaption->setAnchorPoint({1,.5f});m_root->addChild(earnedCaption,5);
+        m_total=menuLabel("-",24.f/64.f,{554,296},Accent,FontWeight::Black);m_total->setAnchorPoint({1,.5f});m_root->addChild(m_total,5);
+        auto* hint=menuLabel(i18n::text("badge-drag","DRAG TO EXPLORE · TAP FOR DETAILS"),13.f/64.f,{284,62},TextMuted,FontWeight::SemiBold);fitFullMenuLabel(hint,520,14,13.f/64.f);m_root->addChild(hint,5);
+        auto* face=slab({90,17},{},ccc3(58,63,78),true,Ink);auto* refreshLabel=menuLabel(i18n::text("refresh","REFRESH"),14.f/64.f,{45,8.5f},Text,FontWeight::ExtraBold);face->addChild(refreshLabel,5);
+        auto* retry=CCMenuItemSpriteExtra::create(face,this,menu_selector(BadgeCollection::refresh));retry->setPosition({284,30});m_buttonMenu->addChild(retry);
         m_session=RankedRuntime::get().spectatorLiveSessionToken();scheduleUpdate();refresh(nullptr);return true;
     }
     void refresh(CCObject*){
@@ -109,7 +120,11 @@ class BadgeCollection final:public Popup {
             }
             p->m_data=json.unwrap();auto rows=survivalBadgeCollectionRows(p->m_data);
             p->m_status->setString(i18n::text("badge-official-rounds","OFFICIAL SURVIVAL ROUND RESULTS").c_str());p->m_status->setColor(TextMuted);
-            p->m_strip=BadgeStrip::create(rows,p->m_data["totals"]["ELIMINATED"].asInt().unwrapOr(0),[weak](std::size_t index){if(auto owner=weak.lock())owner->detail(index);});p->m_strip->setPosition({20,74});p->m_root->addChild(p->m_strip,5);
+            std::int64_t earned=0;for(auto const& row:rows)earned+=survivalBadgeCollectionTotal(row["counts"]);
+            p->m_total->setString(fmt::format("{}",earned).c_str());
+            // The 440-point strip scales to the 540-point board width.
+            p->m_strip=BadgeStrip::create(rows,p->m_data["totals"]["ELIMINATED"].asInt().unwrapOr(0),[weak](std::size_t index){if(auto owner=weak.lock())owner->detail(index);});
+            p->m_strip->setScale(540.f/440.f);p->m_strip->setPosition({14,96});p->m_root->addChild(p->m_strip,5);
         });
     }
     void detail(std::size_t index){

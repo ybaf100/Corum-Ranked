@@ -3,7 +3,7 @@
 #include <array>
 namespace corum::ranked {
 struct CatalogTranslation {char const* key;char const* english;char const* korean;};
-inline constexpr std::array<CatalogTranslation, 1066> kTranslations {{
+inline constexpr std::array<CatalogTranslation, 1070> kTranslations {{
     CatalogTranslation{"A logged-in Geometry Dash account is required.", "A logged-in Geometry Dash account is required.", "로그인된 Geometry Dash 계정이 필요합니다."},
     CatalogTranslation{"A mod update is required before entering Ranked.", "A mod update is required before entering Ranked.", "랭크에 입장하려면 모드를 업데이트하세요."},
     CatalogTranslation{"AUDIO_CACHE_INVALID", "Audio file is missing or empty · retry required", "음원 파일이 없거나 비어 있음 · 재시도 필요"},
@@ -273,7 +273,9 @@ inline constexpr std::array<CatalogTranslation, 1066> kTranslations {{
     CatalogTranslation{"badge-load-failed", "COULD NOT LOAD BADGES · RETRY", "뱃지를 불러오지 못했습니다 · 다시 시도"},
     CatalogTranslation{"badge-menu", "BADGES", "뱃지"},
     CatalogTranslation{"badge-official-rounds", "OFFICIAL SURVIVAL ROUND RESULTS", "공식 서바이벌 라운드 결과"},
+    CatalogTranslation{"badge-showcase", "ROUND BADGE SHOWCASE", "라운드 뱃지 전시장"},
     CatalogTranslation{"badge-total", "TOTAL", "총 획득 수"},
+    CatalogTranslation{"badge-total-earned", "TOTAL EARNED", "총 획득 수"},
     CatalogTranslation{"badges", "BADGES", "뱃지"},
     CatalogTranslation{"ban", "BAN", "밴"},
     CatalogTranslation{"ban-choosing", "CHOOSING", "선택 중"},
@@ -666,6 +668,7 @@ inline constexpr std::array<CatalogTranslation, 1066> kTranslations {{
     CatalogTranslation{"no-ban", "NO BAN", "밴 안 함"},
     CatalogTranslation{"no-ban-random-maps", "NO BAN  ·  MAPS DRAWN AT RANDOM", "밴 없음  ·  맵 무작위 선정"},
     CatalogTranslation{"no-completed-matches", "NO COMPLETED MATCHES", "완료된 경기가 없습니다"},
+    CatalogTranslation{"no-title", "NO TITLE", "칭호 없음"},
     CatalogTranslation{"normal-match", "NORMAL MATCH", "NORMAL MATCH"},
     CatalogTranslation{"of", "of", "중"},
     CatalogTranslation{"opening-exact-level", "OPENING THE EXACT GD LEVEL...", "정확한 GD 레벨을 여는 중..."},
@@ -1045,6 +1048,7 @@ inline constexpr std::array<CatalogTranslation, 1066> kTranslations {{
     CatalogTranslation{"tier-promoted-to", "Promoted to {}!", "{} 승격"},
     CatalogTranslation{"time-left", "TIME LEFT", "남은 시간"},
     CatalogTranslation{"title-equipped-chip", "EQUIPPED", "장착 중"},
+    CatalogTranslation{"title-hint", "SHOWN AFTER YOUR NAME · PRESS TITLE ON AN ACHIEVEMENT", "칭호는 이름 뒤에 표시됩니다 · 도전과제의 칭호를 누르세요"},
     CatalogTranslation{"to-lobby", "LOBBY", "로비로"},
     CatalogTranslation{"unauthorized-active-mods", "UNAUTHORIZED ACTIVE MODS", "허용되지 않은 활성 모드"},
     CatalogTranslation{"unequip-title", "UNEQUIP", "칭호 해제"},

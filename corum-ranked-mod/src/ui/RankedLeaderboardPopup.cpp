@@ -62,11 +62,11 @@ public:
     }
 };
 
+// H6 .seg: the selected mode is a filled lime slab, the other an outline.
 CCNode* modeTabFace(RankedMode mode, bool selected,float width=140) {
-    auto* face = surface({width,23},{},selected ? Gold : Accent,
-        SurfaceRaised,250,true);
-    auto* caption = menuLabel(mode == RankedMode::Survival ? "SURVIVAL" : "SOLO RANKED",0.28f,{width/2,11.5f},
-        selected ? Gold : Text);
+    auto* face = slab({width,19},{},selected ? AccentFill : ccc3(58,63,78),!selected,Ink);
+    auto* caption = menuLabel(mode == RankedMode::Survival ? "SURVIVAL" : "SOLO RANKED",14.f/64.f,{width/2,9.5f},
+        selected ? AccentInk : Text,FontWeight::Black);
     fitMenuLabelWidth(caption,width-10,0.28f,0.20f); face->addChild(caption,5);
     return face;
 }
@@ -115,10 +115,12 @@ bool RankedLeaderboardPopup::init() {
     if (!Popup::init(size.width,size.height)) return false;
     setID("ranked-leaderboard-popup"_spr);
     m_bgSprite->setVisible(false); m_closeBtn->setVisible(false);
-    auto* panel = surface(size,{size.width / 2,size.height / 2},Gold,Surface,255,true);
+    // H6 board popup (.pop): a flat surface with a neutral frame and the
+    // left-aligned leaning title.
+    auto* panel = surface(size,{size.width / 2,size.height / 2},SurfaceSoft,Surface,255,false);
     m_mainLayer->addChild(panel,10);
-    panel->addChild(menuLabel(i18n::text("leaderboard","LEADERBOARD"),0.51f,
-        {size.width / 2,size.height - 20},Gold,FontWeight::Black),5);
+    auto* title = menuLabel(i18n::text("leaderboard","LEADERBOARD"),24.f/64.f,{14,size.height - 20},Text,FontWeight::Black);
+    title->setAnchorPoint({0,.5f}); leanLabel(title); panel->addChild(title,5);
     m_caption = menuLabel("",0.26f,{size.width*.40f,size.height - 97},TextMuted);
     panel->addChild(m_caption,5);
     auto const viewport = CCSize{size.width - 24,size.height - 163};
@@ -144,8 +146,8 @@ bool RankedLeaderboardPopup::init() {
     });
     auto* menu = CCMenu::create(); menu->setPosition(CCPointZero); panel->addChild(menu,20);
     auto button = [&](std::string const& text, float x, SEL_MenuHandler callback) {
-        auto* face = surface({std::min(68.f,(size.width-30)/4),25},{},Steel,SurfaceRaised,250,true);
-        auto* caption = menuLabel(text,0.30f,{std::min(68.f,(size.width-30)/4)/2,12.5f}); fitMenuLabelWidth(caption,std::min(60.f,(size.width-30)/4-8),0.30f,0.23f);
+        auto* face = slab({std::min(68.f,(size.width-30)/4),17},{},ccc3(58,63,78),true,Ink);
+        auto* caption = menuLabel(text,14.f/64.f,{std::min(68.f,(size.width-30)/4)/2,8.5f},Text,FontWeight::ExtraBold); fitMenuLabelWidth(caption,std::min(60.f,(size.width-30)/4-8),14.f/64.f,0.12f);
         face->addChild(caption,5);
         auto* item = CCMenuItemSpriteExtra::create(face,this,callback); item->setPosition({x,17});
         menu->addChild(item); return item;
@@ -153,18 +155,18 @@ bool RankedLeaderboardPopup::init() {
     auto tab = [&](float x, RankedMode mode) {
         auto* face = modeTabFace(mode,m_mode == mode,std::min(140.f,(size.width-30)/2));
         auto* item = CCMenuItemSpriteExtra::create(face,this,menu_selector(RankedLeaderboardPopup::onMode));
-        item->setTag(static_cast<int>(mode)); item->setPosition({x,size.height-45}); menu->addChild(item); return item;
+        item->setTag(static_cast<int>(mode)); item->setPosition({x,size.height-20}); menu->addChild(item); return item;
     };
     auto const inputWidth=std::min(220.0f,size.width-125);
     m_searchInput=TextInput::create(inputWidth,"Player name");m_searchInput->setCommonFilter(CommonFilter::Name);
     m_searchInput->setMaxCharCount(32);m_searchInput->setPosition({size.width/2-42,size.height-72});panel->addChild(m_searchInput,20);
-    auto* searchFace=surface({68,25},{},Steel,SurfaceRaised,250,true);
-    auto* searchLabel=menuLabel(i18n::text("leaderboard-find","FIND"),.30f,{34,12.5f},Text,FontWeight::SemiBold);
-    fitMenuLabelWidth(searchLabel,60,.30f,.23f);searchFace->addChild(searchLabel,5);
+    auto* searchFace=slab({68,17},{},AccentFill,false,Ink);
+    auto* searchLabel=menuLabel(i18n::text("leaderboard-find","FIND"),14.f/64.f,{34,8.5f},AccentInk,FontWeight::Black);
+    fitMenuLabelWidth(searchLabel,60,14.f/64.f,.12f);searchFace->addChild(searchLabel,5);
     m_searchButton=CCMenuItemSpriteExtra::create(searchFace,this,menu_selector(RankedLeaderboardPopup::onSearch));
     m_searchButton->setPosition({size.width/2+inputWidth/2+3,size.height-72});menu->addChild(m_searchButton);
-    m_survivalTab = tab(size.width/2-std::min(76.f,(size.width-18)/4),RankedMode::Survival);
-    m_soloTab = tab(size.width/2+std::min(76.f,(size.width-18)/4),RankedMode::SoloRanked);
+    m_soloTab = tab(size.width-14-std::min(140.f,(size.width-30)/2)*1.5f-4,RankedMode::SoloRanked);
+    m_survivalTab = tab(size.width-14-std::min(140.f,(size.width-30)/2)*.5f,RankedMode::Survival);
     m_previous = button("<",size.width*.125f,menu_selector(RankedLeaderboardPopup::onPrevious));
     m_next = button(">",size.width*.875f,menu_selector(RankedLeaderboardPopup::onNext));
     button(i18n::text("close","CLOSE"),size.width*.375f,menu_selector(RankedLeaderboardPopup::onClose));
@@ -279,8 +281,12 @@ void RankedLeaderboardPopup::showRows(matjson::Value const& data) {
         auto const color = tierColor(entry.tier);
         auto const mine = !entry.bot && entry.accountId > 0 && entry.accountId == local;
         auto const found=m_searchAccount!=0 && entry.accountId==m_searchAccount;
-        auto* row = surface({width,kRowHeight},{},found?Gold:color,found || mine ? SurfaceSoft : SurfaceRaised,250,true);
-        row->setAnchorPoint(CCPointZero); row->setPosition({4,height - 4 - (index + 1) * (kRowHeight + kRowGap)});
+        // H6 row (.tr): flat; the own row (.tr.me) is lifted with a lime left
+        // edge, a searched player gets a gold one.
+        auto const rowFill = mine ? ccc3(32,38,42) : found ? SurfaceSoft : SurfaceRaised;
+        auto* row = CCLayerColor::create({rowFill.r,rowFill.g,rowFill.b,255},width,kRowHeight);
+        if (mine || found) { auto const edge = found ? Gold : Accent; auto* mark = CCLayerColor::create({edge.r,edge.g,edge.b,255},2.0f,kRowHeight); row->addChild(mark,2); }
+        row->setPosition({4,height - 4 - (index + 1) * (kRowHeight + kRowGap)});
         row->setID("ranked-leaderboard-row"_spr); m_scroll->m_contentLayer->addChild(row,1);
         auto* rank = standingNumber(entry.rank,0.38f); rank->setPosition({columns.rank,24});
         if (rank->getContentSize().width > 40) rank->setScale(40 / rank->getContentSize().width);
