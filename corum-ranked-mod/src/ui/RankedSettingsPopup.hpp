@@ -49,7 +49,8 @@ class RankedSettingsPopup final : public Popup {
         auto add=[&](std::string const& text,CCPoint position,CCSize bounds,float scale,ccColor3B color,FontWeight weight=FontWeight::ExtraBold){
             auto* label=menuLabel(text,scale,position,color,weight);fitFullMenuLabel(label,bounds.width,bounds.height,scale);panel->addChild(label,10);return label;
         };
-        add(i18n::text("settings","Settings"),{180,324},{330,24},.5f,Text,FontWeight::Black);
+        // Q1 board: the leaning 28 px title on the left.
+        if(auto* title=add(i18n::text("settings","Settings"),{14,324},{330,24},28.f/64.f,Text,FontWeight::Black)){title->setAnchorPoint({0,.5f});leanLabel(title);}
         add(i18n::text("ranked-volume","Ranked menu BGM"),{94,304},{146,16},.26f,Text);
         m_volume=Slider::create(this,menu_selector(RankedSettingsPopup::onVolume),.55f);if(!m_volume)return false;
         m_volume->setID("ranked-volume-slider"_spr);m_volume->setPosition({94,278});m_volume->setValue(RankedVolumeControl::get().volume());panel->addChild(m_volume,20);

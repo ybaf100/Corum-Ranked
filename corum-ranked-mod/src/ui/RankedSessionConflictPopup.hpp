@@ -15,8 +15,8 @@ class RankedSessionConflictPopup final : public Popup {
         m_bgSprite->setVisible(false); m_closeBtn->setVisible(false);
         setID("ranked-session-conflict"_spr);
         auto* panel=surface({320,180},{160,90},Red,Surface,255,true); m_mainLayer->addChild(panel);
-        auto* title=menuLabel(i18n::text("session-other-device","Connected on another device"),.44f,{160,153},Red,FontWeight::Black);
-        fitMenuLabelWidth(title,292,.44f,.32f); panel->addChild(title);
+        auto* title=menuLabel(i18n::text("session-other-device","Connected on another device"),28.f/64.f,{14,158},Red,FontWeight::Black);
+        fitMenuLabelWidth(title,292,28.f/64.f,.24f); title->setAnchorPoint({0,.5f}); leanLabel(title); panel->addChild(title);
         auto* detail=menuLabel(i18n::text("session-takeover-detail","Disconnect the other device to enter here.\nAn ongoing match will be recovered."),.30f,{160,105},Text);
         fitFullMenuLabel(detail,290,48,.30f); panel->addChild(detail);
         m_actions=CCMenu::create(); m_actions->setPosition(CCPointZero); panel->addChild(m_actions,20);

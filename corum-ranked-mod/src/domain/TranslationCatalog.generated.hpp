@@ -3,7 +3,7 @@
 #include <array>
 namespace corum::ranked {
 struct CatalogTranslation {char const* key;char const* english;char const* korean;};
-inline constexpr std::array<CatalogTranslation, 1070> kTranslations {{
+inline constexpr std::array<CatalogTranslation, 1079> kTranslations {{
     CatalogTranslation{"A logged-in Geometry Dash account is required.", "A logged-in Geometry Dash account is required.", "로그인된 Geometry Dash 계정이 필요합니다."},
     CatalogTranslation{"A mod update is required before entering Ranked.", "A mod update is required before entering Ranked.", "랭크에 입장하려면 모드를 업데이트하세요."},
     CatalogTranslation{"AUDIO_CACHE_INVALID", "Audio file is missing or empty · retry required", "음원 파일이 없거나 비어 있음 · 재시도 필요"},
@@ -243,8 +243,10 @@ inline constexpr std::array<CatalogTranslation, 1070> kTranslations {{
     CatalogTranslation{"all-maps-complete", "ALL {} MAPS COMPLETE", "전체 {}개 맵 완료"},
     CatalogTranslation{"all-placement-maps-complete", "ALL 10 MAPS COMPLETE", "전체 10개 맵 완료"},
     CatalogTranslation{"all-resources-ready", "ALL RESOURCES READY", "모든 리소스 준비 완료"},
+    CatalogTranslation{"assets-basic", "BASIC UI", "기본 화면"},
     CatalogTranslation{"assets-basic-ui", "Built-in interface", "기본 화면"},
     CatalogTranslation{"assets-images", "Images", "이미지"},
+    CatalogTranslation{"assets-included", "INCLUDED IN THE MOD", "모드에 포함"},
     CatalogTranslation{"assets-music", "Music", "음악"},
     CatalogTranslation{"assets-new-download", "DOWNLOAD IMAGE PACK", "이미지팩 신규 다운로드"},
     CatalogTranslation{"assets-one-download", "Download all required resources in one step.", "필요한 리소스를 한 번에 다운로드하세요."},
@@ -397,6 +399,9 @@ inline constexpr std::array<CatalogTranslation, 1070> kTranslations {{
     CatalogTranslation{"forum-refresh-cooldown", "Next refresh in", "다음 갱신까지"},
     CatalogTranslation{"forum-update-failed", "Update failed. Try again.", "갱신 실패. 다시 시도하세요."},
     CatalogTranslation{"forum-updating", "Updating forum records...", "포럼 기록 갱신 중..."},
+    CatalogTranslation{"free-play", "FREE PLAY", "자유 플레이"},
+    CatalogTranslation{"free-play-note", "THE DOWNLOAD CONTINUES IN THE BACKGROUND. PRACTISE RANKED MAPS WITHOUT OFFICIAL RECORDS.", "다운로드는 뒤에서 계속됩니다. 공식 기록 없이 랭크 맵을 연습할 수 있습니다."},
+    CatalogTranslation{"free-play-restart", "THE GAME RESTARTS RIGHT AWAY WHEN IT FINISHES, EVEN WHILE PLAYING", "완료되면 플레이 중이어도 바로 재시작됩니다"},
     CatalogTranslation{"grade-updates-after-attempt", "UPDATES AFTER EACH ATTEMPT", "시도가 끝날 때마다 갱신"},
     CatalogTranslation{"history", "HISTORY", "기록"},
     CatalogTranslation{"history-all-records", "ALL RECORDS", "모든 기록"},
@@ -530,6 +535,7 @@ inline constexpr std::array<CatalogTranslation, 1070> kTranslations {{
     CatalogTranslation{"inline.upper-half-players", "Upper half · {} players", "상위 절반 · {}명"},
     CatalogTranslation{"inline.w", "W / ", "승 / "},
     CatalogTranslation{"inline.waiting-for-opponent", "WAITING FOR OPPONENT...", "상대 입장 대기 중..."},
+    CatalogTranslation{"installed", "INSTALLED", "설치됨"},
     CatalogTranslation{"installed-version", "INSTALLED", "설치"},
     CatalogTranslation{"invalid-no-rating", "MATCH INVALID - NO RATING CHANGES", "무효 경기 - 점수 변동 없음"},
     CatalogTranslation{"irreversible-choice", "IRREVERSIBLE CHOICE", "되돌릴 수 없는 선택"},
@@ -653,6 +659,7 @@ inline constexpr std::array<CatalogTranslation, 1070> kTranslations {{
     CatalogTranslation{"mod-update-free-play", "FREE PLAY WHILE DOWNLOADING", "다운로드 중 자유 플레이"},
     CatalogTranslation{"mod-update-installed-restart", "Update installed. Restarting now...", "업데이트 설치 완료 · 바로 재시작합니다"},
     CatalogTranslation{"mod-update-required", "Update the mod before entering Ranked.", "랭크전에 입장하려면 모드를 업데이트하세요."},
+    CatalogTranslation{"mod-updating", "UPDATING", "업데이트 중"},
     CatalogTranslation{"mod-verifying", "Downloading and verifying the mod...", "모드를 다운로드하고 검증 중..."},
     CatalogTranslation{"mode-browse", "BROWSE", "조회"},
     CatalogTranslation{"mode-disabled", "MODE DISABLED", "운영 중지"},
@@ -791,6 +798,7 @@ inline constexpr std::array<CatalogTranslation, 1070> kTranslations {{
     CatalogTranslation{"replay-view-partial", "VIEW REPLAY · PARTIAL RECOVERED", "리플레이 보기 · 부분 복구"},
     CatalogTranslation{"replay-view-prefix", "VIEW REPLAY · OFFICIAL PREFIX", "리플레이 보기 · 공식 구간만"},
     CatalogTranslation{"replay-waiting-receipt", "Replay waiting for official receipt", "공식 확정 대기 중인 리플레이"},
+    CatalogTranslation{"required", "REQUIRED", "필요"},
     CatalogTranslation{"required-version", "REQUIRED", "필요"},
     CatalogTranslation{"resources-failed", "DOWNLOAD FAILED", "일부 리소스 다운로드 실패"},
     CatalogTranslation{"resources-required", "DOWNLOAD REQUIRED", "추가 리소스가 필요합니다."},
@@ -1068,6 +1076,7 @@ inline constexpr std::array<CatalogTranslation, 1070> kTranslations {{
     CatalogTranslation{"waiting-song-short", "WAITING FOR SONG", "노래 대기 중"},
     CatalogTranslation{"waiting-start", "WAITING TO START", "시작 대기 중"},
     CatalogTranslation{"waiting-time", "WAIT", "대기 시간"},
+    CatalogTranslation{"while-you-wait", "WHILE YOU WAIT...", "기다리는 동안..."},
     CatalogTranslation{"win", "WIN", "승리"},
     CatalogTranslation{"win-short", "W", "승"},
     CatalogTranslation{"win-streak", "WIN STREAK", "연승"},

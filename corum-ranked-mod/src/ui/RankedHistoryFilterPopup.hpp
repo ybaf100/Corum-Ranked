@@ -23,8 +23,8 @@ class RankedHistoryFilterPopup final:public Popup {
         m_bgSprite->setVisible(false);m_closeBtn->setVisible(false);setID("ranked-history-filter-popup"_spr);
         auto* content=rankedPopupContent(m_mainLayer,m_buttonMenu,layout);
         auto* panel=surface({280,height},{140,height/2},Accent,Surface,255,true);content->addChild(panel);
-        auto* title=menuLabel(heading.empty()?i18n::text("match-history","MATCH HISTORY"):heading,.4f,{140,height-22},Text,FontWeight::Black);
-        fitSingleLineMenuLabel(title,252,24,.4f);panel->addChild(title,5);
+        auto* title=menuLabel(heading.empty()?i18n::text("match-history","MATCH HISTORY"):heading,28.f/64.f,{14,height-20},Text,FontWeight::Black);
+        fitSingleLineMenuLabel(title,252,24,28.f/64.f);title->setAnchorPoint({0,.5f});leanLabel(title);panel->addChild(title,5);
         for(std::size_t i=0;i<m_choices.size();++i){
             auto const active=m_choices[i].value==selected;
             auto* face=surface({244,28},{},active?Accent:Steel,SurfaceRaised,255,true);

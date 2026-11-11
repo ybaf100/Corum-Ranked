@@ -70,7 +70,11 @@ class RankedConfirmPopup final : public Popup {
         if(!Popup::init(340,220)) { return false; }
         m_done=std::move(done);m_bgSprite->setVisible(false);m_closeBtn->setVisible(false);
         auto* panel=surface({340,220},{170,110},accent,Surface,255,true);m_mainLayer->addChild(panel);
-        auto* heading=menuLabel(title,.38f,{170,192},accent,FontWeight::SemiBold);fitMenuLabelWidth(heading,310,.38f,.26f);panel->addChild(heading,5);
+        // Q8 board (.pop): the leaning 28 px title on the left, white for the
+        // lime variant and in the signal colour for gold / red.
+        auto const plain=sameColor(accent,Accent);
+        auto* heading=menuLabel(title,28.f/64.f,{16,196},plain?Text:accent,FontWeight::Black);heading->setAnchorPoint({0,.5f});leanLabel(heading);
+        fitMenuLabelWidth(heading,308,28.f/64.f,.24f);panel->addChild(heading,5);
         // Explicit line breaks: the message must stay inside the panel (y 64..172).
         auto* detail=menuLabel(message,.28f,{170,120},Text,FontWeight::SemiBold);fitWrappedMenuLabel(detail,message,300,96,.28f);panel->addChild(detail,5);
         // Popup owns modal touch priority for this menu. A separate nested menu
@@ -78,8 +82,10 @@ class RankedConfirmPopup final : public Popup {
         auto* menu=m_buttonMenu;
         std::array<CCMenuItemSpriteExtra*,2> buttons{};
         for(int i=0;i<2;i++) {
-            auto* face=surface({140,32},{},i?accent:Steel,SurfaceRaised,255,true);
-            face->addChild(menuLabel(i && !confirm.empty()?confirm:i18n::text(i?"confirm":"cancel",i?"CONFIRM":"CANCEL"),.30f,{70,16},i?accent:Text,FontWeight::SemiBold),5);
+            // .btn.sm: CONFIRM filled (lime, or the red danger outline), CANCEL ghost.
+            auto const danger=sameColor(accent,Red);
+            auto* face=slab({140,21},{},i?(danger?Red:AccentFill):GhostEdge,!i||danger,Ink);
+            face->addChild(menuLabel(i && !confirm.empty()?confirm:i18n::text(i?"confirm":"cancel",i?"CONFIRM":"CANCEL"),16.f/64.f,{70,10.5f},i&&!danger?AccentInk:Text,FontWeight::Black),5);
             auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(RankedConfirmPopup::onChoice));item->setTag(i);item->setPosition({i?248.0f:92.0f,38});menu->addChild(item);buttons[i]=item;
         }
 #if !defined(CORUM_RANKED_NATIVE_TEST)

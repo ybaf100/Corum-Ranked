@@ -38,6 +38,9 @@ inline constexpr ccColor3B Green = {90, 238, 151};
 inline constexpr ccColor3B Red = {255, 91, 111};
 inline constexpr ccColor3B Gold = {255, 207, 74};
 inline constexpr ccColor3B Orange = {255, 145, 68};
+// .btn.ghost outline (#3A3F4E).
+inline constexpr ccColor3B GhostEdge = {58, 63, 78};
+inline bool sameColor(ccColor3B a, ccColor3B b) { return a.r == b.r && a.g == b.g && a.b == b.b; }
 
 // Disabled custom buttons are composed of several independent color nodes;
 // tinting only their menu item does not desaturate the border or the caption.
@@ -435,7 +438,13 @@ inline CCNode* surface(
     shadow->setTag(SurfaceShadowTag);
     root->addChild(shadow, -2);
 
-    auto const edge = surfaceEdge(accent, strong);
+    // Board .pop / .btn.ghost: a strong panel on the plain surface has no
+    // visible frame (only its top rule); a strong button keeps a neutral
+    // #3A3F4E outline unless it carries a signal colour.
+    auto const panelFill = fill.r == Surface.r && fill.g == Surface.g && fill.b == Surface.b;
+    auto const edge = strong && panelFill ? fill
+        : strong && accent.r == Steel.r && accent.g == Steel.g && accent.b == Steel.b ? ccColor3B{58, 63, 78}
+        : surfaceEdge(accent, strong);
     auto* border = CCLayerColor::create({edge.r, edge.g, edge.b, 255});
     border->setTag(SurfaceBorderTag);
     root->addChild(border, 0);
@@ -445,15 +454,18 @@ inline CCNode* surface(
     root->addChild(inner, 1);
 
     auto* rule = CCLayerColor::create({accent.r, accent.g, accent.b, static_cast<GLubyte>(strong ? 255 : 140)});
-    rule->setContentSize({size.width, strong ? 2.0f : 1.0f});
+    rule->setContentSize({size.width, strong ? 1.5f : 1.0f});
     rule->setTag(SurfaceRuleTag);
     root->addChild(rule, 3);
 
     if (strong) {
+        // The corner tab marks a strong surface for setSurfaceAccent; the
+        // board style does not draw it.
         auto* tab = CCLayerColor::create({accent.r, accent.g, accent.b, 255});
         tab->setContentSize({8.0f, 3.0f});
         tab->setSkewX(40.0f);
         tab->setTag(SurfaceTabTag);
+        tab->setVisible(false);
         root->addChild(tab, 3);
     }
     layoutSurface(root, size);

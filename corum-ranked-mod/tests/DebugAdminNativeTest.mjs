@@ -77,6 +77,9 @@ namespace ui{inline constexpr ccColor3B Red{255,60,60},Steel{80,120,220},Accent{
  CCLabelBMFont* menuLabel(std::string s,float scale,CCPoint p,ccColor3B color,FontWeight=FontWeight::SemiBold){auto* n=new CCLabelBMFont;n->setString(s.c_str());n->setScale(scale);n->position=p;n->color=color;return n;}
  void fitMenuLabelWidth(CCLabelBMFont*,float,float,float){}void fitFullMenuLabel(CCLabelBMFont*,float,float,float){}void fitWrappedMenuLabel(CCLabelBMFont*,std::string const&,float,float,float){}
  void grayButtonVisual(CCNode* node){node->color={100,100,100};}void cancelMenuTouch(CCMenu* menu){++menu->cancellations;}
+ inline constexpr ccColor3B AccentFill{166,222,36},AccentInk{13,14,18},Ink{13,14,18},GhostEdge{58,63,78};void leanLabel(CCNode*){}
+ inline bool sameColor(ccColor3B a,ccColor3B b){return a.r==b.r&&a.g==b.g&&a.b==b.b;}
+ CCNode* slab(CCSize s,CCPoint p,ccColor3B,bool,ccColor3B){auto* n=CCNode::create();n->size=s;n->position=p;return n;}
 }
 struct SurvivalRuntime{static SurvivalRuntime&get(){static SurvivalRuntime r;return r;}bool active()const{return false;}};void showSurvivalDebugPopup(){}
 namespace debug{inline int spectates=0;void showDebugSpectatePopup(){++spectates;}void showDebugAdminPopup(RankedMode mode);}

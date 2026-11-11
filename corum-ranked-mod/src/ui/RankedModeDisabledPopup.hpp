@@ -24,8 +24,8 @@ class RankedModeDisabledPopup final : public Popup {
         auto* panel = surface({320, 180}, {160, 90}, Gold, Surface, 255, true);
         m_mainLayer->addChild(panel);
         auto* title = menuLabel(mode + " · " + i18n::text("mode-disabled", "MODE DISABLED"),
-            .40f, {160, 150}, Gold, FontWeight::SemiBold);
-        fitMenuLabelWidth(title, 292, .40f, .25f);
+            28.f / 64.f, {14, 158}, Gold, FontWeight::Black);
+        fitMenuLabelWidth(title, 292, 28.f / 64.f, .22f); title->setAnchorPoint({0, .5f}); leanLabel(title);
         panel->addChild(title, 5);
         auto* detail = menuLabel(i18n::text("mode-disabled-notice",
             "This mode is currently disabled.\nContinue to the view-only lobby."),

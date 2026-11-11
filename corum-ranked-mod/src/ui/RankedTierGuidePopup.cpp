@@ -33,7 +33,8 @@ bool RankedTierGuidePopup::init() {
     setID("ranked-tier-guide-popup"_spr);
     m_bgSprite->setVisible(false);m_closeBtn->setVisible(false);m_closeBtn->setEnabled(false);
     auto* panel=surface(size,{size.width/2,size.height/2},Gold,Surface,255,true);m_mainLayer->addChild(panel,1);
-    panel->addChild(menuLabel(corum::ranked::i18n::literal("inline.tiers-cutoffs"),.49f,{size.width/2,size.height-22},Gold,FontWeight::Black),5);
+    {   auto* title=menuLabel(corum::ranked::i18n::literal("inline.tiers-cutoffs"),28.f/64.f,{14,size.height-20},Text,FontWeight::Black);
+        title->setAnchorPoint({0,.5f});leanLabel(title);fitMenuLabelWidth(title,size.width-140,28.f/64.f,.2f);panel->addChild(title,5);}
     m_caption=menuLabel(corum::ranked::i18n::literal("inline.loading"),.28f,{size.width/2,size.height-47},TextMuted);
     panel->addChild(m_caption,5);
     caption(panel,corum::ranked::i18n::literal("inline.tier"),{44,size.height-67},105,.27f);

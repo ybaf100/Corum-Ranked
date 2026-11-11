@@ -95,7 +95,7 @@ test('actual update-channel popup verifies Debug through Lightsail and cancels s
 #include <vector>
 struct CCObject{virtual~CCObject()=default;};struct CCPoint{float x,y;};struct CCSize{float width,height;};
 struct CCNode:CCObject{bool parent=true,visible=true;int refs=0;void*getParent(){return parent?this:nullptr;}void addChild(CCNode*,int=0){}void setVisible(bool v){visible=v;}void setPosition(CCPoint){}void setID(std::string const&){}void autorelease(){}};
-struct CCLabelBMFont:CCNode{std::string value;void setString(char const*s){value=s;}};
+struct CCLabelBMFont:CCNode{std::string value;void setString(char const*s){value=s;}void setAnchorPoint(CCPoint){}};
 struct CCMenu:CCNode{};struct CCMenuItemSpriteExtra:CCNode{bool enabled=true;void setEnabled(bool b){enabled=b;}static auto*create(CCNode*,CCNode*,int){return new CCMenuItemSpriteExtra;}};
 using SEL_MenuHandler=int;
 #define menu_selector(x) 0
@@ -114,7 +114,7 @@ namespace i18n{std::string text(char const*,char const*f){return f;}}
 struct Layout{CCSize size;};Layout rankedPopupLayout(CCSize size,CCSize){return {size};}CCNode*rankedPopupContent(CCNode*,CCMenu*,Layout){return new CCNode;}
 CCNode*surface(CCSize,CCPoint,int,int,int,bool){return new CCNode;}
 CCLabelBMFont*menuLabel(std::string const&,float,CCPoint,int,FontWeight){return new CCLabelBMFont;}
-void fitSingleLineMenuLabel(CCLabelBMFont*,float,float,float){}
+void fitSingleLineMenuLabel(CCLabelBMFont*,float,float,float){}void leanLabel(CCNode*){}
 }
 ${source}
 int main(){using namespace corum::ranked::ui;

@@ -3886,5 +3886,41 @@
   "badge-total-earned": {
     "en": "TOTAL EARNED",
     "ko": "총 획득 수"
+  },
+  "while-you-wait": {
+    "en": "WHILE YOU WAIT...",
+    "ko": "기다리는 동안..."
+  },
+  "free-play": {
+    "en": "FREE PLAY",
+    "ko": "자유 플레이"
+  },
+  "free-play-note": {
+    "en": "THE DOWNLOAD CONTINUES IN THE BACKGROUND. PRACTISE RANKED MAPS WITHOUT OFFICIAL RECORDS.",
+    "ko": "다운로드는 뒤에서 계속됩니다. 공식 기록 없이 랭크 맵을 연습할 수 있습니다."
+  },
+  "free-play-restart": {
+    "en": "THE GAME RESTARTS RIGHT AWAY WHEN IT FINISHES, EVEN WHILE PLAYING",
+    "ko": "완료되면 플레이 중이어도 바로 재시작됩니다"
+  },
+  "mod-updating": {
+    "en": "UPDATING",
+    "ko": "업데이트 중"
+  },
+  "installed": {
+    "en": "INSTALLED",
+    "ko": "설치됨"
+  },
+  "required": {
+    "en": "REQUIRED",
+    "ko": "필요"
+  },
+  "assets-basic": {
+    "en": "BASIC UI",
+    "ko": "기본 화면"
+  },
+  "assets-included": {
+    "en": "INCLUDED IN THE MOD",
+    "ko": "모드에 포함"
   }
 }

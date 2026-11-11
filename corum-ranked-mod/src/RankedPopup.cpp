@@ -1427,8 +1427,9 @@ class CorumRankedLayer final : public CCLayerColor {
             }
         }
         if (RankedRuntime::get().view().stage == RuntimeStage::AwaitingUpdate) {
-            if (m_resourceProgressLabel) m_resourceProgressLabel->setString(fmt::format("{}%",
-                static_cast<int>(std::round(corum::ranked::ui::RankedModUpdateManager::get().view().progress * 100))).c_str());
+            auto const progress = std::clamp(static_cast<float>(corum::ranked::ui::RankedModUpdateManager::get().view().progress), 0.0f, 1.0f);
+            if (m_resourceProgressLabel) m_resourceProgressLabel->setString(fmt::format("{}%", static_cast<int>(std::round(progress * 100))).c_str());
+            if (m_resourceProgressFill) m_resourceProgressFill->setContentSize({m_resourceProgressWidth * progress, 10.0f});
             return;
         }
         if (RankedRuntime::get().view().environmentWarning.active) return;
@@ -1722,97 +1723,34 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const size = CCDirector::sharedDirector()->getWinSize();
         addTopBack(true);
         addLanguageSelector();
-        addScreenHeader(
-            tr("mod-check-required", "MOD CHECK REQUIRED"),
-            tr("ranked-access-blocked", "RANKED ACCESS BLOCKED"),
-            kRed,
-            kRed
-        );
-
-        auto const panelWidth = std::min(448.0f, size.width - 64.0f);
-        auto const panelHeight = std::min(194.0f, size.height - 112.0f);
-        auto const panelCenter = CCPoint{size.width / 2.0f, size.height / 2.0f - 5.0f};
-        auto* panel = makeNeonPanel(
-            {panelWidth, panelHeight},
-            panelCenter,
-            kRed,
-            ccc3(28, 11, 23),
-            250
-        );
-        m_root->addChild(panel, 1);
-
-        auto* body = makeLabel(
-            tr("environment-warning-body", "RANKED CANNOT BE USED WITH THE CURRENT MOD SETUP."),
-            0.29f,
-            {size.width / 2.0f, panelCenter.y + panelHeight / 2.0f - 21.0f},
-            ccc3(255, 232, 236),
-            "semibold"
-        );
-        corum::ranked::ui::fitMenuLabelWidth(body, panelWidth - 34.0f, 0.29f, 0.19f);
-        m_root->addChild(body, 4);
-
-        auto* action = makeLabel(
-            tr(
-                "environment-warning-action",
-                "FIX THE ITEMS BELOW, RESTART THE GAME, THEN CHECK AGAIN."
-            ),
-            0.22f,
-            {size.width / 2.0f, panelCenter.y + panelHeight / 2.0f - 43.0f},
-            corum::ranked::ui::TextMuted,
-            "semibold"
-        );
-        corum::ranked::ui::fitMenuLabelWidth(action, panelWidth - 34.0f, 0.22f, 0.15f);
-        m_root->addChild(action, 4);
-
-        float rowY = panelCenter.y + panelHeight / 2.0f - 68.0f;
-        auto addSection = [&](std::string const& heading, std::string const& detail) {
+        // Q13 board: the red brand with the RANKED ACCESS BLOCKED chip, the
+        // 20 px line, one ruled panel per problem (red: not allowed, gold:
+        // missing or incompatible, neutral: CBF), the action note and CHECK AGAIN.
+        addGateHeader(tr("mod-check-required", "MOD CHECK REQUIRED"), "", tr("ranked-access-blocked", "RANKED ACCESS BLOCKED"), kRed, corum::ranked::ui::AccentInk, kRed);
+        auto const x0 = px(28.0f), x1 = size.width - px(28.0f);
+        float y = size.height - kLobbyHeader - 12.0f;
+        auto* body = makeLabel(tr("environment-warning-body", "RANKED CANNOT BE USED WITH THE CURRENT MOD SETUP."), fontScale(20.0f), {x0, y},
+            corum::ranked::ui::Text, "black", {0.0f, 0.5f});
+        corum::ranked::ui::fitMenuLabelWidth(body, x1 - x0, fontScale(20.0f), 0.14f); m_root->addChild(body, 4);
+        y -= 16.0f;
+        auto addSection = [&](std::string const& heading, std::string const& detail, ccColor3B rule) {
             if (detail.empty()) return;
-            auto* headingLabel = makeLabel(
-                heading,
-                0.23f,
-                {size.width / 2.0f, rowY},
-                kRed,
-                "black"
-            );
-            corum::ranked::ui::fitMenuLabelWidth(headingLabel, panelWidth - 36.0f, 0.23f, 0.16f);
-            m_root->addChild(headingLabel, 4);
-
-            auto* detailLabel = makeLabel(
-                detail,
-                0.23f,
-                {size.width / 2.0f, rowY - 14.0f},
-                corum::ranked::ui::Text,
-                "semibold"
-            );
-            corum::ranked::ui::fitMenuLabelWidth(detailLabel, panelWidth - 36.0f, 0.23f, 0.13f);
-            m_root->addChild(detailLabel, 4);
-            rowY -= 32.0f;
+            constexpr float h = 38.0f;
+            m_root->addChild(makeNeonPanel({x1 - x0, h}, {(x0 + x1) / 2.0f, y - h / 2.0f}, rule, kDeepPanel, 255), 2);
+            auto const headingTone = rule.r == kDeepPanel.r && rule.g == kDeepPanel.g ? corum::ranked::ui::TextMuted : rule;
+            m_root->addChild(makeLabel(heading, fontScale(14.0f), {x0 + 9.0f, y - 11.0f}, headingTone, "extrabold", {0.0f, 0.5f}), 4);
+            auto* detailLabel = makeLabel(detail, fontScale(15.0f), {x0 + 9.0f, y - 27.0f}, corum::ranked::ui::Text, "extrabold", {0.0f, 0.5f});
+            corum::ranked::ui::fitMenuLabelWidth(detailLabel, x1 - x0 - 18.0f, fontScale(15.0f), 0.09f); m_root->addChild(detailLabel, 4);
+            y -= h + 6.0f;
         };
-
-        addSection(
-            tr("unauthorized-active-mods", "UNAUTHORIZED ACTIVE MODS"),
-            joinEnvironmentMods(view.environmentWarning.unauthorizedMods, false)
-        );
-        addSection(
-            tr("missing-required-mods", "MISSING OR INACTIVE REQUIRED MODS"),
-            joinEnvironmentMods(view.environmentWarning.missingRequiredMods, true)
-        );
-        addSection(
-            tr("incompatible-mod-versions", "INCOMPATIBLE MOD VERSIONS"),
-            joinEnvironmentMods(view.environmentWarning.versionViolations, true)
-        );
-        addSection(
-            tr("cbf-settings-required", "CBF SETTINGS REQUIRED"),
-            cbfSettingsText(view.environmentWarning.cbfIssues)
-        );
-
-        addButton(
-            tr("retry-check", "CHECK AGAIN"),
-            {size.width / 2.0f, 24.0f},
-            menu_selector(CorumRankedLayer::onEnvironmentRecheck),
-            false,
-            0.64f
-        );
+        addSection(tr("unauthorized-active-mods", "UNAUTHORIZED ACTIVE MODS"), joinEnvironmentMods(view.environmentWarning.unauthorizedMods, false), kRed);
+        addSection(tr("missing-required-mods", "MISSING OR INACTIVE REQUIRED MODS"), joinEnvironmentMods(view.environmentWarning.missingRequiredMods, true), kGold);
+        addSection(tr("incompatible-mod-versions", "INCOMPATIBLE MOD VERSIONS"), joinEnvironmentMods(view.environmentWarning.versionViolations, true), kGold);
+        addSection(tr("cbf-settings-required", "CBF SETTINGS REQUIRED"), cbfSettingsText(view.environmentWarning.cbfIssues), kDeepPanel);
+        auto* action = makeLabel(tr("environment-warning-action", "FIX THE ITEMS BELOW, RESTART THE GAME, THEN CHECK AGAIN."), fontScale(13.0f),
+            {x0, std::max(52.0f, y - 6.0f)}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f});
+        corum::ranked::ui::fitMenuLabelWidth(action, x1 - x0, fontScale(13.0f), 0.08f); m_root->addChild(action, 4);
+        boardButton(tr("retry-check", "CHECK AGAIN"), {170.0f, px(54.0f)}, {x0 + 85.0f, 26.0f}, menu_selector(CorumRankedLayer::onEnvironmentRecheck), 20.0f, true, "ranked-environment-recheck"_spr);
     }
 
     void addRatingMarks(
@@ -2053,29 +1991,89 @@ class CorumRankedLayer final : public CCLayerColor {
         }
     }
 
+    // Q board header for the gate screens: back, the leaning brand and a chip.
+    void addGateHeader(std::string const& brandText, std::string const& lime, std::string const& chip, ccColor3B chipFill, ccColor3B chipInk, ccColor3B brandColor) {
+        auto const size = CCDirector::sharedDirector()->getWinSize();
+        auto const headY = size.height - kLobbyHeader / 2.0f;
+        auto* brand = makeLabel(brandText, fontScale(30.0f), {px(28.0f) + 24.0f + 8.0f, headY}, brandColor, "black", {0.0f, 0.5f});
+        corum::ranked::ui::leanLabel(brand); corum::ranked::ui::fitMenuLabelWidth(brand, size.width * 0.4f, fontScale(30.0f), 0.2f);
+        brand->setID("ranked-screen-title"_spr); m_root->addChild(brand, 6);
+        auto x = brand->getPositionX() + brand->getScaledContentSize().width;
+        if (!lime.empty()) {
+            auto* accent = makeLabel(lime, fontScale(30.0f), {x + 6.0f, headY}, corum::ranked::ui::Accent, "black", {0.0f, 0.5f});
+            corum::ranked::ui::leanLabel(accent); m_root->addChild(accent, 6); x = accent->getPositionX() + accent->getScaledContentSize().width;
+        }
+        if (!chip.empty()) addChip(m_root, chip, {x + 10.0f, headY}, chipFill, chipInk, 12.0f);
+    }
+    // Q11 / Q12 right panel: "WHILE YOU WAIT..." with FREE PLAY; the
+    // buttons work only while a download runs.
+    void addWaitPanel(float x0, float x1, float y0, float y1, bool active, SEL_MenuHandler freePlay, std::string const& freePlayId, bool randomMap) {
+        auto const width = x1 - x0, cx = (x0 + x1) / 2.0f;
+        m_root->addChild(makeNeonPanel({width, y1 - y0}, {cx, (y0 + y1) / 2.0f}, corum::ranked::ui::SurfaceSoft, kDeepPanel, 255), 1);
+        float y = y1 - 22.0f;
+        m_root->addChild(makeLabel(tr("while-you-wait", "WHILE YOU WAIT..."), fontScale(14.0f), {x0 + 12.0f, y}, corum::ranked::ui::TextMuted, "extrabold", {0.0f, 0.5f}), 4);
+        y -= 20.0f;
+        auto* title = makeLabel(tr("free-play", "FREE PLAY"), fontScale(34.0f), {x0 + 12.0f, y}, corum::ranked::ui::Text, "black", {0.0f, 0.5f});
+        corum::ranked::ui::leanLabel(title); m_root->addChild(title, 4);
+        y -= 24.0f;
+        auto* note = makeLabel("", fontScale(13.0f), {x0 + 12.0f, y}, corum::ranked::ui::TextMuted, "semibold");
+        corum::ranked::ui::fitWrappedMenuLabel(note, tr("free-play-note", "THE DOWNLOAD CONTINUES IN THE BACKGROUND. PRACTISE RANKED MAPS WITHOUT OFFICIAL RECORDS."), width - 24.0f, 26.0f, fontScale(13.0f));
+        note->setAlignment(kCCTextAlignmentLeft); note->setAnchorPoint({0.0f, 1.0f}); note->setPositionY(y + 6.0f); m_root->addChild(note, 4);
+        auto buttonY = y0 + 44.0f;
+        auto* play = boardButton(tr("mod-update-free-play", "FREE PLAY WHILE DOWNLOADING"), {width - 24.0f, px(54.0f)}, {cx, buttonY}, freePlay, 18.0f, true, freePlayId, active);
+        (void)play;
+        if (randomMap) boardButton(tr("random-ranked-map", "RANDOM RANKED MAP"), {width - 24.0f, px(42.0f)}, {cx, buttonY + 32.0f}, menu_selector(CorumRankedLayer::onRandomRankedMap),
+            15.0f, false, "ranked-resources-random-map"_spr, active);
+        auto* after = makeLabel(tr("free-play-restart", "THE GAME RESTARTS RIGHT AWAY WHEN IT FINISHES, EVEN WHILE PLAYING"), fontScale(13.0f), {cx, y0 + 16.0f}, corum::ranked::ui::TextMuted, "semibold");
+        corum::ranked::ui::fitMenuLabelWidth(after, width - 20.0f, fontScale(13.0f), 0.08f); m_root->addChild(after, 4);
+    }
     void renderModUpdate() {
         using corum::ranked::ui::ModUpdateState;
         auto const& update = corum::ranked::ui::RankedModUpdateManager::get().view();
         auto const size = CCDirector::sharedDirector()->getWinSize();
-        auto const center = CCPoint{size.width / 2, size.height / 2};
         addTopBack(true);
-        m_root->addChild(makeNeonPanel({std::min(390.0f, size.width - 90), 210}, center, kAccent, kDeepPanel, 248), 1);
         auto const restart = update.state == ModUpdateState::RestartRequired;
         auto const busy = update.state == ModUpdateState::Downloading || update.state == ModUpdateState::Verifying;
-        auto* heading = makeLabel(tr("mod-update", "MOD UPDATE"), 0.48f, {center.x, center.y + 70}, kAccent, "black");
-        m_root->addChild(heading, 4);
-        auto* versions = makeLabel(fmt::format("{} -> {} ({})", update.installedVersion, update.targetVersion,
-            corum::ranked::ui::RankedModUpdateManager::get().channel()), 0.30f, {center.x, center.y + 39}, kGold, "semibold");
-        corum::ranked::ui::fitMenuLabelWidth(versions, 330, 0.30f, 0.18f); m_root->addChild(versions, 4);
+        // Q11 board: CORUM RANKED with the MOD UPDATE chip; the state, the two
+        // version panels, the fat progress bar and the restart note on the
+        // left; the free-play panel on the right.
+        addGateHeader("CORUM", "RANKED", tr("mod-update", "MOD UPDATE"), corum::ranked::ui::AccentFill, corum::ranked::ui::AccentInk, corum::ranked::ui::Text);
+        auto const x0 = px(28.0f), rightW = 200.0f, x1 = size.width - px(28.0f) - rightW - 11.0f, y0 = 12.0f, y1 = size.height - kLobbyHeader;
+        auto* heading = makeLabel(busy ? tr("mod-updating", "UPDATING") : restart ? tr("restart", "RESTART") : tr("mod-update", "MOD UPDATE"), fontScale(48.0f),
+            {x0, y1 - 30.0f}, corum::ranked::ui::Text, "black", {0.0f, 0.5f});
+        corum::ranked::ui::leanLabel(heading); corum::ranked::ui::fitMenuLabelWidth(heading, x1 - x0, fontScale(48.0f), 0.3f); m_root->addChild(heading, 4);
         auto const message = restart ? tr("mod-restart-ready", "Update installed. Press Restart to apply it.") :
             !update.error.empty() ? update.error : busy ? tr("mod-verifying", "Downloading and verifying the mod...") :
             tr("mod-update-required", "Update the mod before entering Ranked.");
-        auto* detail = makeLabel(message, 0.29f, {center.x, center.y + 7}, update.error.empty() ? kAccent : kRed, "semibold");
-        corum::ranked::ui::fitMenuLabelWidth(detail, 335, 0.29f, 0.16f); m_root->addChild(detail, 4);
+        auto* detail = makeLabel(message, fontScale(17.0f), {x0, y1 - 56.0f}, update.error.empty() ? corum::ranked::ui::Text : kRed, "extrabold", {0.0f, 0.5f});
+        corum::ranked::ui::fitMenuLabelWidth(detail, x1 - x0, fontScale(17.0f), 0.12f); m_root->addChild(detail, 4);
+        // INSTALLED -> REQUIRED panels.
+        auto const versionPanel = [&](std::string const& caption, std::string const& value, float x, bool rule) {
+            auto const w = 100.0f, y = y1 - 88.0f;
+            m_root->addChild(makeNeonPanel({w, 30.0f}, {x + w / 2.0f, y}, rule ? kAccent : kDeepPanel, kDeepPanel, 255), 2);
+            m_root->addChild(makeLabel(caption, fontScale(13.0f), {x + w / 2.0f, y + 7.0f}, corum::ranked::ui::TextMuted, "semibold"), 4);
+            auto* v = makeLabel(value, fontScale(20.0f), {x + w / 2.0f, y - 6.0f}, rule ? corum::ranked::ui::Accent : corum::ranked::ui::TextMuted, "black");
+            corum::ranked::ui::fitMenuLabelWidth(v, w - 10.0f, fontScale(20.0f), 0.1f); m_root->addChild(v, 4);
+        };
+        versionPanel(tr("installed", "INSTALLED"), update.installedVersion.empty() ? "-" : "v" + update.installedVersion, x0, false);
+        if (auto* arrow = corum::ranked::ui::chevron(5.0f, 2.0f, corum::ranked::ui::TextMuted)) { arrow->setPosition({x0 + 110.0f, y1 - 88.0f}); m_root->addChild(arrow, 4); }
+        versionPanel(tr("required", "REQUIRED"), update.targetVersion.empty() ? "-" : "v" + update.targetVersion, x0 + 120.0f, true);
+        // Progress: caption and percent, then the fat bar (live in update()).
+        auto const barY = y1 - 132.0f;
+        m_root->addChild(makeLabel(busy ? tr("mod-verifying", "Downloading and verifying the mod...") : corum::ranked::ui::RankedModUpdateManager::get().channel(),
+            fontScale(13.0f), {x0, barY + 14.0f}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f}), 4);
+        m_resourceProgressLabel = makeLabel(fmt::format("{}%", static_cast<int>(update.progress * 100)), fontScale(13.0f), {x1, barY + 14.0f},
+            corum::ranked::ui::TextMuted, "semibold", {1.0f, 0.5f}); m_root->addChild(m_resourceProgressLabel, 4);
+        m_resourceProgressWidth = x1 - x0;
+        auto* track = CCLayerColor::create({32, 35, 46, 255}, m_resourceProgressWidth, 10.0f); track->setPosition({x0, barY - 5.0f}); track->setSkewX(20.0f); m_root->addChild(track, 3);
+        m_resourceProgressFill = CCLayerColor::create({corum::ranked::ui::Accent.r, corum::ranked::ui::Accent.g, corum::ranked::ui::Accent.b, 255},
+            m_resourceProgressWidth * std::clamp(static_cast<float>(update.progress), 0.0f, 1.0f), 10.0f);
+        m_resourceProgressFill->setPosition({x0, barY - 5.0f}); m_resourceProgressFill->setSkewX(20.0f); m_root->addChild(m_resourceProgressFill, 4);
         if (busy || restart) {
-            auto* notice = makeLabel(tr("mod-update-auto-restart", "The game restarts as soon as the download finishes."), 0.22f,
-                {center.x, center.y - 12}, kGold, "semibold");
-            corum::ranked::ui::fitMenuLabelWidth(notice, 335, 0.22f, 0.14f); m_root->addChild(notice, 4);
+            m_root->addChild(makeNeonPanel({x1 - x0, 22.0f}, {(x0 + x1) / 2.0f, barY - 30.0f}, kGold, kDeepPanel, 255), 2);
+            auto* notice = makeLabel(tr("mod-update-auto-restart", "The game restarts as soon as the download finishes."), fontScale(15.0f),
+                {x0 + 8.0f, barY - 30.0f}, corum::ranked::ui::Text, "extrabold", {0.0f, 0.5f});
+            corum::ranked::ui::fitMenuLabelWidth(notice, x1 - x0 - 16.0f, fontScale(15.0f), 0.1f); m_root->addChild(notice, 4);
         }
         if (restart) {
             // Installed: restart right away, as announced.
@@ -2083,22 +2081,16 @@ class CorumRankedLayer final : public CCLayerColor {
                 corum::ranked::ui::RankedModUpdateManager::get().restart();
             }), nullptr));
         }
-        if (busy) {
-            m_resourceProgressLabel = makeLabel(fmt::format("{}%", static_cast<int>(update.progress * 100)),
-                0.35f, {center.x, center.y - 33}, kGold, "black"); m_root->addChild(m_resourceProgressLabel, 4);
-            // Free play while it downloads: leave Ranked and keep playing; the
-            // watcher restarts the game as soon as the install completes.
-            auto* freePlay = addButton(tr("mod-update-free-play", "FREE PLAY WHILE DOWNLOADING"), {center.x + 48, center.y - 60},
-                menu_selector(CorumRankedLayer::onModUpdateFreePlay), false, 0.56f, true);
-            freePlay->setID("ranked-mod-update-free-play"_spr);
-        } else {
+        if (!busy) {
             auto const canDownload = corum::ranked::ui::RankedModUpdateManager::get().canDownload();
-            addButton(restart ? tr("restart", "RESTART") : canDownload ? tr("mod-update-download", "DOWNLOAD UPDATE") : tr("retry", "RETRY"),
-                {center.x+48, center.y - 60}, restart ? menu_selector(CorumRankedLayer::onRestartModUpdate) :
-                canDownload ? menu_selector(CorumRankedLayer::onDownloadModUpdate) : menu_selector(CorumRankedLayer::onRetry), false, 0.70f);
+            boardButton(restart ? tr("restart", "RESTART") : canDownload ? tr("mod-update-download", "DOWNLOAD UPDATE") : tr("retry", "RETRY"),
+                {170.0f, px(54.0f)}, {x0 + 85.0f, y0 + 20.0f}, restart ? menu_selector(CorumRankedLayer::onRestartModUpdate) :
+                canDownload ? menu_selector(CorumRankedLayer::onDownloadModUpdate) : menu_selector(CorumRankedLayer::onRetry), 20.0f, true, "ranked-mod-update-action"_spr);
         }
-        auto* branch=historyButton(m_root,corum::ranked::ui::RankedModUpdateManager::get().channel()=="debug"?"DEBUG":"RELEASE",
-            {center.x-std::min(390.f,size.width-90)/2+54,center.y-86},100,menu_selector(CorumRankedLayer::onUpdateChannel));branch->setEnabled(!busy&&!restart);
+        auto* branch = boardButton(corum::ranked::ui::RankedModUpdateManager::get().channel() == "debug" ? "DEBUG" : "RELEASE", {80.0f, px(34.0f)},
+            {x1 - 40.0f, y0 + 20.0f}, menu_selector(CorumRankedLayer::onUpdateChannel), 14.0f, false, "ranked-update-channel"_spr, !busy && !restart);
+        (void)branch;
+        addWaitPanel(x1 + 11.0f, size.width - px(28.0f), y0, y1 - 6.0f, busy, menu_selector(CorumRankedLayer::onModUpdateFreePlay), "ranked-mod-update-free-play"_spr, false);
     }
 
     void onUpdateChannel(CCObject*){
@@ -2131,70 +2123,67 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const failed = audio.state == RankedResourceDownloadState::Failed ||
             assets.state == corum::ranked::ui::RankAssetPackState::Failed;
         auto const complete = !resourceWorkMissing();
-        auto const accent = failed ? kRed : complete ? kGreen : downloading ? kGold : kAccent;
-        auto const center = CCPoint{size.width / 2, size.height / 2};
-        m_root->addChild(makeNeonPanel({std::min(390.0f, size.width - 90), 230}, center,
-            accent, kDeepPanel, 248), 1);
-        // Installation identity remains stable during verification and retry.
-        auto title = tr("additional-downloads", "ADDITIONAL DOWNLOADS");
-        if (complete) title = tr("all-resources-ready", "ALL RESOURCES READY");
-        auto* heading = makeLabel(title, 0.48f, {center.x, center.y + 85}, accent, "black");
-        corum::ranked::ui::fitMenuLabelWidth(heading, 330, 0.48f, 0.27f); m_root->addChild(heading, 4);
+        // Q12 board: RANKED RESOURCES with its state chip; the line, one row per
+        // resource (name, caption, bar, state chip), the overall bar, the note
+        // and the actions on the left; the free-play panel on the right.
+        addGateHeader(tr("ranked-resources", "RANKED RESOURCES"), "",
+            complete ? tr("all-resources-ready", "ALL RESOURCES READY") : tr("additional-downloads", "ADDITIONAL DOWNLOADS"),
+            complete ? corum::ranked::ui::AccentFill : ccc3(32, 35, 46), complete ? corum::ranked::ui::AccentInk : corum::ranked::ui::TextMuted, corum::ranked::ui::Text);
+        auto const x0 = px(28.0f), rightW = 180.0f, x1 = size.width - px(28.0f) - rightW - 11.0f, y0 = 12.0f, y1 = size.height - kLobbyHeader;
         auto subtitle = failed ? tr("retry-before-continuing", "Retry the failed download before continuing.") :
             assets.verifying ? tr("assets-verifying", "Verifying and installing image pack...") :
             downloading ? tr("keep-open", "Keep this screen open until the download is complete.") :
             complete ? tr("everything-ready", "Everything required for Ranked is ready.") :
             tr("assets-one-download", "Download all required resources in one step.");
-        auto* detail = makeLabel(subtitle, 0.25f, {center.x, center.y + 57}, corum::ranked::ui::TextMuted, "semibold");
-        corum::ranked::ui::fitMenuLabelWidth(detail, 335, 0.25f, 0.16f); m_root->addChild(detail, 4);
+        auto* line = makeLabel(subtitle, fontScale(18.0f), {x0, y1 - 12.0f}, failed ? kRed : corum::ranked::ui::Text, "extrabold", {0.0f, 0.5f});
+        corum::ranked::ui::fitMenuLabelWidth(line, x1 - x0, fontScale(18.0f), 0.12f); m_root->addChild(line, 4);
+        auto const row = [&](int index, std::string const& name, std::string const& caption, float fill, std::string const& state, ccColor3B tone, bool active) {
+            auto const h = 30.0f, y = y1 - 42.0f - static_cast<float>(index) * (h + 5.0f);
+            m_root->addChild(makeNeonPanel({x1 - x0, h}, {(x0 + x1) / 2.0f, y}, kDeepPanel, kDeepPanel, 255), 2);
+            if (active) { auto* edge = CCLayerColor::create({tone.r, tone.g, tone.b, 255}, 2.0f, h); edge->setPosition({x0, y - h / 2.0f}); m_root->addChild(edge, 3); }
+            auto* label = makeLabel(name, fontScale(20.0f), {x0 + 9.0f, y + 5.0f}, corum::ranked::ui::Text, "black", {0.0f, 0.5f});
+            corum::ranked::ui::fitMenuLabelWidth(label, 70.0f, fontScale(20.0f), 0.1f); m_root->addChild(label, 4);
+            auto* cap = makeLabel(caption, fontScale(13.0f), {x0 + 9.0f, y - 7.0f}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f});
+            corum::ranked::ui::fitMenuLabelWidth(cap, 70.0f, fontScale(13.0f), 0.08f); m_root->addChild(cap, 4);
+            addSkewBar(m_root, {x0 + 90.0f, y}, x1 - x0 - 90.0f - 66.0f, px(12.0f), fill, tone, 4);
+            addChip(m_root, state, {x1 - 58.0f, y}, tone.r == kRed.r ? kRed : fill >= 1.0f ? corum::ranked::ui::AccentFill : ccc3(32, 35, 46),
+                tone.r == kRed.r || fill >= 1.0f ? corum::ranked::ui::AccentInk : corum::ranked::ui::TextMuted, 12.0f);
+        };
+        row(0, tr("assets-basic", "BASIC UI"), tr("assets-included", "INCLUDED IN THE MOD"), 1.0f, tr("ready", "READY"), corum::ranked::ui::Accent, false);
+        auto const imageState = !manager.required() || manager.ready() ? tr("ready", "READY") : failed && !assets.error.empty() ? tr("resources-failed", "DOWNLOAD FAILED") :
+            assets.verifying ? tr("assets-verifying-short", "VERIFYING") : downloading ? tr("downloading-resources", "DOWNLOADING") : tr("resources-required", "DOWNLOAD REQUIRED");
+        auto const imageFill = !manager.required() || manager.ready() ? 1.0f : std::clamp(assets.progress, 0.0f, 1.0f);
+        auto const imageFailed = assets.state == corum::ranked::ui::RankAssetPackState::Failed;
+        row(1, tr("assets-images", "Images"), manager.required() ? (assets.update ? assets.activeVersion + " -> " + assets.targetVersion : assets.targetVersion) : tr("assets-basic-ui", "Built-in interface"),
+            imageFill, imageState, imageFailed ? kRed : corum::ranked::ui::Accent, imageFill < 1.0f);
+        auto const audioFill = audio.total > 0 ? static_cast<float>(audio.ready) / static_cast<float>(audio.total) : 1.0f;
+        auto const audioFailed = audio.state == RankedResourceDownloadState::Failed;
+        row(2, tr("assets-music", "Music"), fmt::format("{} / {}", audio.ready, audio.total), audioFill,
+            audioFailed ? tr("resources-failed", "DOWNLOAD FAILED") : audioFill >= 1.0f ? tr("ready", "READY") : downloading ? tr("downloading-resources", "DOWNLOADING") : tr("resources-required", "DOWNLOAD REQUIRED"),
+            audioFailed ? kRed : corum::ranked::ui::Accent, audioFill < 1.0f);
+        // Overall: n / m READY with the live bar and percent.
         auto const [ready, total] = resourceCounts();
-        m_resourceCountLabel = makeLabel(fmt::format("{} / {} {}", ready, total, tr("ready", "READY")),
-            0.35f, {center.x, center.y + 28}, ready == total ? kGreen : corum::ranked::ui::Text, "black");
-        m_root->addChild(m_resourceCountLabel, 4);
-        if (manager.required()) {
-            auto const version = assets.update ? assets.activeVersion + " -> " + assets.targetVersion : assets.targetVersion;
-            auto* versions = makeLabel(version, 0.23f, {center.x, center.y + 7}, kAccent, "semibold");
-            corum::ranked::ui::fitMenuLabelWidth(versions, 335, 0.23f, 0.14f); m_root->addChild(versions, 4);
-        }
-        auto const images = !manager.required() ? tr("assets-basic-ui", "Built-in interface") : manager.ready() ?
-            tr("ready", "READY") : failed ? tr("resources-failed", "DOWNLOAD FAILED") :
-            assets.verifying ? tr("assets-verifying-short", "VERIFYING") : downloading ?
-            tr("downloading-resources", "DOWNLOADING") : tr("resources-required", "DOWNLOAD REQUIRED");
-        auto* imageRow = makeLabel(tr("assets-images", "Images") + " · " + images,
-            0.22f, {center.x, center.y - 13}, accent, "semibold");
-        corum::ranked::ui::fitMenuLabelWidth(imageRow, 335, 0.22f, 0.14f); m_root->addChild(imageRow, 4);
-        if (audio.total > 0 && assets.error.empty()) {
-            auto* songs = makeLabel(fmt::format("{} · {} / {}", tr("assets-music", "Music"), audio.ready, audio.total),
-                0.22f, {center.x, center.y - 30}, audio.ready == audio.total ? kGreen : kGold, "semibold");
-            m_root->addChild(songs, 4);
-        }
+        auto const overallY = y1 - 42.0f - 3.0f * 35.0f + 4.0f;
+        m_resourceCountLabel = makeLabel(fmt::format("{} / {} {}", ready, total, tr("ready", "READY")), fontScale(13.0f), {x0, overallY},
+            ready == total ? kGreen : corum::ranked::ui::Text, "black", {0.0f, 0.5f}); m_root->addChild(m_resourceCountLabel, 4);
+        m_resourceProgressLabel = makeLabel(fmt::format("{}%", static_cast<int>(std::round(resourceProgress() * 100))), fontScale(13.0f), {x1, overallY},
+            corum::ranked::ui::TextMuted, "semibold", {1.0f, 0.5f}); m_root->addChild(m_resourceProgressLabel, 4);
+        m_resourceProgressWidth = x1 - x0;
+        auto* back = CCLayerColor::create({32, 35, 46, 255}, m_resourceProgressWidth, 10.0f); back->setPosition({x0, overallY - 17.0f}); back->setSkewX(20.0f); m_root->addChild(back, 3);
+        auto const accent = failed ? kRed : corum::ranked::ui::Accent;
+        m_resourceProgressFill = CCLayerColor::create({accent.r, accent.g, accent.b, 255}, static_cast<float>(m_resourceProgressWidth * resourceProgress()), 10.0f);
+        m_resourceProgressFill->setPosition(back->getPosition()); m_resourceProgressFill->setSkewX(20.0f); m_root->addChild(m_resourceProgressFill, 4);
         if (failed && !assets.error.empty()) {
-            auto* error = makeLabel(assets.error, 0.19f, {center.x, center.y - 30}, kRed, "semibold");
-            corum::ranked::ui::fitMenuLabelWidth(error, 335, 0.19f, 0.12f); m_root->addChild(error, 4);
+            auto* error = makeLabel(assets.error, fontScale(13.0f), {x0, overallY - 32.0f}, kRed, "semibold", {0.0f, 0.5f});
+            corum::ranked::ui::fitMenuLabelWidth(error, x1 - x0, fontScale(13.0f), 0.08f); m_root->addChild(error, 4);
         }
-        auto const barWidth = std::min(270.0f, size.width - 180);
-        auto* back = CCLayerColor::create({21, 23, 29, 235}, barWidth, 10);
-        back->setPosition({center.x - barWidth / 2, center.y - 47}); m_root->addChild(back, 3);
-        m_resourceProgressFill = CCLayerColor::create({accent.r, accent.g, accent.b, 245},
-            static_cast<float>(barWidth * resourceProgress()), 10);
-        m_resourceProgressFill->setPosition(back->getPosition()); m_resourceProgressWidth = barWidth;
-        m_root->addChild(m_resourceProgressFill, 4);
-        if (downloading) {
-            m_resourceProgressLabel = makeLabel(fmt::format("{}%", static_cast<int>(std::round(resourceProgress() * 100))),
-                0.23f, {center.x, center.y - 62}, kGold); m_root->addChild(m_resourceProgressLabel, 4);
-            auto* freePlay = addButton(tr("mod-update-free-play", "FREE PLAY WHILE DOWNLOADING"), {center.x - 70, center.y - 88},
-                menu_selector(CorumRankedLayer::onResourceFreePlay), false, 0.48f, true);
-            freePlay->setID("ranked-resources-free-play"_spr);
-            // Q12: practise a random Ranked map (no official record) meanwhile.
-            auto* randomMap = addButton(tr("random-ranked-map", "RANDOM RANKED MAP"), {center.x + 82, center.y - 88},
-                menu_selector(CorumRankedLayer::onRandomRankedMap), false, 0.48f, true);
-            randomMap->setID("ranked-resources-random-map"_spr);
-        } else if (complete) {
-            addButton(tr("continue", "CONTINUE"), {center.x, center.y - 83}, menu_selector(CorumRankedLayer::onContinueResources), false, 0.72f);
-        } else {
-            addButton(failed ? tr("retry-failed", "RETRY FAILED") : tr("download-all", "DOWNLOAD ALL"),
-                {center.x, center.y - 83}, menu_selector(CorumRankedLayer::onDownloadAllResources), failed, 0.70f);
+        if (complete) {
+            boardButton(tr("continue", "CONTINUE"), {x1 - x0, px(54.0f)}, {(x0 + x1) / 2.0f, y0 + 20.0f}, menu_selector(CorumRankedLayer::onContinueResources), 20.0f, true, "ranked-resources-continue"_spr);
+        } else if (!downloading) {
+            boardButton(failed ? tr("retry-failed", "RETRY FAILED") : tr("download-all", "DOWNLOAD ALL"), {x1 - x0, px(54.0f)}, {(x0 + x1) / 2.0f, y0 + 20.0f},
+                menu_selector(CorumRankedLayer::onDownloadAllResources), 20.0f, true, "ranked-resources-download"_spr);
         }
+        addWaitPanel(x1 + 11.0f, size.width - px(28.0f), y0, y1 - 6.0f, downloading, menu_selector(CorumRankedLayer::onResourceFreePlay), "ranked-resources-free-play"_spr, true);
     }
 
     // P1 / P2 (placement setup), from the boards. Step 1 chooses the length

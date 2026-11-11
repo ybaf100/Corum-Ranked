@@ -35,7 +35,8 @@ struct Popup:CCNode{CCNode*m_bgSprite=CCNode::create(),*m_closeBtn=CCNode::creat
 namespace corum::ranked::ui{
  enum class FontWeight{SemiBold,Black};constexpr ccColor3B Gold{255,207,74},Surface{8,14,26},SurfaceRaised{16,27,49},Text{242,247,255};
  inline std::vector<std::pair<std::string,FontWeight>> labels;
- CCNode*surface(CCSize s,CCPoint p,ccColor3B,ccColor3B fill,int,bool){auto*n=CCNode::create();n->size=s;n->position=p;n->color=fill;return n;}
+ void leanLabel(CCNode*){}
+CCNode*surface(CCSize s,CCPoint p,ccColor3B,ccColor3B fill,int,bool){auto*n=CCNode::create();n->size=s;n->position=p;n->color=fill;return n;}
  CCLabelBMFont*menuLabel(std::string const&s,float,CCPoint,ccColor3B,FontWeight w){auto*n=new CCLabelBMFont;n->setString(s.c_str());labels.emplace_back(s,w);return n;}
  void fitMenuLabelWidth(CCLabelBMFont*,float,float,float){}void fitFullMenuLabel(CCLabelBMFont*,float,float,float){}
  void cancelMenuTouch(CCMenu*m){++m->cancellations;}
