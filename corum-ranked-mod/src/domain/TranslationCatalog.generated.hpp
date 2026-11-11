@@ -319,7 +319,7 @@ inline constexpr std::array<CatalogTranslation, 1101> kTranslations {{
     CatalogTranslation{"continue", "CONTINUE", "계속"},
     CatalogTranslation{"continue-placement", "CONTINUE PLACEMENT", "CONTINUE PLACEMENT"},
     CatalogTranslation{"creator-loading", "CREATOR LOADING...", "CREATOR LOADING..."},
-    CatalogTranslation{"credits-intro", "Planning and music behind Corum Ranked", "Corum Ranked의 기획과 음악"},
+    CatalogTranslation{"credits-intro", "Planning and music behind Ranked", "Ranked의 기획과 음악"},
     CatalogTranslation{"credits-music", "Music", "음악"},
     CatalogTranslation{"credits-no-music", "No configured music", "설정된 음악 없음"},
     CatalogTranslation{"credits-planner", "Planner", "기획"},

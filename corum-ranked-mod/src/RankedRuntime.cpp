@@ -844,7 +844,7 @@ void RankedRuntime::fetchConfig() {
                 setStage(
                     RuntimeStage::Error,
                     "This client does not understand the current CBF policy.",
-                    "Update Corum Ranked before joining."
+                    "Update Ranked before joining."
                 );
                 return;
             }

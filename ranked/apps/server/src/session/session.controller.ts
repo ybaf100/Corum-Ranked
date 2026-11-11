@@ -31,7 +31,7 @@ export class SessionController {
     if (!decision.allowed) {
       throw new HttpException({
         code: "RANKED_CLIENT_UPDATE_REQUIRED",
-        message: `Corum Ranked ${decision.requiredVersion} is required. Update the mod before entering Ranked.`,
+        message: `Ranked ${decision.requiredVersion} is required. Update the mod before entering Ranked.`,
         requiredVersion: decision.requiredVersion,
         clientVersion: decision.clientVersion,
         installedModVersion: decision.installedModVersion,

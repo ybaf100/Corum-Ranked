@@ -148,7 +148,7 @@ class RankedGuideCarousel final : public cocos2d::CCNode {
         box(s, x, cy + 6.0f, w, 40.0f, SurfaceRaised);
         box(s, x, cy + 45.0f, w, 1.0f, ccColor3B{201, 162, 255}, 255, 2);
         text(s, "+20 AP", 22.0f, {x + 8.0f, cy + 26.0f}, Gold, FontWeight::Black);
-        text(s, "hwanhee1", 15.0f, {x + 90.0f, cy + 26.0f}, Text, FontWeight::ExtraBold);
+        text(s, "PLAYER", 15.0f, {x + 90.0f, cy + 26.0f}, Text, FontWeight::ExtraBold);
         text(s, i18n::text("title-equipped-chip", "EQUIPPED"), 11.0f, {x + w - 8.0f, cy + 26.0f}, ccColor3B{201, 162, 255}, FontWeight::Black, {1.0f, 0.5f});
         std::array<cocos2d::ccColor3B, 5> const grades {Accent, ccColor3B{55, 220, 234}, ccColor3B{181, 124, 255}, Gold, Red};
         for (std::size_t i = 0; i < grades.size(); ++i) {

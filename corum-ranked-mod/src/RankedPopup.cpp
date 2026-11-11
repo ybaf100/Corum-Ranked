@@ -2049,9 +2049,9 @@ class CorumRankedLayer final : public CCLayerColor {
         addTopBack(true);
         auto const restart = update.state == ModUpdateState::RestartRequired;
         auto const busy = update.state == ModUpdateState::Downloading || update.state == ModUpdateState::Verifying;
-        // Q11: CORUM RANKED with the MOD UPDATE chip and the channel on the
+        // Q11: RANKED with the MOD UPDATE chip and the channel on the
         // right; the Ranked guide in the middle; the download dock below.
-        addGateHeader("CORUM", "RANKED", busy ? tr("mod-updating", "UPDATING") : tr("mod-update", "MOD UPDATE"), corum::ranked::ui::AccentFill, corum::ranked::ui::AccentInk, corum::ranked::ui::Text);
+        addGateHeader("RANKED", "", busy ? tr("mod-updating", "UPDATING") : tr("mod-update", "MOD UPDATE"), corum::ranked::ui::AccentFill, corum::ranked::ui::AccentInk, corum::ranked::ui::Accent);
         boardButton(corum::ranked::ui::RankedModUpdateManager::get().channel() == "debug" ? "DEBUG" : "RELEASE", {72.0f, px(34.0f)},
             {size.width - px(28.0f) - 36.0f, size.height - kLobbyHeader / 2.0f}, menu_selector(CorumRankedLayer::onUpdateChannel), 13.0f, false, "ranked-update-channel"_spr, !busy && !restart);
         addGuideCarousel();
