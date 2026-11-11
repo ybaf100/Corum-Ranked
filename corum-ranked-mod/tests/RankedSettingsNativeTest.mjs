@@ -41,6 +41,7 @@ namespace ui {
 namespace i18n {std::string text(char const*,char const* fallback){return fallback;}}
 void fitMenuLabelWidth(CCLabelBMFont*,float,float,float){}
 void fitFullMenuLabel(CCLabelBMFont*,float,float,float){}
+void fitSingleLineMenuLabel(CCLabelBMFont*,float,float,float){}
 struct RankedSettingsPopup {
  bool m_closed=false,m_refreshDisabled=false;Button button;Button* m_refreshRecords=&button;
  CCLabelBMFont timer,status;CCLabelBMFont* m_forumCooldown=&timer;CCLabelBMFont* m_forumStatus=&status;

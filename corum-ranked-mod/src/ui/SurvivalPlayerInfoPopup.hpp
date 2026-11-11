@@ -92,14 +92,9 @@ class SurvivalPlayerInfoPopup final:public Popup,public UserInfoDelegate {
         auto const streak=static_cast<int>(record["winStreak"].asInt().unwrapOr(0));if(streak>0)line+=" · "+i18n::streak(streak,true);
         if(m_player.bot)line="BOT";
         else if(!record.isObject())line=i18n::text("info-unavailable","Unavailable");
-        auto* summary=menuLabel(line,15.f/64.f,{386,224},streak>=2?Gold:TextMuted,FontWeight::ExtraBold);summary->setAnchorPoint({1,.5f});fitSingleLineMenuLabel(summary,140,16,15.f/64.f);m_contents->addChild(summary,5);
-        // Mode rows on raised panels; the shared rank line keeps its 300-unit
-        // geometry inside an offset holder.
-        for(auto const& [caption,key,y]:{std::tuple{i18n::text("survival","SURVIVAL"),"survival",170.0f},std::tuple{i18n::text("solo-ranked","SOLO RANKED"),"solo",140.0f}}){
-            m_contents->addChild(surface({372,26},{200,y},SurfaceRaised,SurfaceRaised,255,false),1);
-            auto* holder=CCNode::create();holder->setPosition({50,0});m_contents->addChild(holder,4);
-            publicRankLine(holder,caption,profile[key],y);
-        }
+        // Q2 tier panels: Solo, then Survival with its record and streak.
+        publicTierPanel(m_contents,i18n::text("solo-ranked","SOLO RANKED"),profile["solo"],"",{106.5f,162},{185,52});
+        publicTierPanel(m_contents,i18n::text("survival","SURVIVAL"),profile["survival"],line,{293.5f,162},{185,52});
         auto const unavailable=i18n::text("info-unavailable","Unavailable");auto const waiting=m_lookupFailed?unavailable:i18n::text("loading","Loading...");
         auto stat=[&](std::optional<int> value){return m_player.bot?std::string("BOT"):value?std::to_string(*value):waiting;};
         tile(i18n::text("info-stars","Stars"),stat(m_statistics?std::optional(m_statistics->stars):std::nullopt),0);
@@ -135,8 +130,7 @@ class SurvivalPlayerInfoPopup final:public Popup,public UserInfoDelegate {
         if(m_player.accountId<=0)m_lookupFailed=m_forumFailed=true;
         m_bgSprite->setVisible(false);m_closeBtn->setVisible(false);setID("survival-player-info-popup"_spr);
         m_panel=rankedPopupContent(m_mainLayer,m_buttonMenu,layout);m_panel->addChild(surface({400,270},{200,135},Accent,Surface,255,true));
-        auto* face=surface({90,18},{},Steel,SurfaceRaised,255,true);auto* label=menuLabel(i18n::text("close","CLOSE"),14.f/64.f,{45,9},Text,FontWeight::ExtraBold);face->addChild(label,5);
-        auto* close=CCMenuItemSpriteExtra::create(face,this,menu_selector(SurvivalPlayerInfoPopup::onClose));close->setPosition({341,20});m_buttonMenu->addChild(close);
+        auto* close=CCMenuItemSpriteExtra::create(publicCloseFace(),this,menu_selector(SurvivalPlayerInfoPopup::onClose));close->setPosition({376,252});m_buttonMenu->addChild(close);
         m_deadline=std::chrono::steady_clock::now()+std::chrono::seconds(25);
         schedule(schedule_selector(SurvivalPlayerInfoPopup::refresh),.1f);render();return true;
     }

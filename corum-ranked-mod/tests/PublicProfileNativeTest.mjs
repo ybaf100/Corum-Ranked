@@ -54,11 +54,15 @@ test('actual public profile helpers retain scoped titles/effects, current badges
 #include <cassert>
 #include <string>
 #include <vector>
-struct CCPoint{float x,y;};struct CCNode{std::vector<CCNode*>children;void addChild(CCNode*p,int){children.push_back(p);}void setPosition(CCPoint){}};
+struct CCPoint{float x,y;};struct CCSize{float width,height;};struct CCNode{virtual ~CCNode()=default;std::vector<CCNode*>children;void addChild(CCNode*p,int){children.push_back(p);}void setPosition(CCPoint){}};
 struct CCLabelBMFont:CCNode{std::string text;int effect=0;bool unlocked=false;float fitted=0;void setAnchorPoint(CCPoint){}};
 namespace geode::prelude{}
+using ccColor3B=int;
+namespace corum::ranked{inline std::string rankTierDisplay(std::string tier){return tier;}}
 namespace corum::ranked::ui{
-enum class FontWeight{SemiBold,ExtraBold};enum class RankBadgeDisplay{Leaderboard};constexpr int Text=1,TextMuted=2,Green=3;
+enum class FontWeight{SemiBold,ExtraBold,Black};enum class RankBadgeDisplay{Leaderboard};constexpr int Text=1,TextMuted=2,Green=3,SurfaceRaised=4,Steel=5;
+inline int tierColor(std::string const&){return 9;}
+CCNode*surface(CCSize,CCPoint,int,int,int,bool){return new CCNode;}
 namespace i18n{bool korean=false;bool isKorean(){return korean;}std::string text(char const*,char const*f){return f;}}
 CCLabelBMFont*menuLabel(std::string const&s,float,CCPoint,int,FontWeight){auto*p=new CCLabelBMFont;p->text=s;return p;}
 void fitSingleLineMenuLabel(CCLabelBMFont*p,float width,float,float){p->fitted=width;}
@@ -79,6 +83,10 @@ int main(){using namespace corum::ranked::ui;
  profile["promotion"]=matjson::parse(R"({"results":["WIN","LOSS","WIN"]})").unwrap();publicRankLine(&parent,"SOLO RANKED",profile,170);
  assert(static_cast<CCLabelBMFont*>(parent.children.back())->text=="PROMOTION MATCH O X O");
  profile["promotion"]=matjson::Value::object();publicRankLine(&parent,"SOLO RANKED",profile,170);assert(static_cast<CCLabelBMFont*>(parent.children.back())->text=="PROMOTION MATCH");
+ {CCNode panel;matjson::Value gold;gold["tier"]="GOLD";gold["lp"]=900;publicTierPanel(&panel,"SURVIVAL",gold,"8W",{100,100},{180,50});
+  std::vector<std::string> texts;for(auto* c:panel.children)if(auto* l=dynamic_cast<CCLabelBMFont*>(c))texts.push_back(l->text);
+  assert((texts==std::vector<std::string>{"SURVIVAL","GOLD","900 LP · 8W"})&&ambientBadges.back()=="GOLD");
+  CCNode empty;publicTierPanel(&empty,"SOLO",matjson::Value(),"",{100,100},{180,50});assert(dynamic_cast<CCLabelBMFont*>(empty.children.back())->text=="Unavailable");}
  auto before=ambientBadges.size();publicRankLine(&parent,"SURVIVAL",matjson::Value(),140);assert(ambientBadges.size()==before&&static_cast<CCLabelBMFont*>(parent.children.back())->text=="Unavailable");
 }
 `);
@@ -95,8 +103,9 @@ test('actual update-channel popup verifies Debug through Lightsail and cancels s
 #include <vector>
 struct CCObject{virtual~CCObject()=default;};struct CCPoint{float x,y;};struct CCSize{float width,height;};
 struct CCNode:CCObject{bool parent=true,visible=true;int refs=0;void*getParent(){return parent?this:nullptr;}void addChild(CCNode*,int=0){}void setVisible(bool v){visible=v;}void setPosition(CCPoint){}void setID(std::string const&){}void autorelease(){}};
-struct CCLabelBMFont:CCNode{std::string value;void setString(char const*s){value=s;}void setAnchorPoint(CCPoint){}};
-struct CCMenu:CCNode{};struct CCMenuItemSpriteExtra:CCNode{bool enabled=true;void setEnabled(bool b){enabled=b;}static auto*create(CCNode*,CCNode*,int){return new CCMenuItemSpriteExtra;}};
+struct CCLabelBMFont:CCNode{std::string value;int color=0;void setString(char const*s){value=s;}void setAnchorPoint(CCPoint){}void setColor(int c){color=c;}};
+struct CCMenu:CCNode{};struct CCMenuItemSpriteExtra:CCNode{bool enabled=true;CCNode*face=nullptr;void setEnabled(bool b){enabled=b;}void setNormalImage(CCNode*n){face=n;}static auto*create(CCNode*,CCNode*,int){return new CCMenuItemSpriteExtra;}};
+struct Version{std::string toVString()const{return "v0.6.0-beta.42";}};struct Mod{static Mod*get(){static Mod m;return &m;}Version getVersion()const{return {};}};
 using SEL_MenuHandler=int;
 #define menu_selector(x) 0
 std::string operator""_spr(char const*s,std::size_t n){return std::string(s,n);}
@@ -109,7 +118,9 @@ struct TextInput:CCNode{std::string value;bool masked=false,enabled=true;int lim
 namespace web{struct WebResponse{int status;matjson::Value body;int code(){return status;}struct Parsed{matjson::Value body;auto unwrapOr(matjson::Value){return body;}};auto json(){return Parsed{body};}};
 struct Operation{std::string path;matjson::Value body;};struct WebRequest{matjson::Value body;WebRequest&timeout(std::chrono::seconds s){assert(s.count()==8);return*this;}WebRequest&followRedirects(bool b){assert(!b);return*this;}void bodyJSON(matjson::Value const&v){body=v;}Operation post(std::string path){return {path,body};}};}
 namespace geode{namespace prelude{using::Ref;using::WeakRef;namespace web=::web;}namespace async{struct Job{web::Operation op;std::function<void(web::WebResponse)>callback;};inline std::vector<Job>jobs;template<class T>struct TaskHolder{int cancels=0;void cancel(){++cancels;}template<class F>void spawn(web::Operation op,F callback){jobs.push_back({op,callback});}};}}
-namespace corum::ranked::ui{enum class FontWeight{ExtraBold,Black,SemiBold};constexpr int Accent=1,Steel=2,Surface=3,SurfaceRaised=4,Text=5,TextMuted=6;
+namespace corum::ranked{inline std::string rankedBuildChannel(){return "debug";}}
+using ccColor3B=int;
+namespace corum::ranked::ui{enum class FontWeight{ExtraBold,Black,SemiBold};constexpr int Accent=1,Steel=2,Surface=3,SurfaceRaised=4,Text=5,TextMuted=6,Red=7,AccentFill=8,AccentInk=9;
 namespace i18n{std::string text(char const*,char const*f){return f;}}
 struct Layout{CCSize size;};Layout rankedPopupLayout(CCSize size,CCSize){return {size};}CCNode*rankedPopupContent(CCNode*,CCMenu*,Layout){return new CCNode;}
 CCNode*surface(CCSize,CCPoint,int,int,int,bool){return new CCNode;}

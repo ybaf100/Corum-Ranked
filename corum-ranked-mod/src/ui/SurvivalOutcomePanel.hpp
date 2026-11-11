@@ -7,6 +7,8 @@
 #include "RankBadgeAssets.hpp"
 #include "SurvivalProfile.hpp"
 #include "ModeLobbyMotion.hpp"
+#include "AchievementEffects.hpp"
+#include "../domain/AchievementStyle.hpp"
 #include "../domain/ScoreDisplay.hpp"
 #include "../domain/SurvivalBoardPresentation.hpp"
 #include "../domain/SurvivalPodiumMotion.hpp"
@@ -117,7 +119,7 @@ inline void showSurvivalStandings(){
     if(auto* popup=SurvivalStandingsPopup::create())popup->show();
 }
 class SurvivalOutcomePanel final:public cocos2d::CCLayerColor {
-    std::function<void(int)> m_action;CCMenu* m_menu=nullptr;CCMenuItemSpriteExtra* m_watch=nullptr;CCMenuItemSpriteExtra* m_freeChoice=nullptr;CCMenuItemSpriteExtra* m_resultChoice=nullptr;
+    std::function<void(int)> m_action;CCMenu* m_menu=nullptr;CCMenuItemSpriteExtra* m_watch=nullptr;CCMenuItemSpriteExtra* m_freeChoice=nullptr;CCMenuItemSpriteExtra* m_resultChoice=nullptr;CCMenuItemSpriteExtra* m_close=nullptr;
     std::string m_key,m_identity;std::vector<SurvivalStanding> m_profiles;
     struct Podium {CCNode* pedestal;CCMenuItemSpriteExtra* avatar;CCNode* stamp;CCNode* place;CCNode* glow;float x,base,height;int rank;};
     std::vector<CCNode*> m_badges;
@@ -162,7 +164,7 @@ public:
         for(auto const& p:view.result["standings"].asArray().unwrapOr(std::vector<matjson::Value>{}))
             buildKey+=":"+p["participantId"].asString().unwrapOr("")+":"+p["tierAfter"].asString().unwrapOr("")+":"+(p["lpAfter"].isNumber()?std::to_string(p["lpAfter"].asInt().unwrapOr(0)):"pending")+":"+std::to_string(p["delta"].asInt().unwrapOr(0));
         auto const size=CCDirector::sharedDirector()->getWinSize();
-        if(m_key!=buildKey){auto const elapsed=m_identity==key?m_elapsed:0.;m_identity=key;m_key=buildKey;removeAllChildrenWithCleanup(true);m_profiles=survivalRoster(view);m_stages.clear();m_badges.clear();m_elapsed=elapsed;m_watch=nullptr;m_freeChoice=m_resultChoice=nullptr;m_detail=m_watchText=nullptr;m_halo=nullptr;
+        if(m_key!=buildKey){auto const elapsed=m_identity==key?m_elapsed:0.;m_identity=key;m_key=buildKey;removeAllChildrenWithCleanup(true);m_profiles=survivalRoster(view);m_stages.clear();m_badges.clear();m_elapsed=elapsed;m_watch=nullptr;m_freeChoice=m_resultChoice=m_close=nullptr;m_detail=m_watchText=nullptr;m_halo=nullptr;
             m_menu=CCMenu::create();m_menu->setPosition(CCPointZero);addChild(m_menu,20);
             auto const own=std::find_if(m_profiles.begin(),m_profiles.end(),[&](auto const& row){return row.id==view.ownId;});
             if(choice){
@@ -300,7 +302,17 @@ public:
                 auto const head=[&](std::string const& text,float x,CCPoint anchor){auto* l=menuLabel(text,css(13),{x,headY},TextMuted,FontWeight::SemiBold);l->setAnchorPoint(anchor);addChild(l,5);};
                 head(i18n::text("round-short","ROUND"),tableX+6,{0,.5f});head(i18n::text("map","MAP"),tableX+36,{0,.5f});
                 head(i18n::text("rank","RANK"),tableR-56,{1,.5f});head(i18n::text("result","RESULT"),tableR-22,{.5f,.5f});
-                constexpr float rowH=23;auto const visible=static_cast<std::size_t>(std::max(1.f,(headY-8-46)/(rowH+2)));
+                // Achievements unlocked by this match sit under the round
+                // table in the same row style (at most three rows).
+                struct Unlock{std::string name;int tier=0;std::int64_t ap=0;};std::vector<Unlock> unlocks;
+                for(auto const& value:view.result["achievementUnlocks"].asArray().unwrapOr(std::vector<matjson::Value>{})){
+                    auto const type=value["type"].asString().unwrapOr("");auto const level=static_cast<int>(value["level"].asInt().unwrapOr(0));
+                    auto const tier=type=="PROGRESSIVE"?level:achievementRarityTier(value["rarity"].asString().unwrapOr(""));
+                    auto name=i18n::text("achievement."+value["achievementId"].asString().unwrapOr("")+".name",value[i18n::isKorean()?"nameKo":"nameEn"].asString().unwrapOr(""));
+                    if(name.empty()||tier<1||tier>5)continue;auto const stageLabel=value["displayLabel"].asString().unwrapOr("");if(!stageLabel.empty())name+=" - "+stageLabel;
+                    unlocks.push_back({name,tier,value["rewardAp"].asInt().unwrapOr(0)});if(unlocks.size()==3)break;}
+                constexpr float rowH=23;auto const achievementBlock=unlocks.empty()?0.f:14.f+static_cast<float>(unlocks.size())*(rowH+2);
+                auto const visible=static_cast<std::size_t>(std::max(1.f,(headY-8-46-achievementBlock)/(rowH+2)));
                 auto const pages=std::max<std::size_t>(1,(rows.size()+visible-1)/visible);m_badgePage=std::min(m_badgePage,pages-1);
                 auto const begin=m_badgePage*visible,count=std::min(visible,rows.size()-std::min(rows.size(),begin));
                 for(std::size_t i=0;i<count;++i){auto const& badge=rows[begin+i];auto const y=headY-8-rowH/2-static_cast<float>(i)*(rowH+2);
@@ -319,10 +331,27 @@ public:
                     else{auto* result=menuLabel(survived?"PASS":"OUT",css(13),{tableR-22,y},survived?Accent:Red,FontWeight::Black);addChild(result,5);}
                 }
                 if(pages>1){
-                    auto const center=(tableX+tableR)/2;
-                    auto* caption=menuLabel(fmt::format("{} / {}",m_badgePage+1,pages),css(13),{center,56},TextMuted,FontWeight::ExtraBold);addChild(caption,5);
-                    button("<",{center-40,56},24,31,false,16)->setEnabled(m_badgePage>0);
-                    button(">",{center+40,56},24,32,false,16)->setEnabled(m_badgePage+1<pages);
+                    // On the header line when achievements take the space below.
+                    auto const center=(tableX+tableR)/2,pagerY=unlocks.empty()?56.f:headY;
+                    auto* caption=menuLabel(fmt::format("{} / {}",m_badgePage+1,pages),css(13),{center,pagerY},TextMuted,FontWeight::ExtraBold);addChild(caption,5);
+                    button("<",{center-40,pagerY},24,31,false,16)->setEnabled(m_badgePage>0);
+                    button(">",{center+40,pagerY},24,32,false,16)->setEnabled(m_badgePage+1<pages);
+                }
+                if(!unlocks.empty()){
+                    auto const shown=std::max<std::size_t>(1,count);
+                    auto y=headY-8-static_cast<float>(shown)*(rowH+2)-8;
+                    auto* heading=menuLabel(i18n::text("achievement-unlocked","ACHIEVEMENT UNLOCKED"),css(13),{tableX+6,y},TextMuted,FontWeight::SemiBold);heading->setAnchorPoint({0,.5f});addChild(heading,5);
+                    y-=6+rowH/2;
+                    for(std::size_t i=0;i<unlocks.size();++i,y-=rowH+2){
+                        auto const& unlock=unlocks[i];auto const tone=achievementColor(unlock.tier);
+                        // Each row enters from the page's left edge, one after another.
+                        auto* row=CCNode::create();row->setPosition({-(tableR+20),0});addChild(row,5);
+                        auto* stripe=CCLayerColor::create({SurfaceRaised.r,SurfaceRaised.g,SurfaceRaised.b,255},tableR-tableX,rowH);stripe->setPosition({tableX,y-rowH/2});row->addChild(stripe,2);
+                        auto* rule=CCLayerColor::create({tone.r,tone.g,tone.b,255},3,rowH);rule->setPosition({tableX,y-rowH/2});row->addChild(rule,3);
+                        auto* name=menuLabel(unlock.name,css(15),{tableX+10,y},tone,FontWeight::Black);name->setAnchorPoint({0,.5f});fitMenuLabelWidth(name,tableR-tableX-90,css(15),.1f);styleAchievementText(name,unlock.tier);row->addChild(name,5);
+                        auto* ap=menuLabel(fmt::format("+{} AP",unlock.ap),css(15),{tableR-8,y},Gold,FontWeight::Black);ap->setAnchorPoint({1,.5f});row->addChild(ap,5);
+                        row->runAction(CCSequence::create(CCDelayTime::create(.45f+.32f*static_cast<float>(i)),CCEaseSineOut::create(CCMoveTo::create(.38f,{0,0})),nullptr));
+                    }
                 }
                 // Header chip: the round badges earned in this match.
                 if(m_badgeCount>0){auto* text=menuLabel(fmt::format(fmt::runtime(i18n::text("survival-badges-earned","ROUND BADGES +{}")),m_badgeCount),css(15),{0,0},Accent,FontWeight::Black);
@@ -333,7 +362,9 @@ public:
             else if(!choice && stage!=SurvivalFlowStage::ScoreAnimation){
                 // S6 footer: QUEUE AGAIN is not offered here (the board's lobby
                 // flow owns it); CLOSE returns to the lobby.
-                button(i18n::text("close","CLOSE"),{size.width/2,23},150,1,true,29,20)->setEnabled(settled);
+                // A tap meant for the score screen right before must not close
+                // the result the moment it appears.
+                m_close=button(i18n::text("close","CLOSE"),{size.width/2,23},150,1,true,29,20);m_close->setEnabled(false);
             }
         }
         m_elapsed+=std::max(0.f,dt);
@@ -350,6 +381,7 @@ public:
                 if(auto* rgba=dynamic_cast<CCRGBAProtocol*>(p.glow))rgba->setOpacity(static_cast<GLubyte>(std::lround(frame.glowOpacity*255)));
             }
         }
+        if(m_close)m_close->setEnabled(view.result.isObject() && m_elapsed>=1.0);
         if(!m_watch){auto const lock=SurvivalRuntime::get().watchLockSeconds();if(m_freeChoice)m_freeChoice->setEnabled(lock==0);if(m_resultChoice)m_resultChoice->setEnabled(lock==0);}
         if(m_watch){auto const lock=SurvivalRuntime::get().watchLockSeconds();m_watch->setEnabled(lock==0);if(m_freeChoice)m_freeChoice->setEnabled(lock==0);if(m_resultChoice)m_resultChoice->setEnabled(lock==0);m_watchText->setString((i18n::text("survival-watch","WATCH")+(lock>0?fmt::format(" ({})",lock):std::string{})).c_str());m_watchText->setColor(lock>0?TextMuted:Accent);fitFullMenuLabel(m_watchText,m_watch->getContentSize().width-12,22,.29f);}
     }

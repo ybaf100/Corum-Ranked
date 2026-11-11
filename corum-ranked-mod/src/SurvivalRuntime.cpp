@@ -897,6 +897,7 @@ void SurvivalRuntime::presentationComplete() {
 void SurvivalRuntime::acknowledge() {
     if((!m_view.result.isObject() && m_view.state!="CANCELLED") || m_creating || std::chrono::steady_clock::now()<m_ackRetryAt)return;
     m_creating=true;auto const generation=m_generation;auto const session=m_session;auto const id=m_view.id;
+    geode::log::info("[SurvivalResult] acknowledge match={} state={} flow={}",id,m_view.state,Mod::get()->getSavedValue<int>(resultFlowKey()));
     m_controlRequest.spawn(request(session).post(matchEndpoint("/matches/"+id+"/acknowledge")),[this,generation,session,id](web::WebResponse response) {
         if(!current(generation,session) || m_view.id!=id)return;
         m_creating=false;

@@ -89,7 +89,7 @@ ${fixed?`auto* scroll=LeaderboardScrollLayer::create({300,180});scroll->setTapHa
 
 test('Settings and Credits remain within the viewport after native popup appearance resets the outer scale',()=>{
  for(const [file,marker] of [['src/ui/RankedSettingsPopup.hpp','        auto add='],['src/ui/RankedCreditsPopup.cpp','        auto add=']]){
-  const src=read(file),start=src.indexOf('bool init() override{')>=0?src.indexOf('bool init() override{'):src.indexOf('bool init() override {');
+  const src=read(file),start=['bool init() override{','bool init() override {','bool init(RankedSettingsHooks hooks) {'].map(s=>src.indexOf(s)).find(i=>i>=0);
   const open=src.indexOf('{',start);const prefix=src.slice(open+1,src.indexOf(marker,open));
   const helper=src.includes('RankedPopupLayout.hpp')?read('src/ui/RankedPopupLayout.hpp').split('\n').filter(l=>!l.startsWith('#include')&&!l.startsWith('#pragma')).join('\n'):'';
   run(`
@@ -113,7 +113,7 @@ struct Popup{bool m_noElasticity=false;CCLayer layer;CCMenu menu;CCNode bg,close
  bool init(float w,float h){layer.size={w,h};layer.anchor={.5,.5};auto win=CCDirector::sharedDirector()->size;layer.pos={win.width/2,win.height/2};layer.addChild(&menu);return true;}void setID(std::string){}
  void nativeShow(){layer.scale=1;}
 };
-struct Subject:Popup{bool setup(){using namespace corum::ranked::ui;
+struct Subject:Popup{static constexpr float kWidth=340,kHeight=296,kPad=12;bool setup(){using namespace corum::ranked::ui;
 ${prefix}
 return true;}};
 int main(){for(auto win:{CCSize{432,324},CCSize{480,335},CCSize{568,320},CCSize{640,480},CCSize{400,280}}){CCDirector::sharedDirector()->size=win;Subject s;assert(s.setup());s.nativeShow();

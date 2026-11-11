@@ -56,7 +56,8 @@ void fitSingleLineMenuLabel(CCLabelBMFont*,float,float,float){}
 struct Layout{CCSize size;};Layout rankedPopupLayout(CCSize canvas,CCSize){return {canvas};}
 CCNode*rankedPopupContent(CCNode*,CCMenu*,Layout){return new CCNode;}
 CCLabelBMFont*publicPlayerTitle(CCNode*,matjson::Value const&,CCPoint,float,float){return nullptr;}
-void publicRankLine(CCNode*,std::string const&,matjson::Value const&,float){}
+void publicTierPanel(CCNode*,std::string const&,matjson::Value const&,std::string const& record,CCPoint,CCSize){if(!record.empty())CCLabelBMFont::labels.push_back(record);}
+CCNode* publicCloseFace(){return new CCNode;}
 
 enum class RankBadgeDisplay{Compact};CCNode*createAnimatedRankBadge(std::string const&,CCSize,RankBadgeDisplay){return new CCNode;}
 }}

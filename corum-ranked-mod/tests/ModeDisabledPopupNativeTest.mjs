@@ -52,7 +52,7 @@ struct Owner:CCNode{
  CCLayerColor a,b,c;CCLayerColor*m_lobbySurvival=&a,*m_lobbySolo=&b,*m_lobbyPanel=&c;
  CCMenu menu,toolbar,settings;CCMenu*m_menu=&menu,*m_lobbyToolbar=&toolbar,*m_settingsMenu=&settings;std::string m_localMessage;int animations=0,renders=0;
  bool m_queueShown=false,m_queueAnimating=false;CCMenu*m_queueMenu=nullptr;
- void renderModePanel(RuntimeView const&,corum::ranked::RankedMode){++renders;}void animateModeLobby(corum::ranked::RankedMode,bool){++animations;}
+ CCNode* m_fadeRoot=nullptr;static bool clipsContent(CCNode*){return false;}void scheduleThumbnailPrewarm(){corum::ranked::SurvivalThumbnailProvider::get().prewarm();}void renderModePanel(RuntimeView const&,corum::ranked::RankedMode){++renders;}void animateModeLobby(corum::ranked::RankedMode,bool){++animations;}
  ${method(popup,'    void setLobbyNodeInput(')}
  ${method(popup,'    void syncLobbyInput(')}
  ${method(popup,'    void enterMode(')}

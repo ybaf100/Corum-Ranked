@@ -33,6 +33,7 @@ struct Popup:CCNode{CCMenu*m_buttonMenu=new CCMenu;CCNode* m_bgSprite=new CCNode
 template<class T>struct Ref{explicit Ref(T*){}};
 struct GJUserScore{int m_accountID=123,m_globalRank=0,m_stars=42,m_moons=12,m_demons=5;std::string m_demonInfo="0,0,0,0,3,0,0,0,0,2,0,0";};
 struct UserInfoDelegate{virtual ~UserInfoDelegate()=default;virtual void getUserInfoFinished(GJUserScore*){}virtual void getUserInfoFailed(int){}virtual void userInfoChanged(GJUserScore*){}};
+struct ProfilePage:CCNode{static ProfilePage* create(int,bool){return nullptr;}void show(){}};
 struct GameLevelManager{UserInfoDelegate* m_userInfoDelegate=nullptr;int requests=0,account=0;GJUserScore* cached=nullptr;static GameLevelManager* sharedState(){static GameLevelManager m;return &m;}GJUserScore* userInfoForAccountID(int id){return cached&&cached->m_accountID==id?cached:nullptr;}void getGJUserInfo(int id){++requests;account=id;}};
 #define schedule_selector(x) 0
 #define menu_selector(x) 0
@@ -50,7 +51,8 @@ void fitSingleLineMenuLabel(CCLabelBMFont*,float,float,float){}
 struct Layout{struct Size{float width,height;}size;};Layout rankedPopupLayout(CCPoint canvas,CCPoint){return {{canvas.x,canvas.y}};}
 CCNode*rankedPopupContent(CCNode*,CCMenu*,Layout){return new CCNode;}
 CCLabelBMFont*publicPlayerTitle(CCNode*,Json const&,CCPoint,float,float){return nullptr;}
-inline int publicRankCalls=0;void publicRankLine(CCNode*,std::string const&,Json const&,float){++publicRankCalls;}
+inline int publicRankCalls=0;void publicTierPanel(CCNode*,std::string const&,Json const&,std::string const& record,CCPoint,CCPoint){++publicRankCalls;if(!record.empty())CCLabelBMFont::labels.push_back(record);}
+CCNode* publicCloseFace(){return new CCNode;}
 
 enum class RankBadgeDisplay{Compact};inline int haloBadges=0;
 bool hasPersistentRankAmbient(std::string const& tier){return tier=="SILVER"||tier=="GOLD";}

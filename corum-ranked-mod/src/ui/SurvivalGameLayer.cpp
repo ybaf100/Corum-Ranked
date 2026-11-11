@@ -91,6 +91,7 @@ class SurvivalGameLayer final : public CCLayerColor {
     std::chrono::steady_clock::time_point m_nextMapAt{},m_introUntil{},m_returnAt{};
     std::optional<RankedAudioMode> m_audioMode;
     bool m_closed=false,m_motion=false;float m_frameDelta=0;
+    SurvivalFlowStage m_loggedStage=SurvivalFlowStage::Lobby;
     static std::string text(char const* key,char const* fallback) {return i18n::text(key,fallback);}
     CCMenuItemSpriteExtra* button(CCMenu* menu,std::string const& caption,CCPoint position,float width,int tag,ccColor3B color=ui::Steel,CCLabelBMFont** saved=nullptr) {
         auto* face=ui::surface({width,28},{},color,ui::SurfaceRaised,255,true);
@@ -605,15 +606,15 @@ public:
         // owners continue independently in SurvivalRuntime/Recorder.
         auto const navigationContext=runtime.optionsContext();
         if(m_navigationContext!=navigationContext){m_navigationContext=navigationContext;m_browsingBoard=false;m_manualMap=false;m_entrySyncAfter.reset();m_replayRequestedContext.clear();m_launchedContext.clear();++m_boardVisit;}
-        auto const stage=runtime.flowStage();auto const outcome=stage==SurvivalFlowStage::EliminatedChoice || stage==SurvivalFlowStage::PersonalResult || stage==SurvivalFlowStage::Ceremony || stage==SurvivalFlowStage::ScoreAnimation;
+        auto const stage=runtime.flowStage();
+        if(stage!=m_loggedStage){log::info("[SurvivalFlow] stage {} -> {} match={} state={} eliminated={} motion={}",static_cast<int>(m_loggedStage),static_cast<int>(stage),view.id,view.state,view.ownEliminated,m_motion);m_loggedStage=stage;}
+        auto const outcome=stage==SurvivalFlowStage::EliminatedChoice || stage==SurvivalFlowStage::PersonalResult || stage==SurvivalFlowStage::Ceremony || stage==SurvivalFlowStage::ScoreAnimation;
         if(outcome){
             if((stage==SurvivalFlowStage::Ceremony||stage==SurvivalFlowStage::ScoreAnimation) && runtime.promotionMotionPending())beginPromotionMotion();
             else if(stage==SurvivalFlowStage::ScoreAnimation)beginResultMotion();
             syncAudio(view);if(m_selection->isVisible())m_selection->hideSelection();if(view.nextMap["map"].isObject())m_selection->prepareServerMap(runtime.preparationView());m_grid->setVisible(false);m_pager->setVisible(false);m_heading->setVisible(false);m_map->setVisible(false);m_status->setVisible(false);m_boardClock->setVisible(false);m_spinner->setVisible(false);
             for(auto* button:{m_liveWatch,m_resume,m_continue,m_surrender,m_freePlay,m_backToMap,m_viewBoard,m_force})if(button)button->setVisible(false);
-            m_outcome->setVisible(!m_motion);if(!m_motion){m_outcome->present(view,stage,dt);
-                ui::showAchievementUnlocks(this,view.id+":"+view.ownId,view.result["achievementUnlocks"]);
-            }
+            m_outcome->setVisible(!m_motion);if(!m_motion)m_outcome->present(view,stage,dt);
             return;
         }
         m_outcome->setVisible(false);

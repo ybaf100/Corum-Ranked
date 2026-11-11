@@ -2135,11 +2135,15 @@ class CorumRankedLayer final : public CCLayerColor {
         }
     }
 
-    void onUpdateChannel(CCObject*){
-        if(RankedRuntime::get().view().stage!=RuntimeStage::AwaitingUpdate)return;
+    void onUpdateChannel(CCObject*){openUpdateChannel(true);}
+    // The update screen's channel chip, or Settings' UPDATE CHANNEL button
+    // (any stage): a new channel restarts the runtime, which gates entry on
+    // that channel's package.
+    void openUpdateChannel(bool updateScreen){
+        if(updateScreen&&RankedRuntime::get().view().stage!=RuntimeStage::AwaitingUpdate)return;
         if(m_updateChannelPopup)if(auto popup=m_updateChannelPopup->lock();popup&&popup->getParent())return;
-        if(auto* popup=corum::ranked::ui::RankedUpdateChannelPopup::create([weak=WeakRef(this)](std::string channel){
-            auto owner=weak.lock();if(!owner||!owner->isRunning()||RankedRuntime::get().view().stage!=RuntimeStage::AwaitingUpdate)return;
+        if(auto* popup=corum::ranked::ui::RankedUpdateChannelPopup::create([weak=WeakRef(this),updateScreen](std::string channel){
+            auto owner=weak.lock();if(!owner||!owner->isRunning()||(updateScreen&&RankedRuntime::get().view().stage!=RuntimeStage::AwaitingUpdate))return;
             owner->m_updateChannelPopup.reset();
             if(corum::ranked::ui::RankedModUpdateManager::get().selectChannel(std::move(channel))){
                 owner->render();
@@ -3203,6 +3207,17 @@ class CorumRankedLayer final : public CCLayerColor {
         if (m_menu) { corum::ranked::ui::cancelMenuTouch(m_menu); m_menu->setTouchEnabled(false); }
         if (m_settingsMenu) { corum::ranked::ui::cancelMenuTouch(m_settingsMenu); m_settingsMenu->setTouchEnabled(false); }
         setLobbyNodeInput(m_lobbyToolbar,false);
+        // Dissolve: the current lobby is captured and fades out over the new
+        // one, which is built once, right away (no dark gap, no second build).
+        if (beginCrossfade(0.32f)) {
+            m_modeTransition.finish();
+            m_renderedUiKey.clear();
+            render();
+            m_renderedUiKey = presentationKey();
+            m_renderedLocalUi = localUiSignature();
+            syncLobbyInput(); refreshLobbyHover();
+            return;
+        }
         m_renderedUiKey = presentationKey();
         constexpr float out = 0.16f;
         for (auto* group : {m_lobbySurvival, m_lobbySolo, m_lobbyPanel}) {
@@ -3231,14 +3246,22 @@ class CorumRankedLayer final : public CCLayerColor {
         if(m_lobbyHover)m_root->addChild(m_lobbyHover,100);
     }
 
+    // Thumbnail warm-up waits until the new lobby has drawn.
+    void scheduleThumbnailPrewarm() {
+        runAction(CCSequence::create(CCDelayTime::create(0.40f),
+            CallFuncExt::create([] { corum::ranked::SurvivalThumbnailProvider::get().prewarm(); }), nullptr));
+    }
+
     void enterMode(corum::ranked::RankedMode mode) {
         if (m_uiFadingOut || m_page != Page::Live || !m_lobbyPanel ||
             RankedRuntime::get().view().stage != RuntimeStage::Ready) return;
         if (!m_modeTransition.select(mode)) return;
-        renderModePanel(RankedRuntime::get().view(),mode);
         if (mode == corum::ranked::RankedMode::Survival && !RankedRuntime::get().view().survival.loaded) RankedRuntime::get().fetchSurvivalProfile();
-        if (mode == corum::ranked::RankedMode::Survival) corum::ranked::SurvivalThumbnailProvider::get().prewarm();
+        // The dissolve path builds the mode lobby once; only the fade-through
+        // fallback needs the panel prepared now.
+        if (clipsContent(m_fadeRoot)) renderModePanel(RankedRuntime::get().view(),mode);
         animateModeLobby(mode,true);
+        if (mode == corum::ranked::RankedMode::Survival) scheduleThumbnailPrewarm();
     }
 
     void onSelectMode(CCObject* sender) {
@@ -7639,7 +7662,18 @@ class CorumRankedLayer final : public CCLayerColor {
             if (popup && popup->getParent()) return;
             m_settings.reset();
         }
-        if (auto* popup = corum::ranked::ui::RankedSettingsPopup::create()) {
+        corum::ranked::ui::RankedSettingsHooks hooks;
+        hooks.languageChanged = [weak = WeakRef(this)] {
+            auto owner = weak.lock(); if (!owner || !owner->isRunning()) return;
+            // Rebuild this screen on the next UI pass and reopen Settings in
+            // the new language.
+            owner->m_renderedUiKey.clear(); owner->m_fadeInNextRender = false;
+            owner->m_settings.reset(); owner->onSettings(nullptr);
+        };
+        hooks.updateChannel = [weak = WeakRef(this)] {
+            if (auto owner = weak.lock(); owner && owner->isRunning()) owner->openUpdateChannel(false);
+        };
+        if (auto* popup = corum::ranked::ui::RankedSettingsPopup::create(std::move(hooks))) {
             m_settings.emplace(popup); popup->show();
         }
     }

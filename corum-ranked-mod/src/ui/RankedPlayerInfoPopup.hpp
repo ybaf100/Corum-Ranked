@@ -10,6 +10,7 @@
 #include "RankBadgeAssets.hpp"
 #include <Geode/binding/GameLevelManager.hpp>
 #include <Geode/binding/GJUserScore.hpp>
+#include <Geode/binding/ProfilePage.hpp>
 #include <Geode/binding/UserInfoDelegate.hpp>
 #include <Geode/ui/Popup.hpp>
 
@@ -48,11 +49,14 @@ class RankedPlayerInfoPopup final : public Popup, public UserInfoDelegate {
         m_panel = rankedPopupContent(m_mainLayer,m_buttonMenu,layout);
         m_panel->addChild(surface({400,270},{200,135},Accent,Surface,255,true));
         auto* menu=m_buttonMenu;menu->setZOrder(30);
-        auto* face = surface({90, 18}, {}, Steel, SurfaceRaised, 250, true);
-        auto* caption = menuLabel(i18n::text("close", "Close"), 14.f / 64.f, {45, 9}, Text, FontWeight::ExtraBold);
-        fitMenuLabelWidth(caption, 80, 14.f / 64.f, 0.12f); face->addChild(caption, 5);
-        auto* close = CCMenuItemSpriteExtra::create(face, this, menu_selector(RankedPlayerInfoPopup::onClose));
-        close->setPosition({341, 20}); menu->addChild(close);
+        // Q2 header .xbtn, and the ghost GD PROFILE button on the footer row.
+        auto* close = CCMenuItemSpriteExtra::create(publicCloseFace(), this, menu_selector(RankedPlayerInfoPopup::onClose));
+        close->setPosition({376, 252}); menu->addChild(close);
+        auto* face = surface({96, 18}, {}, Steel, SurfaceRaised, 250, true);
+        auto* caption = menuLabel(i18n::text("info-open-gd-profile", "OPEN GD PROFILE"), 14.f / 64.f, {48, 9}, Text, FontWeight::ExtraBold);
+        fitMenuLabelWidth(caption, 86, 14.f / 64.f, 0.12f); face->addChild(caption, 5);
+        auto* profile = CCMenuItemSpriteExtra::create(face, this, menu_selector(RankedPlayerInfoPopup::onGdProfile));
+        profile->setPosition({338, 54}); menu->addChild(profile);
         schedule(schedule_selector(RankedPlayerInfoPopup::refresh), 0.1f); render(); refresh(0);
         return true;
     }
@@ -105,15 +109,10 @@ class RankedPlayerInfoPopup final : public Popup, public UserInfoDelegate {
         auto* name=menuLabel(info.username,36.f/64.f,{14,224},Text,FontWeight::Black);name->setAnchorPoint({0,.5f});
         fitSingleLineMenuLabel(name,230,24,36.f/64.f);m_contents->addChild(name);
         publicPlayerTitle(m_contents,info.publicProfile["equippedTitle"],{130,203},232,.25f);
-        auto* record=menuLabel(matchRecordText(profile.wins,profile.losses,i18n::isKorean()),15.f/64.f,{386,224},Text,FontWeight::ExtraBold);
-        record->setAnchorPoint({1,.5f});fitSingleLineMenuLabel(record,140,16,15.f/64.f);record->setID("ranked-player-info-record"_spr);m_contents->addChild(record);
-        // Mode rows on raised panels; the shared rank line keeps its 300-unit
-        // geometry inside an offset holder.
-        for (auto const& [caption, key, y] : {std::tuple{i18n::text("survival","SURVIVAL"), "survival", 170.0f}, std::tuple{i18n::text("solo-ranked","SOLO RANKED"), "solo", 140.0f}}) {
-            m_contents->addChild(surface({372, 26}, {200, y}, SurfaceRaised, SurfaceRaised, 255, false), 1);
-            auto* holder = CCNode::create(); holder->setPosition({50, 0}); m_contents->addChild(holder, 4);
-            publicRankLine(holder, caption, info.publicProfile[key], y);
-        }
+        // Q2 tier panels: Solo with this match's record, then Survival.
+        publicTierPanel(m_contents,i18n::text("solo-ranked","SOLO RANKED"),info.publicProfile["solo"],
+            matchRecordText(profile.wins,profile.losses,i18n::isKorean()),{106.5f,162},{185,52});
+        publicTierPanel(m_contents,i18n::text("survival","SURVIVAL"),info.publicProfile["survival"],"",{293.5f,162},{185,52});
         auto const unavailable = i18n::text("info-unavailable", "Unavailable");
         auto const waiting = m_lookupFailed ? unavailable : i18n::text("loading", "Loading...");
         tile(i18n::text("info-stars", "Stars"), m_statistics ? fmt::format("{}", m_statistics->stars) : waiting, 0);
@@ -139,11 +138,15 @@ class RankedPlayerInfoPopup final : public Popup, public UserInfoDelegate {
         }
         if (ranked) footer += " · Extreme Demons " + extreme;
         auto* line = menuLabel(footer, 13.f / 64.f, {14, 54}, TextMuted, FontWeight::SemiBold);
-        line->setAnchorPoint({0, 0.5f}); fitMenuLabelWidth(line, 372, 13.f / 64.f, 0.09f); m_contents->addChild(line);
+        line->setAnchorPoint({0, 0.5f}); fitMenuLabelWidth(line, 270, 13.f / 64.f, 0.09f); m_contents->addChild(line);
         if (info.botReference) {
             auto* hint = menuLabel(i18n::text("info-bot-reference", "Bot reference: CoJong"), 13.f / 64.f,
                 {14, 20}, TextMuted); hint->setAnchorPoint({0, 0.5f}); fitMenuLabelWidth(hint, 260, 13.f / 64.f, 0.09f); m_contents->addChild(hint);
         }
+    }
+    void onGdProfile(CCObject*) {
+        if (m_closed || m_accountId <= 0 || RankedRuntime::get().view().playerInfo.botReference) return;
+        if (auto* page = ProfilePage::create(m_accountId, false)) page->show();
     }
     void refresh(float) {
         if (m_closed) return;
