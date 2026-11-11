@@ -708,14 +708,13 @@ class CorumRankedLayer final : public CCLayerColor {
         // Independent of page re-renders: always the same bottom-right entry.
         m_settingsMenu = CCMenu::create(); m_settingsMenu->setPosition(CCPointZero);
         m_settingsMenu->setID("ranked-settings-menu"_spr); addChild(m_settingsMenu, 100);
-        auto* settingsFace = corum::ranked::ui::surface({92, 28}, {}, kSteel, kDeepPanel2, 250, true);
-        m_settingsLabel = corum::ranked::ui::menuLabel(tr("settings", "Settings"), 0.27f, {46, 14},
-            corum::ranked::ui::Text, corum::ranked::ui::FontWeight::ExtraBold);
-        corum::ranked::ui::fitMenuLabelWidth(m_settingsLabel, 78, 0.27f, 0.18f);
-        settingsFace->addChild(m_settingsLabel, 5);
-        settingsFace->setAnchorPoint(CCPointZero); settingsFace->setPosition(CCPointZero);
+        // The same flat face as the lobby footer buttons (HISTORY etc.), so it
+        // lines up with them when the lobby lays it into the footer row.
+        auto* settingsFace = makeFooterFace(tr("settings", "Settings"));
+        m_settingsLabel = typeinfo_cast<CCLabelBMFont*>(settingsFace->getChildByTag(3));
+        layoutFooterFace(settingsFace, kSettingsButtonWidth); settingsFace->setPosition({kSettingsButtonWidth / 2.0f, 13.0f});
         auto* settingsButton = CCMenuItemSpriteExtra::create(settingsFace, this, menu_selector(CorumRankedLayer::onSettings));
-        settingsButton->setContentSize({92,28}); settingsButton->setAnchorPoint({0.5f,0.5f});
+        settingsButton->setContentSize(settingsFace->getContentSize()); settingsButton->setAnchorPoint({0.5f,0.5f});
         settingsButton->setID("ranked-settings-button"_spr);
         settingsButton->setPosition({winSize.width - 70, 30}); m_settingsMenu->addChild(settingsButton);
 
@@ -1438,7 +1437,16 @@ class CorumRankedLayer final : public CCLayerColor {
         }
         if (m_settingsLabel) {
             m_settingsLabel->setString(tr("settings", "Settings").c_str());
-            corum::ranked::ui::fitMenuLabelWidth(m_settingsLabel, 78, 0.27f, 0.18f);
+            // Outside the lobby footer the button floats at its own width.
+            auto* settings = m_settingsMenu ? typeinfo_cast<CCMenuItemSpriteExtra*>(m_settingsMenu->getChildByID("ranked-settings-button"_spr)) : nullptr;
+            auto* face = settings ? settings->getNormalImage() : nullptr;
+            if (face && !m_lobbyToolbar && face->getContentSize().width != kSettingsButtonWidth) {
+                layoutFooterFace(face, kSettingsButtonWidth); face->setPosition({kSettingsButtonWidth / 2.0f, 13.0f});
+                settings->setContentSize(face->getContentSize());
+                settings->setPosition({CCDirector::sharedDirector()->getWinSize().width - 20.0f - kSettingsButtonWidth / 2.0f, 27.0f});
+            }
+            auto const width = face ? face->getContentSize().width : kSettingsButtonWidth;
+            corum::ranked::ui::fitMenuLabelWidth(m_settingsLabel, width - 12.0f, fontScale(16.0f), 0.12f);
         }
         if (m_settingsMenu) {
             auto const& view = RankedRuntime::get().view();
@@ -2432,8 +2440,8 @@ class CorumRankedLayer final : public CCLayerColor {
     // font size of N px is label scale N / 64. Lobby groups sit at the origin
     // at scale 1 and draw in screen points.
     static constexpr float kLobbyHeader = 36.0f, kLobbyFooter = 38.0f;
-    // Floating SETTINGS button outside the page tree: 92 x 28 centred at
-    // (width - inset - 46, 27), so its top edge is at 41.
+    // Floating SETTINGS button outside the page tree: 92 x 26 centred at
+    // (width - inset - 46, 27); 41 keeps a point above its top edge (40).
     static constexpr float kSettingsButtonWidth = 92.0f, kSettingsButtonInset = 20.0f, kSettingsButtonTop = 41.0f;
     static float px(float value) { return value / 2.0f; }
     static float fontScale(float cssPx) { return cssPx / 64.0f; }
@@ -2626,7 +2634,9 @@ class CorumRankedLayer final : public CCLayerColor {
                 corum::ranked::ui::leanLabel(line); corum::ranked::ui::fitMenuLabelWidth(line, x1 - cx - px(104.0f), fontScale(64.0f), 0.4f);
                 m_root->addChild(line, 8);
             };
-            if (survival) { addTitle("SURVIVAL", y + 16.0f); y += 32.0f; }
+            // Both halves reserve the two-line title block, so the 01 / 02 rows
+            // and everything below them line up; SURVIVAL sits in its middle.
+            if (survival) { addTitle("SURVIVAL", y + 29.5f); y += 59.0f; }
             else { addTitle("RANKED", y + 15.0f); addTitle("SOLO", y + 44.0f); y += 59.0f; }
             y += px(10.0f);
             // Number row: 01 / 02 chip and the mode's line.
@@ -3156,7 +3166,10 @@ class CorumRankedLayer final : public CCLayerColor {
                 if(auto* badge=face->getChildByTag(4))badge->setPosition({slot-12.0f,24.0f});}
             item->setPosition({x+slot/2.0f,y});x+=slot+gap;
         }
-        if(settings)settings->setPosition({x+slot/2.0f,y});
+        if(settings){
+            if(auto* face=settings->getNormalImage()){layoutFooterFace(face,slot);settings->setContentSize(face->getContentSize());face->setPosition({slot/2.0f,13.0f});}
+            settings->setPosition({x+slot/2.0f,y});
+        }
         m_statusTextWidth=std::max(80.0f,size.width-120.0f);
         if(m_mainStatusLabel) corum::ranked::ui::fitMenuLabelWidth(m_mainStatusLabel,m_statusTextWidth,fontScale(13.0f),.12f);
     }

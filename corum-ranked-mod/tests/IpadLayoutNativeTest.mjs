@@ -107,8 +107,9 @@ test('achievements keep the pager and the last card row clear of the floating SE
     const popup=read('src/RankedPopup.cpp');
     const constants=popup.match(/static constexpr float kSettingsButtonWidth = ([\d.]+)f, kSettingsButtonInset = ([\d.]+)f, kSettingsButtonTop = ([\d.]+)f;/);
     assert.ok(constants);const [,width,inset,top]=constants.map(Number);
-    // The floating button is 92 x 28 centred 27 points up: its top is 41.
-    assert.equal(top,27+28/2);assert.equal(width,92);
+    // The floating button is 92 x 26 centred 27 points up: its top (40) stays below 41.
+    assert.ok(top>=27+26/2);assert.equal(width,92);
+    assert.match(popup,/auto\* settingsFace = makeFooterFace\(tr\("settings", "Settings"\)\);/);
     const settingsInset=Number(popup.match(/settings->setPosition\(\{size\.width-(\d+)-settings->getContentSize\(\)\.width\/2,27\}\)/)[1]);
     assert.equal(settingsInset,inset);
     const achievements=method(popup,'    void renderAchievements(');

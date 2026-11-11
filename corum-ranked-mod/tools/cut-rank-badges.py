@@ -2,7 +2,8 @@
 """Cut the lower-tier rank badges and rebuild their finished trophies.
 
 UNRANKED keeps only its core, drawn twice as large so it still reads at
-list size. RED keeps only its spikes and core (its body layer is cleared).
+list size. RED keeps only its four spike arrows and its core, enlarged 1.8
+times so the arrows sit against it (its body layer is cleared).
 AQUA and BRONZE lose the middle of each
 side of their body layer (a horizontal and a vertical band through the
 centre); the narrower the band, the higher the tier. Ornament layers and the
@@ -35,9 +36,10 @@ LAYERS = {
 BODY_CUT = {'bronze': 45, 'aqua': 80}
 # Tiers whose body layer is cleared entirely.
 BODY_CLEARED = ('red',)
-# The UNRANKED core is enlarged around the canvas centre while it is still
-# at its original size (idempotent: an enlarged core is left alone).
-CORE_SCALE, CORE_ORIGINAL_MAX = 2.0, 300
+# Cores enlarged around the canvas centre while they are still at their
+# original size (idempotent: an enlarged core is left alone):
+# tier -> (scale, original maximum width in canvas pixels).
+CORE_ENLARGE = {'unranked': (2.0, 300), 'red': (1.8, 400)}
 
 
 def layer_path(tier, role):
@@ -61,20 +63,35 @@ def middle_bands(half_width):
     return (np.abs(xx - centre) < half_width) | (np.abs(yy - centre) < half_width)
 
 
-def enlarge_unranked_core():
-    path = layer_path('unranked', 'core')
+def enlarge_core(tier, scale, original_max):
+    path = layer_path(tier, 'core')
     pixels = load(path)
     ys, xs = np.nonzero(pixels[..., 3] > 16)
-    if xs.max() - xs.min() > CORE_ORIGINAL_MAX:
+    if xs.max() - xs.min() > original_max:
         return
-    size = round(CANVAS * CORE_SCALE)
+    size = round(CANVAS * scale)
     offset = (size - CANVAS) // 2
     big = Image.fromarray(pixels, 'RGBA').resize((size, size), Image.LANCZOS)
     save(path, np.asarray(big.crop((offset, offset, offset + CANVAS, offset + CANVAS))).copy())
 
 
+def keep_red_arrows():
+    # The four spike arrows only: the scattered pixels and hairlines of the
+    # spikes layer would float around the enlarged core.
+    path = layer_path('red', 'spikes')
+    pixels = load(path)
+    yy, xx = np.mgrid[0:CANVAS, 0:CANVAS]
+    centre = (CANVAS - 1) / 2.0
+    vertical = (np.abs(xx - centre) < 90) & ((yy < 200) | (yy > 820))
+    horizontal = (np.abs(yy - centre) < 120) & ((xx < 200) | (xx > 820))
+    pixels[~(vertical | horizontal)] = 0
+    save(path, pixels)
+
+
 def cut():
-    enlarge_unranked_core()
+    for tier, (scale, original_max) in CORE_ENLARGE.items():
+        enlarge_core(tier, scale, original_max)
+    keep_red_arrows()
     for role in LAYERS['unranked']:
         if role == 'core':
             continue
