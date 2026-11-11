@@ -1,6 +1,7 @@
 #include "PublicPlayerProfile.hpp"
 #include "RankedPopupLayout.hpp"
 #pragma once
+#include <tuple>
 
 #include "../RankedRuntime.hpp"
 #include "../domain/PlayerInfoPresentation.hpp"
@@ -34,7 +35,8 @@ class RankedPlayerInfoPopup final : public Popup, public UserInfoDelegate {
         if (view.stage != RuntimeStage::Matched || view.match.state == "ROUND_ENTERING" ||
             view.match.state == "DEATHMATCH_ENTERING" || view.match.state == "ROUND_PLAYING" ||
             view.match.state == "DEATHMATCH_PLAYING") return false;
-        auto const layout=rankedPopupLayout({300,354},CCDirector::sharedDirector()->getWinSize());
+        // Q2 board: a landscape .pop (800 x 540 board px = 400 x 270).
+        auto const layout=rankedPopupLayout({400,270},CCDirector::sharedDirector()->getWinSize());
         if (!Popup::init(layout.size.width,layout.size.height)) return false;
         m_bgSprite->setVisible(false); m_closeBtn->setVisible(false);
         setID("ranked-player-info-popup"_spr);
@@ -44,13 +46,13 @@ class RankedPlayerInfoPopup final : public Popup, public UserInfoDelegate {
         if (m_accountId <= 0) return false;
         m_lookupDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(25);
         m_panel = rankedPopupContent(m_mainLayer,m_buttonMenu,layout);
-        m_panel->addChild(surface({300,354},{150,177},Accent,Surface,255,true));
+        m_panel->addChild(surface({400,270},{200,135},Accent,Surface,255,true));
         auto* menu=m_buttonMenu;menu->setZOrder(30);
-        auto* face = surface({120, 26}, {}, Steel, SurfaceRaised, 250, true);
-        auto* caption = menuLabel(i18n::text("close", "Close"), 0.36f, {60, 13}, Text, FontWeight::ExtraBold);
-        fitMenuLabelWidth(caption, 100, 0.36f, 0.26f); face->addChild(caption, 5);
+        auto* face = surface({90, 18}, {}, Steel, SurfaceRaised, 250, true);
+        auto* caption = menuLabel(i18n::text("close", "Close"), 14.f / 64.f, {45, 9}, Text, FontWeight::ExtraBold);
+        fitMenuLabelWidth(caption, 80, 14.f / 64.f, 0.12f); face->addChild(caption, 5);
         auto* close = CCMenuItemSpriteExtra::create(face, this, menu_selector(RankedPlayerInfoPopup::onClose));
-        close->setPosition({150, 19}); menu->addChild(close);
+        close->setPosition({341, 20}); menu->addChild(close);
         schedule(schedule_selector(RankedPlayerInfoPopup::refresh), 0.1f); render(); refresh(0);
         return true;
     }
@@ -80,39 +82,48 @@ class RankedPlayerInfoPopup final : public Popup, public UserInfoDelegate {
         m_inFlight = true; ++m_requests; m_requestedAt = now;
         manager->getGJUserInfo(m_accountId);
     }
-    void row(std::string const& caption, std::string const& value, float y, ccColor3B color = Text) {
-        auto* text = menuLabel(caption, 0.37f, {18, y}, TextMuted, FontWeight::SemiBold);
-        text->setAnchorPoint({0, 0.5f}); fitMenuLabelWidth(text, 160, 0.37f, 0.28f); m_contents->addChild(text);
-        auto* number = menuLabel(value, 0.41f, {282, y}, color, FontWeight::ExtraBold);
-        number->setAnchorPoint({1, 0.5f}); fitMenuLabelWidth(number, 97, 0.41f, 0.28f); m_contents->addChild(number);
+    // Q2 stat tile (.panel #20232E): the caption over the 24 px value.
+    void tile(std::string const& caption, std::string const& value, int index, ccColor3B color = Text) {
+        constexpr float width = 69.6f, gap = 6.0f, y = 96.0f;
+        auto const x = 14.0f + width / 2.0f + static_cast<float>(index) * (width + gap);
+        m_contents->addChild(surface({width, 40}, {x, y}, SurfaceRaised, SurfaceRaised, 255, false), 1);
+        auto* text = menuLabel(caption, 13.f / 64.f, {x - width / 2.0f + 7.0f, y + 9.0f}, TextMuted, FontWeight::SemiBold);
+        text->setAnchorPoint({0, 0.5f}); fitMenuLabelWidth(text, width - 12.0f, 13.f / 64.f, 0.09f); m_contents->addChild(text, 5);
+        auto* number = menuLabel(value, 24.f / 64.f, {x - width / 2.0f + 7.0f, y - 6.0f}, color, FontWeight::Black);
+        number->setAnchorPoint({0, 0.5f}); fitMenuLabelWidth(number, width - 12.0f, 24.f / 64.f, 0.12f); m_contents->addChild(number, 5);
     }
     void render() {
         if (m_contents) m_contents->removeFromParentAndCleanup(true);
         m_contents = CCNode::create(); m_panel->addChild(m_contents, 10);
         auto const& info = RankedRuntime::get().view().playerInfo;
-        auto* title = menuLabel(i18n::text("player-info", "PLAYER INFO"), 0.50f, {150, 246}, Text, FontWeight::Black);
-        fitMenuLabelWidth(title, 268, 0.50f, 0.34f); m_contents->addChild(title);
+        // Q2 board: PLAYER INFO, the 36 px name with the title and record,
+        // the two mode rows, five stat tiles and the forum line.
+        auto* title = menuLabel(i18n::text("player-info", "PLAYER INFO"), 14.f / 64.f, {14, 252}, TextMuted, FontWeight::ExtraBold);
+        title->setAnchorPoint({0, 0.5f}); fitMenuLabelWidth(title, 200, 14.f / 64.f, 0.1f); m_contents->addChild(title);
         auto const& match = RankedRuntime::get().view().match;
         auto const& profile=m_side=="A"?match.playerAProfile:match.playerBProfile;
-        title->setPosition({150,330});
-        auto* name=menuLabel(info.username,.42f,{150,304},Gold,FontWeight::ExtraBold);
-        fitSingleLineMenuLabel(name,264,23,.42f);m_contents->addChild(name);
-        publicPlayerTitle(m_contents,info.publicProfile["equippedTitle"],{150,281},264,.25f);
-        publicRankLine(m_contents,i18n::text("survival","SURVIVAL"),info.publicProfile["survival"],253);
-        publicRankLine(m_contents,i18n::text("solo-ranked","SOLO RANKED"),info.publicProfile["solo"],223);
-        auto* record=menuLabel(matchRecordText(profile.wins,profile.losses,i18n::isKorean()),.32f,{150,196},Text,FontWeight::ExtraBold);
-        fitSingleLineMenuLabel(record,264,18,.32f);record->setID("ranked-player-info-record"_spr);m_contents->addChild(record);
-        float y=175;
-        if (m_statistics && m_statistics->globalRank > 0) {
-            row("GD Global Rank", fmt::format("#{}", m_statistics->globalRank), y, Gold); y -= 20;
+        auto* name=menuLabel(info.username,36.f/64.f,{14,224},Text,FontWeight::Black);name->setAnchorPoint({0,.5f});
+        fitSingleLineMenuLabel(name,230,24,36.f/64.f);m_contents->addChild(name);
+        publicPlayerTitle(m_contents,info.publicProfile["equippedTitle"],{130,203},232,.25f);
+        auto* record=menuLabel(matchRecordText(profile.wins,profile.losses,i18n::isKorean()),15.f/64.f,{386,224},Text,FontWeight::ExtraBold);
+        record->setAnchorPoint({1,.5f});fitSingleLineMenuLabel(record,140,16,15.f/64.f);record->setID("ranked-player-info-record"_spr);m_contents->addChild(record);
+        // Mode rows on raised panels; the shared rank line keeps its 300-unit
+        // geometry inside an offset holder.
+        for (auto const& [caption, key, y] : {std::tuple{i18n::text("survival","SURVIVAL"), "survival", 170.0f}, std::tuple{i18n::text("solo-ranked","SOLO RANKED"), "solo", 140.0f}}) {
+            m_contents->addChild(surface({372, 26}, {200, y}, SurfaceRaised, SurfaceRaised, 255, false), 1);
+            auto* holder = CCNode::create(); holder->setPosition({50, 0}); m_contents->addChild(holder, 4);
+            publicRankLine(holder, caption, info.publicProfile[key], y);
         }
         auto const unavailable = i18n::text("info-unavailable", "Unavailable");
         auto const waiting = m_lookupFailed ? unavailable : i18n::text("loading", "Loading...");
-        row(i18n::text("info-stars", "Stars"), m_statistics ? fmt::format("{}", m_statistics->stars) : waiting, y); y -= 20;
-        row(i18n::text("info-moons", "Moons"), m_statistics ? fmt::format("{}", m_statistics->moons) : waiting, y); y -= 20;
-        row(i18n::text("info-demons", "Demons"), m_statistics ? fmt::format("{}", m_statistics->demons) : waiting, y); y -= 20;
-        row("Extreme Demons", m_statistics && m_statistics->extreme ? fmt::format("{}", *m_statistics->extreme) :
-            (m_statistics ? unavailable : waiting), y); y -= 23;
+        tile(i18n::text("info-stars", "Stars"), m_statistics ? fmt::format("{}", m_statistics->stars) : waiting, 0);
+        tile(i18n::text("info-moons", "Moons"), m_statistics ? fmt::format("{}", m_statistics->moons) : waiting, 1);
+        tile(i18n::text("info-demons", "Demons"), m_statistics ? fmt::format("{}", m_statistics->demons) : waiting, 2);
+        auto const extreme = m_statistics && m_statistics->extreme ? fmt::format("{}", *m_statistics->extreme) : (m_statistics ? unavailable : waiting);
+        auto const ranked = m_statistics && m_statistics->globalRank > 0;
+        if (ranked) tile("GD Global Rank", fmt::format("#{}", m_statistics->globalRank), 3, Gold);
+        else tile("Extreme Demons", extreme, 3);
+        std::string footer;
         for (auto const& provider : {std::string("GDKF"), std::string("POINTERCRATE")}) {
             std::string value = info.forum.loading ? i18n::text("loading", "Loading...") : unavailable;
             ccColor3B color = TextMuted;
@@ -123,11 +134,15 @@ class RankedPlayerInfoPopup final : public Popup, public UserInfoDelegate {
                 else if (record.status == "PENDING") value = i18n::text("loading", "Loading...");
                 if (record.status == "ERROR" && record.rank) value += " *";
             }
-            row(provider == "GDKF" ? "GDKF" : "Pointercrate", value, y, color); y -= 20;
+            if (provider == "POINTERCRATE") tile("Pointercrate", value, 4, color);
+            else footer = "GDKF " + value;
         }
+        if (ranked) footer += " · Extreme Demons " + extreme;
+        auto* line = menuLabel(footer, 13.f / 64.f, {14, 54}, TextMuted, FontWeight::SemiBold);
+        line->setAnchorPoint({0, 0.5f}); fitMenuLabelWidth(line, 372, 13.f / 64.f, 0.09f); m_contents->addChild(line);
         if (info.botReference) {
-            auto* hint = menuLabel(i18n::text("info-bot-reference", "Bot reference: CoJong"), 0.26f,
-                {150, 40}, TextMuted); fitMenuLabelWidth(hint, 264, 0.26f, 0.20f); m_contents->addChild(hint);
+            auto* hint = menuLabel(i18n::text("info-bot-reference", "Bot reference: CoJong"), 13.f / 64.f,
+                {14, 20}, TextMuted); hint->setAnchorPoint({0, 0.5f}); fitMenuLabelWidth(hint, 260, 13.f / 64.f, 0.09f); m_contents->addChild(hint);
         }
     }
     void refresh(float) {

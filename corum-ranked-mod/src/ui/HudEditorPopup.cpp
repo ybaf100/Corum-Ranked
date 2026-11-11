@@ -384,8 +384,12 @@ static void markUnavailable(CCMenuItemSpriteExtra* item, bool unavailable) {
 
 CCMenuItemSpriteExtra* HudEditorPopup::toolbarButton(std::string const& text, CCSize size, CCPoint offset,
     SEL_MenuHandler selector, ccColor3B accent, CCLabelBMFont** caption, int tag) {
-    auto* face = surface(size, {}, accent, SurfaceRaised, 250, true);
-    auto* title = menuLabel(text, 0.26f, {size.width / 2.0f, size.height / 2.0f}, Text, FontWeight::ExtraBold);
+    // Q6 board frame: SAVE is the filled lime .btn; the rest are ghost
+    // outlines (red / gold / orange keep their signal edge).
+    auto const filled = sameColor(accent, Green);
+    auto const edge = filled ? AccentFill : sameColor(accent, Steel) || sameColor(accent, Accent) ? GhostEdge : accent;
+    auto* face = slab(size, {}, edge, !filled, Ink);
+    auto* title = menuLabel(text, 0.26f, {size.width / 2.0f, size.height / 2.0f}, filled ? AccentInk : Text, filled ? FontWeight::Black : FontWeight::ExtraBold);
     fitFullMenuLabel(title, size.width - 8.0f, size.height - 6.0f, 0.26f);
     face->addChild(title, 5);
     if (caption) *caption = title;
@@ -399,7 +403,7 @@ CCMenuItemSpriteExtra* HudEditorPopup::toolbarButton(std::string const& text, CC
 // 1 px nudges. GJ_arrow_01 points left; rotation is clockwise.
 CCMenuItemSpriteExtra* HudEditorPopup::arrowButton(float rotation, CCPoint offset, int tag) {
     CCSize const size {22.0f, 22.0f};
-    auto* face = surface(size, {}, Steel, SurfaceRaised, 250, true);
+    auto* face = slab(size, {}, GhostEdge, true, Ink);
     if (auto* arrow = CCSprite::createWithSpriteFrameName("GJ_arrow_01_001.png")) {
         auto const content = arrow->getContentSize();
         auto const fit = std::max(content.width, content.height);
@@ -486,7 +490,7 @@ void HudEditorPopup::buildToolbar() {
     // Collapsed tools leave one button at the bottom centre.
     {
         CCSize const size {84.0f, 22.0f};
-        auto* face = surface(size, {}, Accent, Surface, 245, true);
+        auto* face = slab(size, {}, GhostEdge, true, Ink);
         auto* title = menuLabel(i18n::text("hud-tools-open", "TOOLS"), 0.24f, {size.width / 2.0f, size.height / 2.0f}, Text, FontWeight::ExtraBold);
         fitFullMenuLabel(title, size.width - 8.0f, size.height - 6.0f, 0.24f);
         face->addChild(title, 5);

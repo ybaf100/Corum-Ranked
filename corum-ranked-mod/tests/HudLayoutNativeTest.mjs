@@ -235,6 +235,9 @@ namespace corum::ranked::ui{
  inline void fitMenuLabelWidth(CCLabelBMFont*,float,float,float){}
  inline void fitFullMenuLabel(CCLabelBMFont*,float,float,float){}
  inline CCNode* surface(CCSize s,CCPoint p,ccColor3B,ccColor3B,GLubyte,bool){auto*n=new CCNode;n->content=s;n->anchor=CCPoint{.5f,.5f};n->position=p;return n;}
+ constexpr ccColor3B AccentFill{166,222,36},AccentInk{13,14,18},Ink{13,14,18},GhostEdge{58,63,78};
+ inline bool sameColor(ccColor3B a,ccColor3B b){return a.r==b.r&&a.g==b.g&&a.b==b.b;}
+ inline CCNode* slab(CCSize s,CCPoint p,ccColor3B,bool,ccColor3B){return surface(s,p,{},{},255,false);}
  struct PlayerIcon:CCNode{static PlayerIcon* createLocal(){return new PlayerIcon;}};
 }
 namespace corum::ranked::ui{

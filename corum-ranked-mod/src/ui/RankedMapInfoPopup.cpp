@@ -54,15 +54,16 @@ void RankedMapInfoPopup::addChrome() {
     auto* menu = CCMenu::create();
     menu->setPosition(CCPointZero);
     m_content->addChild(menu, 20);
-    auto* close = CCMenuItemSpriteExtra::create(buttonFace(i18n::text("close", "CLOSE"), {64, 22}, Steel, false),
+    // Q4 board: REFRESH and CLOSE (ghost) sit under the left column, beside
+    // VIEW LEVEL; the map title leads the left column.
+    auto* close = CCMenuItemSpriteExtra::create(buttonFace(i18n::text("close", "CLOSE"), {44, 22}, Steel, false),
         this, menu_selector(RankedMapInfoPopup::onClose));
-    close->setPosition({44, size.height - 20});
+    close->setPosition({12 + 176 - 8 - 22, 30});
     menu->addChild(close);
-    auto* refresh = CCMenuItemSpriteExtra::create(buttonFace(i18n::text("leaderboard-refresh", "REFRESH"), {72, 22}, Accent, false),
+    auto* refresh = CCMenuItemSpriteExtra::create(buttonFace(i18n::text("leaderboard-refresh", "REFRESH"), {48, 22}, Steel, false),
         this, menu_selector(RankedMapInfoPopup::onRefresh));
-    refresh->setPosition({size.width - 44, size.height - 20});
+    refresh->setPosition({12 + 176 - 8 - 44 - 4 - 24, 30});
     menu->addChild(refresh);
-    caption(m_content, m_row.title, {size.width / 2, size.height - 16}, 0.46f, size.width - 200, Gold, FontWeight::Black);
 }
 
 void RankedMapInfoPopup::showMessage(std::string const& message, ccColor3B color) {
@@ -123,38 +124,42 @@ void RankedMapInfoPopup::showDetail(matjson::Value const& data) {
     if (!map.levelId.empty()) subtitle += "ID " + map.levelId + "  ·  ";
     subtitle += rank ? fmt::format(fmt::runtime(i18n::text("map-info-rank", "#{} of {} by plays")), *rank, integer(data["mapCount"]))
         : i18n::text("map-info-unplayed", "No rounds on this map yet.");
-    caption(m_content, subtitle, {size.width / 2, size.height - 34}, 0.21f, size.width - 190, TextMuted);
 
-    // Left column: the map itself, the viewer's record and VIEW LEVEL.
+    // Left column (300 board px): the 34 px title, by / ID / rank, the
+    // difficulty, chips, qualifying progress, MY RECORD and the buttons.
     constexpr float left = 12, leftWidth = 176;
-    auto* card = surface({leftWidth, size.height - 54}, {}, poolColor(map.pool), SurfaceRaised, 245, false);
+    auto* card = surface({leftWidth, size.height - 20}, {}, poolColor(map.pool), SurfaceRaised, 245, false);
     card->setAnchorPoint(CCPointZero);
     card->setPosition({left, 10});
     m_content->addChild(card, 2);
     auto const cardHeight = card->getContentSize().height;
+    caption(card, map.title, {8, cardHeight - 22}, 34.f / 64.f, leftWidth - 16, Text, FontWeight::Black, 0);
+    caption(card, subtitle, {8, cardHeight - 38}, 13.f / 64.f, leftWidth - 16, TextMuted, FontWeight::SemiBold, 0);
+    auto* divider = CCLayerColor::create({32, 35, 46, 255}, 1.0f, size.height - 20);
+    divider->setPosition({left + leftWidth + 4, 10}); m_content->addChild(divider, 1);
     auto* badge = mapDifficultyBadge(levelNumber(map.levelId), metadataOf(map), leftWidth - 16, 20, true, displayedDifficulty(map));
-    badge->setPosition({8, cardHeight - 30});
+    badge->setPosition({8, cardHeight - 62});
     card->addChild(badge, 5);
     // Two fixed chips side by side; each label shrinks to its chip.
     auto const chipWidth = (leftWidth - 16 - 6) / 2;
     auto const chip = [&](int index, std::string const& label, ccColor3B accent) {
-        auto* box = surface({chipWidth, 16}, {8 + chipWidth / 2 + index * (chipWidth + 6), cardHeight - 48}, accent, Ink, 245, false);
+        auto* box = surface({chipWidth, 16}, {8 + chipWidth / 2 + index * (chipWidth + 6), cardHeight - 80}, accent, Ink, 245, false);
         card->addChild(box, 4);
         caption(box, label, {chipWidth / 2, 8}, 0.19f, chipWidth - 8, Text, FontWeight::ExtraBold);
     };
     chip(0, fmt::format("POOL {}", map.pool), poolColor(map.pool));
     chip(1, map.durationSeconds ? fmt::format(fmt::runtime(i18n::text("map-info-length", "Length {}")), mapPoolClock(map.durationSeconds)) : "-", Steel);
-    caption(card, i18n::text("map-info-qualifying", "Qualifying progress"), {8, cardHeight - 70}, 0.21f, 110, TextMuted, FontWeight::SemiBold, 0);
-    caption(card, mapPoolPercent(map.qualifyingPercent), {leftWidth - 8, cardHeight - 70}, 0.26f, 50, Text, FontWeight::Black, 1);
+    caption(card, i18n::text("map-info-qualifying", "Qualifying progress"), {8, cardHeight - 100}, 0.21f, 110, TextMuted, FontWeight::SemiBold, 0);
+    caption(card, mapPoolPercent(map.qualifyingPercent), {leftWidth - 8, cardHeight - 100}, 0.26f, 50, Text, FontWeight::Black, 1);
     auto* rule = drawNode(card);
-    fillRect(rule, {8, cardHeight - 80, leftWidth - 16, 1}, Steel, 0.35f);
+    fillRect(rule, {8, cardHeight - 110, leftWidth - 16, 1}, Accent, 1.0f);
 
-    caption(card, i18n::text("map-info-mine", "MY RECORD"), {8, cardHeight - 92}, 0.24f, 100, Accent, FontWeight::Black, 0);
+    caption(card, i18n::text("map-info-mine", "MY RECORD"), {8, cardHeight - 122}, 14.f / 64.f, 100, TextMuted, FontWeight::Black, 0);
     auto const mineWidth = (leftWidth - 16 - 8) / 3;
     auto const mineTile = [&](int index, std::string const& value, std::string const& label, ccColor3B color) {
         auto* box = surface({mineWidth, 38}, {}, Accent, Surface, 245, false);
         box->setAnchorPoint(CCPointZero);
-        box->setPosition({8 + index * (mineWidth + 4), cardHeight - 140});
+        box->setPosition({8 + index * (mineWidth + 4), cardHeight - 168});
         card->addChild(box, 4);
         caption(box, value, {mineWidth / 2, 24}, 0.3f, mineWidth - 6, color, FontWeight::Black);
         caption(box, label, {mineWidth / 2, 9}, 0.17f, mineWidth - 6, TextMuted);
@@ -168,9 +173,9 @@ void RankedMapInfoPopup::showDetail(matjson::Value const& data) {
     auto* viewMenu = CCMenu::create();
     viewMenu->setPosition(CCPointZero);
     card->addChild(viewMenu, 20);
-    auto* view = CCMenuItemSpriteExtra::create(buttonFace(i18n::text("history-view-level", "VIEW LEVEL"), {leftWidth - 16, 26}, Accent, false, 0.28f),
+    auto* view = CCMenuItemSpriteExtra::create(buttonFace(i18n::text("history-view-level", "VIEW LEVEL"), {leftWidth - 16 - 100, 22}, Accent, false, 0.22f, Accent),
         this, menu_selector(RankedMapInfoPopup::onViewLevel));
-    view->setPosition({leftWidth / 2, 20});
+    view->setPosition({8 + (leftWidth - 16 - 100) / 2, 20});
     viewMenu->addChild(view);
 
     // Right column: headline rates, death distribution, tiers and records.
@@ -180,7 +185,7 @@ void RankedMapInfoPopup::showDetail(matjson::Value const& data) {
     auto const headline = [&](int index, std::string const& label, std::string const& value, std::string const& detail, ccColor3B accent) {
         auto* box = surface({tileWidth, 40}, {}, accent, SurfaceRaised, 245, false);
         box->setAnchorPoint(CCPointZero);
-        box->setPosition({rightX + index * (tileWidth + 6), size.height - 92});
+        box->setPosition({rightX + index * (tileWidth + 6), size.height - 52});
         m_content->addChild(box, 2);
         caption(box, label, {6, 32}, 0.17f, tileWidth - 10, TextMuted, FontWeight::SemiBold, 0);
         caption(box, value, {6, 19}, 0.33f, tileWidth - 10, Text, FontWeight::Black, 0);
@@ -197,7 +202,7 @@ void RankedMapInfoPopup::showDetail(matjson::Value const& data) {
         i18n::text("map-info-clear-detail", "Players who reached 100%"), Green);
 
     // Where players die: ten 10% bins, the deadliest one in gold.
-    auto const middleTop = size.height - 98, middleBottom = 106.0f;
+    auto const middleTop = size.height - 58, middleBottom = 106.0f;
     auto const deathsWidth = rightWidth * 0.6f;
     auto* deaths = surface({deathsWidth, middleTop - middleBottom}, {}, Steel, SurfaceRaised, 245, false);
     deaths->setAnchorPoint(CCPointZero);

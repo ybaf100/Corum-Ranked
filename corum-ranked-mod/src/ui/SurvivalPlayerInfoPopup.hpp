@@ -1,4 +1,5 @@
 #pragma once
+#include <tuple>
 #include "../SurvivalRuntime.hpp"
 #include "../RankedRuntime.hpp"
 #include "../domain/PlayerInfoPresentation.hpp"
@@ -70,33 +71,42 @@ class SurvivalPlayerInfoPopup final:public Popup,public UserInfoDelegate {
             owner->render();
         });
     }
-    void row(std::string const& caption,std::string const& value,float y,ccColor3B color=Text){
-        auto* label=menuLabel(caption,.34f,{18,y},TextMuted,FontWeight::SemiBold);label->setAnchorPoint({0,.5f});fitFullMenuLabel(label,156,18,.34f);m_contents->addChild(label,5);
-        auto* number=menuLabel(value,.36f,{282,y},color,FontWeight::ExtraBold);number->setAnchorPoint({1,.5f});fitFullMenuLabel(number,104,18,.36f);m_contents->addChild(number,5);
+    // Q2 stat tile (.panel #20232E): the caption over the 24 px value.
+    void tile(std::string const& caption,std::string const& value,int index,ccColor3B color=Text){
+        constexpr float width=69.6f,gap=6.0f,y=96.0f;auto const x=14.0f+width/2.0f+static_cast<float>(index)*(width+gap);
+        m_contents->addChild(surface({width,40},{x,y},SurfaceRaised,SurfaceRaised,255,false),1);
+        auto* label=menuLabel(caption,13.f/64.f,{x-width/2.0f+7.0f,y+9.0f},TextMuted,FontWeight::SemiBold);label->setAnchorPoint({0,.5f});fitFullMenuLabel(label,width-12.0f,12,13.f/64.f);m_contents->addChild(label,5);
+        auto* number=menuLabel(value,24.f/64.f,{x-width/2.0f+7.0f,y-6.0f},color,FontWeight::Black);number->setAnchorPoint({0,.5f});fitFullMenuLabel(number,width-12.0f,16,24.f/64.f);m_contents->addChild(number,5);
     }
     void render(){
         if(m_contents)m_contents->removeFromParentAndCleanup(true);m_contents=CCNode::create();m_panel->addChild(m_contents,10);
-        auto* title=menuLabel(i18n::text("player-info","PLAYER INFO"),.48f,{150,330},Text,FontWeight::Black);fitFullMenuLabel(title,264,24,.48f);m_contents->addChild(title,5);
-        auto* name=playerNameLabel(m_player.name,.39f,{150,304},Gold,FontWeight::ExtraBold);fitSingleLineMenuLabel(name,264,23,.39f);m_contents->addChild(name,5);
+        // Q2 board: PLAYER INFO, the 36 px name with the title and record,
+        // the two mode rows, five stat tiles and the forum / global line.
+        auto* title=menuLabel(i18n::text("player-info","PLAYER INFO"),14.f/64.f,{14,252},TextMuted,FontWeight::ExtraBold);title->setAnchorPoint({0,.5f});fitFullMenuLabel(title,200,14,14.f/64.f);m_contents->addChild(title,5);
+        auto* name=playerNameLabel(m_player.name,36.f/64.f,{14,224},Text,FontWeight::Black);name->setAnchorPoint({0,.5f});fitSingleLineMenuLabel(name,230,24,36.f/64.f);m_contents->addChild(name,5);
         auto const& payload=std::as_const(m_forum)["profile"];
         auto const profile=payload["gdAccountId"].asString().unwrapOr("")==std::to_string(m_player.accountId)?payload:matjson::Value();
-        publicPlayerTitle(m_contents,profile["equippedTitle"],{150,281},264,.25f);
-        publicRankLine(m_contents,i18n::text("survival","SURVIVAL"),profile["survival"],253);
-        publicRankLine(m_contents,i18n::text("solo-ranked","SOLO RANKED"),profile["solo"],223);
+        publicPlayerTitle(m_contents,profile["equippedTitle"],{130,203},232,.25f);
         auto const record=profile["survival"]["recordSummary"];
         auto line=survivalRecordText(static_cast<int>(record["wins"].asInt().unwrapOr(0)),static_cast<int>(record["losses"].asInt().unwrapOr(0)),i18n::isKorean());
         auto const streak=static_cast<int>(record["winStreak"].asInt().unwrapOr(0));if(streak>0)line+=" · "+i18n::streak(streak,true);
         if(m_player.bot)line="BOT";
         else if(!record.isObject())line=i18n::text("info-unavailable","Unavailable");
-        auto* summary=menuLabel(line,.25f,{150,196},streak>=2?Gold:TextMuted,FontWeight::ExtraBold);fitSingleLineMenuLabel(summary,264,18,.25f);m_contents->addChild(summary,5);
-        float y=175;
+        auto* summary=menuLabel(line,15.f/64.f,{386,224},streak>=2?Gold:TextMuted,FontWeight::ExtraBold);summary->setAnchorPoint({1,.5f});fitSingleLineMenuLabel(summary,140,16,15.f/64.f);m_contents->addChild(summary,5);
+        // Mode rows on raised panels; the shared rank line keeps its 300-unit
+        // geometry inside an offset holder.
+        for(auto const& [caption,key,y]:{std::tuple{i18n::text("survival","SURVIVAL"),"survival",170.0f},std::tuple{i18n::text("solo-ranked","SOLO RANKED"),"solo",140.0f}}){
+            m_contents->addChild(surface({372,26},{200,y},SurfaceRaised,SurfaceRaised,255,false),1);
+            auto* holder=CCNode::create();holder->setPosition({50,0});m_contents->addChild(holder,4);
+            publicRankLine(holder,caption,profile[key],y);
+        }
         auto const unavailable=i18n::text("info-unavailable","Unavailable");auto const waiting=m_lookupFailed?unavailable:i18n::text("loading","Loading...");
         auto stat=[&](std::optional<int> value){return m_player.bot?std::string("BOT"):value?std::to_string(*value):waiting;};
-        if(m_statistics && m_statistics->globalRank>0){row("GD Global Rank","#"+std::to_string(m_statistics->globalRank),y,Gold);y-=20;}
-        row(i18n::text("info-stars","Stars"),stat(m_statistics?std::optional(m_statistics->stars):std::nullopt),y);y-=20;
-        row(i18n::text("info-moons","Moons"),stat(m_statistics?std::optional(m_statistics->moons):std::nullopt),y);y-=20;
-        row(i18n::text("info-demons","Demons"),stat(m_statistics?std::optional(m_statistics->demons):std::nullopt),y);y-=20;
-        row("Extreme Demons",m_player.bot?"BOT":m_statistics?(m_statistics->extreme?std::to_string(*m_statistics->extreme):unavailable):waiting,y);y-=22;
+        tile(i18n::text("info-stars","Stars"),stat(m_statistics?std::optional(m_statistics->stars):std::nullopt),0);
+        tile(i18n::text("info-moons","Moons"),stat(m_statistics?std::optional(m_statistics->moons):std::nullopt),1);
+        tile(i18n::text("info-demons","Demons"),stat(m_statistics?std::optional(m_statistics->demons):std::nullopt),2);
+        tile("Extreme Demons",m_player.bot?"BOT":m_statistics?(m_statistics->extreme?std::to_string(*m_statistics->extreme):unavailable):waiting,3);
+        float footX=14;
         for(auto const* provider:{"GDKF","POINTERCRATE"}){
             std::string value=m_player.bot?"BOT":m_forumFailed?unavailable:m_forum.isNull()?i18n::text("loading","Loading..."):unavailable;
             auto color=TextMuted;
@@ -107,18 +117,26 @@ class SurvivalPlayerInfoPopup final:public Popup,public UserInfoDelegate {
                 else if(status=="UNLINKED")value=i18n::text("info-unlinked","Not linked");
                 else if(status=="PENDING")value=i18n::text("loading","Loading...");
             }
-            row(std::string(provider)=="GDKF"?"GDKF":"Pointercrate",value,y,color);y-=20;
+            if(std::string(provider)=="POINTERCRATE"){tile("Pointercrate",value,4,color);continue;}
+            // GDKF on the footer line.
+            auto* label=menuLabel("GDKF",13.f/64.f,{footX,54},TextMuted,FontWeight::SemiBold);label->setAnchorPoint({0,.5f});m_contents->addChild(label,5);
+            auto* number=menuLabel(value,15.f/64.f,{footX+34,54},color,FontWeight::ExtraBold);number->setAnchorPoint({0,.5f});fitFullMenuLabel(number,110,14,15.f/64.f);m_contents->addChild(number,5);
+            footX+=160;
+        }
+        if(m_statistics && m_statistics->globalRank>0){
+            auto* label=menuLabel("GD Global Rank",13.f/64.f,{footX,54},TextMuted,FontWeight::SemiBold);label->setAnchorPoint({0,.5f});m_contents->addChild(label,5);
+            auto* number=menuLabel("#"+std::to_string(m_statistics->globalRank),15.f/64.f,{footX+82,54},Gold,FontWeight::ExtraBold);number->setAnchorPoint({0,.5f});m_contents->addChild(number,5);
         }
     }
     bool init(SurvivalStanding const& player,std::string const& match){
-        auto const layout=rankedPopupLayout({300,354},CCDirector::sharedDirector()->getWinSize());
+        auto const layout=rankedPopupLayout({400,270},CCDirector::sharedDirector()->getWinSize());
         if(!Popup::init(layout.size.width,layout.size.height))return false;m_player=player;m_matchId=match;m_session=RankedRuntime::get().spectatorLiveSessionToken();
         if(m_player.bot)m_player.accountId=0;
         if(m_player.accountId<=0)m_lookupFailed=m_forumFailed=true;
         m_bgSprite->setVisible(false);m_closeBtn->setVisible(false);setID("survival-player-info-popup"_spr);
-        m_panel=rankedPopupContent(m_mainLayer,m_buttonMenu,layout);m_panel->addChild(surface({300,354},{150,177},Accent,Surface,255,true));
-        auto* face=surface({120,28},{},Steel,SurfaceRaised,255,true);auto* label=menuLabel(i18n::text("close","CLOSE"),.32f,{60,14},Text,FontWeight::ExtraBold);face->addChild(label,5);
-        auto* close=CCMenuItemSpriteExtra::create(face,this,menu_selector(SurvivalPlayerInfoPopup::onClose));close->setPosition({150,20});m_buttonMenu->addChild(close);
+        m_panel=rankedPopupContent(m_mainLayer,m_buttonMenu,layout);m_panel->addChild(surface({400,270},{200,135},Accent,Surface,255,true));
+        auto* face=surface({90,18},{},Steel,SurfaceRaised,255,true);auto* label=menuLabel(i18n::text("close","CLOSE"),14.f/64.f,{45,9},Text,FontWeight::ExtraBold);face->addChild(label,5);
+        auto* close=CCMenuItemSpriteExtra::create(face,this,menu_selector(SurvivalPlayerInfoPopup::onClose));close->setPosition({341,20});m_buttonMenu->addChild(close);
         m_deadline=std::chrono::steady_clock::now()+std::chrono::seconds(25);
         schedule(schedule_selector(SurvivalPlayerInfoPopup::refresh),.1f);render();return true;
     }
