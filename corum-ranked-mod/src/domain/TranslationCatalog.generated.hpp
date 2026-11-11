@@ -3,7 +3,7 @@
 #include <array>
 namespace corum::ranked {
 struct CatalogTranslation {char const* key;char const* english;char const* korean;};
-inline constexpr std::array<CatalogTranslation, 1086> kTranslations {{
+inline constexpr std::array<CatalogTranslation, 1101> kTranslations {{
     CatalogTranslation{"A logged-in Geometry Dash account is required.", "A logged-in Geometry Dash account is required.", "로그인된 Geometry Dash 계정이 필요합니다."},
     CatalogTranslation{"A mod update is required before entering Ranked.", "A mod update is required before entering Ranked.", "랭크에 입장하려면 모드를 업데이트하세요."},
     CatalogTranslation{"AUDIO_CACHE_INVALID", "Audio file is missing or empty · retry required", "음원 파일이 없거나 비어 있음 · 재시도 필요"},
@@ -405,6 +405,21 @@ inline constexpr std::array<CatalogTranslation, 1086> kTranslations {{
     CatalogTranslation{"free-play-note", "THE DOWNLOAD CONTINUES IN THE BACKGROUND. PRACTISE RANKED MAPS WITHOUT OFFICIAL RECORDS.", "다운로드는 뒤에서 계속됩니다. 공식 기록 없이 랭크 맵을 연습할 수 있습니다."},
     CatalogTranslation{"free-play-restart", "THE GAME RESTARTS RIGHT AWAY WHEN IT FINISHES, EVEN WHILE PLAYING", "완료되면 플레이 중이어도 바로 재시작됩니다"},
     CatalogTranslation{"grade-updates-after-attempt", "UPDATES AFTER EACH ATTEMPT", "시도가 끝날 때마다 갱신"},
+    CatalogTranslation{"guide-achievements-body", "Achievements give AP, and an equipped title shows with your name. Survival round results become round badges.", "도전과제를 달성하면 AP를 받고, 칭호를 장착하면 이름 뒤에 표시됩니다. 서바이벌 라운드 결과는 라운드 뱃지로 모입니다."},
+    CatalogTranslation{"guide-achievements-title", "ACHIEVEMENTS AND TITLES", "도전과제와 칭호"},
+    CatalogTranslation{"guide-modes-body", "Survival: many players race on the same map and the bottom of each round is eliminated. Solo Ranked: one on one, best of three.", "서바이벌은 여러 명이 한 맵을 플레이하고 라운드마다 하위권이 탈락합니다. 솔로 랭크는 1대1 경기로 3판 2선승입니다."},
+    CatalogTranslation{"guide-modes-title", "TWO MODES", "두 가지 모드"},
+    CatalogTranslation{"guide-placement-body", "Your first tier comes from placement stages of two maps each. A stage's grade sets the next stage's map pool.", "처음에는 STAGE마다 맵 2개를 플레이합니다. STAGE 등급이 다음 STAGE의 맵 풀을 정하고, 마지막 결과로 첫 티어가 정해집니다."},
+    CatalogTranslation{"guide-placement-title", "PLACEMENT", "배치고사"},
+    CatalogTranslation{"guide-promotion-body", "At the next tier's line a promotion series opens: win enough games to move up. Lose during a demotion warning and you can drop.", "다음 티어 기준에 도달하면 승격전이 열리고, 필요한 승수를 달성하면 승급합니다. 강등 경고 중에 패배하면 강등될 수 있습니다."},
+    CatalogTranslation{"guide-promotion-title", "PROMOTION AND DEMOTION", "승격전과 강등 경고"},
+    CatalogTranslation{"guide-solo-body", "After matching, both players ban maps. Each round, the better record on the same map wins. A drawn round goes to a Death Match.", "매칭이 되면 맵을 밴하고, 라운드마다 한 맵에서 기록이 더 높은 쪽이 승리합니다. 무승부 라운드는 데스 매치로 정합니다."},
+    CatalogTranslation{"guide-solo-title", "A SOLO RANKED MATCH", "솔로 랭크 경기 진행"},
+    CatalogTranslation{"guide-survival-body", "Each round, players below the cut are eliminated until one remains. The round's first place finishes them with its equipped effect.", "라운드마다 컷 아래 플레이어가 탈락하고, 끝까지 남은 한 명이 우승합니다. 라운드 1위는 장착한 처형 효과로 탈락자를 처리합니다."},
+    CatalogTranslation{"guide-survival-title", "SURVIVAL ROUNDS", "서바이벌 라운드"},
+    CatalogTranslation{"guide-tiers-body", "Results move your LP up and down. Tiers go RED, AQUA, BRONZE, SILVER, GOLD, each split into III, II and I.", "승리하면 LP가 상승하고 패배하면 하락합니다. 티어는 RED, AQUA, BRONZE, SILVER, GOLD 순이고 각 티어는 III · II · I 단계가 있습니다."},
+    CatalogTranslation{"guide-tiers-title", "TIERS AND LP", "티어와 LP"},
+    CatalogTranslation{"guide-title", "HOW RANKED WORKS", "랭크 안내"},
     CatalogTranslation{"history", "HISTORY", "기록"},
     CatalogTranslation{"history-all-records", "ALL RECORDS", "모든 기록"},
     CatalogTranslation{"history-all-results", "ALL RESULTS", "모든 결과"},

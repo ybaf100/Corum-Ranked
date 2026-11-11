@@ -3950,5 +3950,65 @@
   "history-tap-player": {
     "en": "TAP A PLAYER FOR INFO",
     "ko": "플레이어를 누르면 정보"
+  },
+  "guide-title": {
+    "en": "HOW RANKED WORKS",
+    "ko": "랭크 안내"
+  },
+  "guide-modes-title": {
+    "en": "TWO MODES",
+    "ko": "두 가지 모드"
+  },
+  "guide-modes-body": {
+    "en": "Survival: many players race on the same map and the bottom of each round is eliminated. Solo Ranked: one on one, best of three.",
+    "ko": "서바이벌은 여러 명이 한 맵을 플레이하고 라운드마다 하위권이 탈락합니다. 솔로 랭크는 1대1 경기로 3판 2선승입니다."
+  },
+  "guide-solo-title": {
+    "en": "A SOLO RANKED MATCH",
+    "ko": "솔로 랭크 경기 진행"
+  },
+  "guide-solo-body": {
+    "en": "After matching, both players ban maps. Each round, the better record on the same map wins. A drawn round goes to a Death Match.",
+    "ko": "매칭이 되면 맵을 밴하고, 라운드마다 한 맵에서 기록이 더 높은 쪽이 승리합니다. 무승부 라운드는 데스 매치로 정합니다."
+  },
+  "guide-tiers-title": {
+    "en": "TIERS AND LP",
+    "ko": "티어와 LP"
+  },
+  "guide-tiers-body": {
+    "en": "Results move your LP up and down. Tiers go RED, AQUA, BRONZE, SILVER, GOLD, each split into III, II and I.",
+    "ko": "승리하면 LP가 상승하고 패배하면 하락합니다. 티어는 RED, AQUA, BRONZE, SILVER, GOLD 순이고 각 티어는 III · II · I 단계가 있습니다."
+  },
+  "guide-promotion-title": {
+    "en": "PROMOTION AND DEMOTION",
+    "ko": "승격전과 강등 경고"
+  },
+  "guide-promotion-body": {
+    "en": "At the next tier's line a promotion series opens: win enough games to move up. Lose during a demotion warning and you can drop.",
+    "ko": "다음 티어 기준에 도달하면 승격전이 열리고, 필요한 승수를 달성하면 승급합니다. 강등 경고 중에 패배하면 강등될 수 있습니다."
+  },
+  "guide-placement-title": {
+    "en": "PLACEMENT",
+    "ko": "배치고사"
+  },
+  "guide-placement-body": {
+    "en": "Your first tier comes from placement stages of two maps each. A stage's grade sets the next stage's map pool.",
+    "ko": "처음에는 STAGE마다 맵 2개를 플레이합니다. STAGE 등급이 다음 STAGE의 맵 풀을 정하고, 마지막 결과로 첫 티어가 정해집니다."
+  },
+  "guide-survival-title": {
+    "en": "SURVIVAL ROUNDS",
+    "ko": "서바이벌 라운드"
+  },
+  "guide-survival-body": {
+    "en": "Each round, players below the cut are eliminated until one remains. The round's first place finishes them with its equipped effect.",
+    "ko": "라운드마다 컷 아래 플레이어가 탈락하고, 끝까지 남은 한 명이 우승합니다. 라운드 1위는 장착한 처형 효과로 탈락자를 처리합니다."
+  },
+  "guide-achievements-title": {
+    "en": "ACHIEVEMENTS AND TITLES",
+    "ko": "도전과제와 칭호"
+  },
+  "guide-achievements-body": {
+    "en": "Achievements give AP, and an equipped title shows with your name. Survival round results become round badges.",
+    "ko": "도전과제를 달성하면 AP를 받고, 칭호를 장착하면 이름 뒤에 표시됩니다. 서바이벌 라운드 결과는 라운드 뱃지로 모입니다."
   }
 }
