@@ -2893,9 +2893,9 @@ class CorumRankedLayer final : public CCLayerColor {
                 auto* players = makeLabel(online ? fmt::format(fmt::runtime(tr("survival-online-ready-format","2-{} PLAYERS")), view.survivalPlayerCount) : tr("mode-disabled","MODE DISABLED"),
                     fontScale(16.0f), {sideX, heroY + 7.0f}, corum::ranked::ui::Text, "extrabold", {0.0f, 0.5f});
                 corum::ranked::ui::fitMenuLabelWidth(players, x1 - sideX, fontScale(16.0f), 0.12f); m_root->addChild(players, 4);
-                auto* small = makeLabel(fmt::format(fmt::runtime(tr("survival-queue-short-format","AFTER {}s, SMALLER FIELDS MAY START")), corum::ranked::SurvivalRuntime::get().queue().maxWaitSeconds),
+                auto* fieldNote = makeLabel(fmt::format(fmt::runtime(tr("survival-queue-short-format","AFTER {}s, SMALLER FIELDS MAY START")), corum::ranked::SurvivalRuntime::get().queue().maxWaitSeconds),
                     fontScale(13.0f), {sideX, heroY - 8.0f}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f});
-                corum::ranked::ui::fitMenuLabelWidth(small, x1 - sideX, fontScale(13.0f), 0.1f); m_root->addChild(small, 4);
+                corum::ranked::ui::fitMenuLabelWidth(fieldNote, x1 - sideX, fontScale(13.0f), 0.1f); m_root->addChild(fieldNote, 4);
             }
         }
 
