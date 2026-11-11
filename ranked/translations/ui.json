@@ -3610,5 +3610,41 @@
   "badges": {
     "en": "BADGES",
     "ko": "뱃지"
+  },
+  "matching-short": {
+    "en": "MATCHING",
+    "ko": "매칭 중"
+  },
+  "waiting-time": {
+    "en": "WAIT",
+    "ko": "대기 시간"
+  },
+  "finding-opponent": {
+    "en": "LOOKING FOR AN OPPONENT",
+    "ko": "상대를 찾고 있습니다"
+  },
+  "revealed-on-match": {
+    "en": "REVEALED WHEN MATCHED",
+    "ko": "매칭 완료 시 공개"
+  },
+  "match-moves-now": {
+    "en": "A FOUND MATCH STARTS RIGHT AWAY",
+    "ko": "상대를 찾으면 바로 경기로 이동합니다"
+  },
+  "cancel-matching": {
+    "en": "CANCEL MATCHING",
+    "ko": "매칭 취소"
+  },
+  "seat-fade-note": {
+    "en": "NEW PLAYERS FADE INTO OPEN SEATS · NAMES SHOW WHEN THE MATCH STARTS",
+    "ko": "새 참가자는 자리에 바로 표시 · 이름은 경기 시작 시 공개"
+  },
+  "players-count-format": {
+    "en": "{} PLAYERS",
+    "ko": "{}명"
+  },
+  "score-range-format": {
+    "en": "(SCORE RANGE +/-{})",
+    "ko": "(점수 범위 +/-{})"
   }
 }
