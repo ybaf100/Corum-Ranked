@@ -2,7 +2,8 @@
 """Cut the lower-tier rank badges and rebuild their finished trophies.
 
 UNRANKED keeps only its core, drawn twice as large so it still reads at
-list size. RED, AQUA and BRONZE lose the middle of each
+list size. RED keeps only its spikes and core (its body layer is cleared).
+AQUA and BRONZE lose the middle of each
 side of their body layer (a horizontal and a vertical band through the
 centre); the narrower the band, the higher the tier. Ornament layers and the
 core stay whole, every layer keeps its 1024 px canvas, file name and role,
@@ -31,7 +32,9 @@ LAYERS = {
 }
 # Half width in canvas pixels of the band removed through the middle of each
 # side of the body layer.
-BODY_CUT = {'bronze': 45, 'aqua': 80, 'red': 110}
+BODY_CUT = {'bronze': 45, 'aqua': 80}
+# Tiers whose body layer is cleared entirely.
+BODY_CLEARED = ('red',)
 # The UNRANKED core is enlarged around the canvas centre while it is still
 # at its original size (idempotent: an enlarged core is left alone).
 CORE_SCALE, CORE_ORIGINAL_MAX = 2.0, 300
@@ -78,6 +81,10 @@ def cut():
         pixels = load(layer_path('unranked', role))
         pixels[...] = 0
         save(layer_path('unranked', role), pixels)
+    for tier in BODY_CLEARED:
+        pixels = load(layer_path(tier, 'body'))
+        pixels[...] = 0
+        save(layer_path(tier, 'body'), pixels)
     for tier, half_width in BODY_CUT.items():
         pixels = load(layer_path(tier, 'body'))
         pixels[middle_bands(half_width)] = 0
