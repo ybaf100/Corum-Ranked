@@ -3706,5 +3706,109 @@
   "round-lost-mine": {
     "en": "ROUND LOST",
     "ko": "라운드 패배"
+  },
+  "placement-setup-ko": {
+    "en": "PLACEMENT SETUP",
+    "ko": "배치 설정"
+  },
+  "placement-times": {
+    "en": "{} STAGES",
+    "ko": "{}회"
+  },
+  "placement-quick": {
+    "en": "QUICK",
+    "ko": "단기 배치"
+  },
+  "placement-recommended": {
+    "en": "RECOMMENDED",
+    "ko": "권장"
+  },
+  "placement-recommended-selected": {
+    "en": "RECOMMENDED · SELECTED",
+    "ko": "권장 · 선택됨"
+  },
+  "placement-map-count": {
+    "en": "{} MAPS",
+    "ko": "{}개 맵"
+  },
+  "placement-three-detail": {
+    "en": "3 STAGES LOWERS YOUR MAX PLACEMENT.",
+    "ko": "경고: 3회 배치는 배치 최대점이 낮아집니다."
+  },
+  "placement-five-detail": {
+    "en": "STAGE GRADES ADD UP TO YOUR PLACEMENT TIER.",
+    "ko": "각 STAGE의 등급을 합산해 배치 티어를 정합니다."
+  },
+  "placement-max-tier": {
+    "en": "MAX PLACEMENT: {}",
+    "ko": "최대 배치는 {}입니다."
+  },
+  "placement-range": {
+    "en": "PLACEMENT RANGE",
+    "ko": "배치 가능 범위"
+  },
+  "first-stage-pool": {
+    "en": "FIRST STAGE POOL",
+    "ko": "첫 STAGE POOL"
+  },
+  "placement-stage-chip": {
+    "en": "{} STAGES · STAGE 1 / {}",
+    "ko": "{}회 배치 · STAGE 1 / {}"
+  },
+  "choose-start-pool": {
+    "en": "CHOOSE YOUR STARTING POOL.",
+    "ko": "시작할 POOL을 선택하세요."
+  },
+  "pool-rating": {
+    "en": "RATING {}",
+    "ko": "레이팅 {}"
+  },
+  "pool-note-1": {
+    "en": "THIS ONLY SETS STAGE 1'S STARTING POOL.",
+    "ko": "이 선택은 STAGE 1의 시작 POOL만 정합니다."
+  },
+  "pool-note-2": {
+    "en": "YOUR FINAL RANK COMES FROM THE WHOLE RUN.",
+    "ko": "최종 랭크는 전체 결과로 결정됩니다."
+  },
+  "start-with-pool": {
+    "en": "START WITH POOL {}",
+    "ko": "POOL {}으로 시작"
+  },
+  "pool-maps": {
+    "en": "POOL {} MAPS",
+    "ko": "POOL {} 맵"
+  },
+  "pool-maps-note": {
+    "en": "2 MAPS ARE DRAWN AT RANDOM EACH STAGE",
+    "ko": "STAGE마다 2개 맵이 무작위로 정해집니다"
+  },
+  "current-map-grade": {
+    "en": "CURRENT MAP GRADE",
+    "ko": "현재 맵 등급"
+  },
+  "grade-updates-after-attempt": {
+    "en": "UPDATES AFTER EACH ATTEMPT",
+    "ko": "시도가 끝날 때마다 갱신"
+  },
+  "best-progress-format": {
+    "en": "BEST {}%",
+    "ko": "최고 진행도 {}%"
+  },
+  "progress": {
+    "en": "PROGRESS",
+    "ko": "진행도"
+  },
+  "stage-complete-line": {
+    "en": "STAGE COMPLETE. CHECK THE FINAL GRADE.",
+    "ko": "단계가 완료되었습니다. 최종 등급을 확인하세요."
+  },
+  "stage-pool-rule": {
+    "en": "A HIGHER STAGE GRADE STARTS THE NEXT STAGE IN A HARDER POOL",
+    "ko": "STAGE 등급이 높을수록 다음 STAGE는 더 어려운 POOL에서 시작합니다"
+  },
+  "all-maps-complete": {
+    "en": "ALL {} MAPS COMPLETE",
+    "ko": "전체 {}개 맵 완료"
   }
 }

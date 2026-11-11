@@ -248,6 +248,12 @@ void RankTransitionLayer::createBackground() {
         CCFadeTo::create(1.2f, goldRankTier(m_newRank) ? 76 : 48), nullptr
     )));
 
+    // P6: the ink fade along the bottom 60 points.
+    auto* bottomFade = CCLayerGradient::create(ccc4(13, 14, 18, 0), ccc4(13, 14, 18, 255));
+    bottomFade->setContentSize({size.width, 60.0f});
+    bottomFade->setPosition(CCPointZero);
+    m_backgroundRoot->addChild(bottomFade, 4);
+
     auto* topLine = CCLayerColor::create({profile.color.r, profile.color.g, profile.color.b, 170});
     topLine->setContentSize({size.width - 72.0f, 1.2f});
     topLine->setPosition({36.0f, size.height - 26.0f});

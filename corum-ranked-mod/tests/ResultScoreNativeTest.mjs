@@ -1007,7 +1007,7 @@ int main() {
     assert(corum::ranked::ui::RankedJukeboxPopup::opened==1&&FLAlertLayer::opened==1);
 }
 `);
-    assert.match(method(popupSource,'void addRoundOptions('),/addJukeboxButton\(\{size.width \/ 2.0f \+ 116.0f, y\}/);
+    assert.match(method(popupSource,'void addRoundOptions('),/addJukeboxButton\(\{cx \+ 116.0f, y\}/);
     assert.match(method(popupSource,'void addPlayerCard('),/center.x \+ \(self \? -55 : 55\)/);
     const main=method(popupSource,'void renderModeCard(');
     // L1 half: the 190 px trophy at the top right, the rank (or streak) in the stat row.

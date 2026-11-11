@@ -586,6 +586,7 @@ class CorumRankedLayer final : public CCLayerColor {
     std::string m_localMessage;
     int m_selectedPlacementStageCount = 0;
     int m_selectedPlacementPool = 0;
+    bool m_placementPoolStep = false;
     SteadyClock::time_point m_phaseStartedAt {};
     std::vector<int> m_songIds;
     bool m_readySent = false;
@@ -961,7 +962,7 @@ class CorumRankedLayer final : public CCLayerColor {
             ) + fmt::format(":{}", view.revision);
         }
         if (m_page == Page::PlacementPoolSelection) {
-            return fmt::format("placement:pool:{}:{}:{}:{}", RankedRuntime::get().view().revision, m_selectedPlacementStageCount, m_selectedPlacementPool, m_localMessage) + detailsKey;
+            return fmt::format("placement:pool:{}:{}:{}:{}:{}", RankedRuntime::get().view().revision, m_selectedPlacementStageCount, m_selectedPlacementPool, m_placementPoolStep, m_localMessage) + detailsKey;
         }
         if (m_page == Page::PlacementSkipConfirm) return "placement:skip-confirm";
         if (view.stage != RuntimeStage::Matched) {
@@ -1403,6 +1404,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 ? fmt::format("{} {}s", tr("starts-in", "STARTS IN"), *remaining).c_str()
                 : tr("starting", "STARTING...").c_str());
             m_placementPrepareTimerLabel->setColor(remaining && *remaining <= 3 ? kRed : kGold);
+            corum::ranked::ui::fitMenuLabelWidth(m_placementPrepareTimerLabel, 70.0f, fontScale(15.0f), 0.09f);
         }
         auto const opponentSurrender = m_page == Page::Live && runtime.view().stage == RuntimeStage::Matched &&
             !runtime.view().environmentWarning.active && !showResourceGate() &&
@@ -2189,166 +2191,160 @@ class CorumRankedLayer final : public CCLayerColor {
         }
     }
 
+    // P1 / P2 (placement setup), from the boards. Step 1 chooses the length
+    // (3 or 5 stages) on two option panels; step 2 chooses the first stage's
+    // pool beside that pool's map list and starts the run.
     void renderPlacementPoolSelection(RuntimeView const& view) {
         auto const size = CCDirector::sharedDirector()->getWinSize();
-        addTopBack(false);
-        addLanguageSelector();
-        addScreenHeader(
-            tr("placement-matches", "PLACEMENT"),
-            tr("placement-setup", "PLACEMENT SETUP"),
-            kGold,
-            kAccent
-        );
-
-        auto* countTitle = makeLabel(
-            tr("placement-count", "CHOOSE PLACEMENT LENGTH"),
-            0.25f,
-            {size.width / 2.0f, size.height - 72.0f},
-            corum::ranked::ui::Text,
-            "black"
-        );
-        m_root->addChild(countTitle, 5);
-
-        auto const threeCountText = fmt::format(fmt::runtime(tr("placement-stage-count","{} STAGES")),3);
-        auto const fiveCountText = fmt::format(fmt::runtime(tr("placement-stage-count","{} STAGES")),5);
-        auto* three = addButton(
-            threeCountText,
-            {size.width / 2.0f - 78.0f, size.height - 97.0f},
-            menu_selector(CorumRankedLayer::onPlacementStageCount),
-            false,
-            0.54f,
-            // P1: the chosen length is the solid slab, the other is outlined.
-            m_selectedPlacementStageCount != 3
-        );
-        three->setTag(3);
-        auto* five = addButton(
-            fiveCountText,
-            {size.width / 2.0f + 78.0f, size.height - 97.0f},
-            menu_selector(CorumRankedLayer::onPlacementStageCount),
-            false,
-            0.54f,
-            // P1: the chosen length is the solid slab, the other is outlined.
-            m_selectedPlacementStageCount != 5
-        );
-        five->setTag(5);
-
-        std::string countHint;
-        ccColor3B countHintColor = corum::ranked::ui::TextMuted;
-        if (m_selectedPlacementStageCount == 3) {
-            countHint = tr(
-                "placement-three-stage-warning",
-                "WARNING: 3 STAGES LOWERS YOUR MAX PLACEMENT. MAX: AQUA. CANNOT CHANGE AFTER START."
-            );
-            countHintColor = kRed;
-        } else if (m_selectedPlacementStageCount == 5) {
-            countHint = tr(
-                "placement-five-stage-info",
-                "5 STAGES · 10 MAPS · FULL PLACEMENT RANGE · CANNOT CHANGE AFTER START."
-            );
-            countHintColor = kGreen;
+        auto const headerY = size.height - kLobbyHeader / 2.0f;
+        auto const stages = m_selectedPlacementStageCount;
+        auto const brandX = px(28.0f) + px(48.0f) + px(16.0f);
+        if (!m_placementPoolStep) {
+            addTopBack(true);
+            auto* brand = makeLabel(tr("placement-setup-ko", "PLACEMENT SETUP"), fontScale(30.0f), {brandX, headerY}, corum::ranked::ui::Text, "black", {0.0f, 0.5f});
+            corum::ranked::ui::leanLabel(brand); brand->setID("ranked-screen-title"_spr); m_root->addChild(brand, 6);
+            m_root->addChild(makeLabel("PLACEMENT SETUP", fontScale(13.0f), {brandX + brand->getScaledContentSize().width + 10.0f, headerY}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f}), 6);
+            if (auto* badge = corum::ranked::ui::createAnimatedRankBadge("UNRANKED", {24.0f, 24.0f}, corum::ranked::ui::RankBadgeDisplay::Matched)) {
+                badge->setPosition({size.width - px(28.0f) - 80.0f, headerY}); m_root->addChild(badge, 6);
+            }
+            m_root->addChild(makeLabel("UNRANKED", fontScale(24.0f), {size.width - px(28.0f), headerY}, ccc3(145, 160, 184), "black", {1.0f, 0.5f}), 6);
+            // Title block.
+            auto const titleY = size.height - kLobbyHeader - 8.0f;
+            m_root->addChild(makeLabel(tr("placement-count", "CHOOSE PLACEMENT LENGTH"), fontScale(22.0f), {px(28.0f), titleY}, corum::ranked::ui::Text, "black", {0.0f, 0.5f}), 5);
+            auto* hint = makeLabel(tr("placement-count-lock", "SELECT 3 OR 5 STAGES. THIS CANNOT BE CHANGED AFTER START."), fontScale(13.0f), {px(28.0f), titleY - 13.0f},
+                corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f});
+            corum::ranked::ui::fitMenuLabelWidth(hint, size.width - px(56.0f), fontScale(13.0f), 0.1f); m_root->addChild(hint, 5);
+            // Two option panels.
+            auto const top = titleY - 22.0f - px(20.0f), bottom = px(108.0f);
+            auto const gap = px(20.0f), panelW = (size.width - px(56.0f) - gap) / 2.0f;
+            for (int option = 0; option < 2; ++option) {
+                auto const count = option == 0 ? 3 : 5;
+                auto const chosen = stages == count;
+                auto const x0 = px(28.0f) + static_cast<float>(option) * (panelW + gap);
+                auto* face = CCNode::create(); face->setContentSize({panelW, top - bottom});
+                auto* fill = CCLayerColor::create({23, 25, 34, 255}, panelW, top - bottom); face->addChild(fill, 0);
+                if (chosen) {
+                    auto const lime = corum::ranked::ui::Accent;
+                    for (auto const& edge : std::array<CCRect, 4>{CCRect{0, 0, panelW, 1.5f}, CCRect{0, top - bottom - 1.5f, panelW, 1.5f}, CCRect{0, 0, 1.5f, top - bottom}, CCRect{panelW - 1.5f, 0, 1.5f, top - bottom}}) {
+                        auto* line = CCLayerColor::create({lime.r, lime.g, lime.b, 255}, edge.size.width, edge.size.height); line->setPosition(edge.origin); face->addChild(line, 3);
+                    }
+                }
+                auto const pad = px(24.0f);
+                float y = top - bottom - px(22.0f) - 14.0f;
+                auto* big = makeLabel(fmt::format(fmt::runtime(tr("placement-times", "{} STAGES")), count), fontScale(56.0f), {pad, y}, chosen ? corum::ranked::ui::Accent : corum::ranked::ui::Text, "black", {0.0f, 0.5f});
+                corum::ranked::ui::leanLabel(big); face->addChild(big, 4);
+                auto const tag = option == 0 ? tr("placement-quick", "QUICK") : chosen ? tr("placement-recommended-selected", "RECOMMENDED · SELECTED") : tr("placement-recommended", "RECOMMENDED");
+                auto* tagLabel = makeLabel(tag, fontScale(13.0f), {}, corum::ranked::ui::AccentInk, "black");
+                addChip(face, tag, {panelW - pad - tagLabel->getScaledContentSize().width - 10.0f, y}, option == 0 ? kRed : chosen ? corum::ranked::ui::AccentFill : ccc3(32, 35, 46),
+                    option == 0 || chosen ? corum::ranked::ui::AccentInk : corum::ranked::ui::TextMuted);
+                y -= 26.0f;
+                auto* stageChip = makeLabel(fmt::format("{} STAGE", count), fontScale(15.0f), {}, corum::ranked::ui::TextMuted, "black");
+                addChip(face, fmt::format("{} STAGE", count), {pad, y}, ccc3(32, 35, 46), corum::ranked::ui::TextMuted, 15.0f);
+                addChip(face, fmt::format(fmt::runtime(tr("placement-map-count", "{} MAPS")), count * 2), {pad + stageChip->getScaledContentSize().width + 20.0f, y}, ccc3(32, 35, 46), corum::ranked::ui::TextMuted, 15.0f);
+                y -= 30.0f;
+                // Description panel (red rule for the 3-stage warning).
+                auto const descH = 34.0f;
+                auto* desc = CCLayerColor::create({32, 35, 46, 255}, panelW - pad * 2.0f, descH); desc->setPosition({pad, y - descH / 2.0f}); face->addChild(desc, 2);
+                if (option == 0) { auto* rule = CCLayerColor::create({kRed.r, kRed.g, kRed.b, 255}, panelW - pad * 2.0f, 1.0f); rule->setPosition({pad, y + descH / 2.0f - 1.0f}); face->addChild(rule, 3); }
+                auto* line1 = makeLabel(option == 0 ? tr("placement-three-detail", "3 STAGES LOWERS YOUR MAX PLACEMENT.") : tr("placement-five-detail", "STAGE GRADES ADD UP TO YOUR PLACEMENT TIER."),
+                    fontScale(15.0f), {pad + 7.0f, y + 7.0f}, corum::ranked::ui::Text, "extrabold", {0.0f, 0.5f});
+                corum::ranked::ui::fitMenuLabelWidth(line1, panelW - pad * 2.0f - 14.0f, fontScale(15.0f), 0.1f); face->addChild(line1, 4);
+                auto* line2 = makeLabel(fmt::format(fmt::runtime(tr("placement-max-tier", "MAX PLACEMENT: {}")), option == 0 ? "AQUA" : "BRONZE"), fontScale(15.0f), {pad + 7.0f, y - 8.0f},
+                    option == 0 ? kRed : tierColor("BRONZE"), "extrabold", {0.0f, 0.5f});
+                face->addChild(line2, 4);
+                // Range: the tiers this length can place into.
+                auto const rangeY = px(22.0f) + 8.0f;
+                auto* rangeCap = makeLabel(tr("placement-range", "PLACEMENT RANGE"), fontScale(13.0f), {pad, rangeY}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f});
+                face->addChild(rangeCap, 4);
+                float chipX = pad + rangeCap->getScaledContentSize().width + 8.0f;
+                for (auto const* tier : option == 0 ? std::vector<char const*>{"RED", "AQUA"} : std::vector<char const*>{"RED", "AQUA", "BRONZE"}) {
+                    addChip(face, tier, {chipX, rangeY}, tierColor(tier), corum::ranked::ui::AccentInk);
+                    chipX += makeLabel(tier, fontScale(13.0f), {}, corum::ranked::ui::Text, "black")->getScaledContentSize().width + 18.0f;
+                }
+                auto* item = CCMenuItemSpriteExtra::create(face, this, menu_selector(CorumRankedLayer::onPlacementStageCount));
+                item->setTag(count); item->setPosition({x0 + panelW / 2.0f, bottom + (top - bottom) / 2.0f}); m_menu->addChild(item);
+                item->setID(fmt::format("{}/placement-length-{}", GEODE_MOD_ID, count));
+            }
+            // Footer: SKIP PLACEMENT, the summary, NEXT.
+            auto const footY = px(54.0f);
+            boardButton(tr("skip-placement", "SKIP PLACEMENT"), {px(210.0f), px(42.0f)}, {px(28.0f) + px(105.0f), footY}, menu_selector(CorumRankedLayer::onOpenPlacementSkip), 16.0f, false,
+                "ranked-placement-skip"_spr);
+            auto* summary = makeLabel(stages == 3 ? tr("placement-three-stage-warning", "WARNING: 3 STAGES LOWERS YOUR MAX PLACEMENT. MAX: AQUA. CANNOT CHANGE AFTER START.")
+                    : stages == 5 ? tr("placement-five-stage-info", "5 STAGES · 10 MAPS · MAX PLACEMENT BRONZE · CANNOT CHANGE AFTER START.") : tr("select-placement-count-first", "SELECT 3 OR 5 STAGES FIRST."),
+                fontScale(13.0f), {size.width / 2.0f, footY}, stages == 3 ? kRed : corum::ranked::ui::TextMuted, "semibold");
+            corum::ranked::ui::fitMenuLabelWidth(summary, size.width - px(56.0f) - px(210.0f) - px(240.0f) - 20.0f, fontScale(13.0f), 0.09f); m_root->addChild(summary, 5);
+            boardButton(tr("next", "NEXT"), {px(240.0f), px(76.0f)}, {size.width - px(28.0f) - px(120.0f), footY}, menu_selector(CorumRankedLayer::onPlacementNextStep), 30.0f, true,
+                "ranked-placement-next"_spr, stages == 3 || stages == 5);
         } else {
-            countHint = tr(
-                "placement-count-lock",
-                "SELECT 3 OR 5 STAGES. THIS CANNOT BE CHANGED AFTER START."
-            );
-        }
-        auto* countHintLabel = makeLabel(
-            countHint,
-            0.20f,
-            {size.width / 2.0f, size.height - 123.0f},
-            countHintColor,
-            "semibold"
-        );
-        corum::ranked::ui::fitMenuLabelWidth(countHintLabel, size.width - 74.0f, 0.20f, 0.14f);
-        m_root->addChild(countHintLabel, 5);
-
-        auto* panel = makeNeonPanel(
-            {std::min(430.0f, size.width - 60.0f), 132.0f},
-            {size.width / 2.0f, size.height / 2.0f - 36.0f},
-            kSteel,
-            kDeepPanel,
-            244
-        );
-        m_root->addChild(panel, 1);
-        auto* poolTitle = makeLabel(
-            tr("select-starting-pool", "SELECT YOUR STARTING POOL"),
-            0.22f,
-            {size.width / 2.0f, size.height / 2.0f + 25.0f},
-            kAccent,
-            "black"
-        );
-        m_root->addChild(poolTitle, 5);
-
-        constexpr float spacing = 124.0f;
-        for (int pool = 1; pool <= 6; ++pool) {
-            auto const row = (pool - 1) / 3;
-            auto const column = (pool - 1) % 3;
-            auto const x = size.width / 2.0f + (static_cast<float>(column) - 1.0f) * spacing;
-            auto const y = size.height / 2.0f - 2.0f - static_cast<float>(row) * 48.0f;
-            auto* button = addButton(
-                fmt::format("POOL {}", pool),
-                {x, y},
-                menu_selector(CorumRankedLayer::onPlacementPoolSelect),
-                false,
-                0.50f,
-                m_selectedPlacementPool != pool
-            );
-            button->setTag(pool);
-
-            auto const reference = std::find_if(
-                view.placement.referenceMaps.begin(),
-                view.placement.referenceMaps.end(),
-                [pool](RankedMapView const& map) { return map.pool == pool; }
-            );
-            auto const referenceText = reference == view.placement.referenceMaps.end()
-                ? tr("reference-loading", "REFERENCE MAP LOADING...")
-                : reference->title;
-            auto* referenceLabel = makeLabel(
-                referenceText,
-                0.14f,
-                {x, y - 16.0f},
-                corum::ranked::ui::TextMuted,
-                "semibold"
-            );
-            corum::ranked::ui::fitMenuLabelWidth(referenceLabel, 112.0f, 0.14f, 0.10f);
-            m_root->addChild(referenceLabel, 5);
-            if (reference != view.placement.referenceMaps.end()) {
-                addMapDifficulty(*reference,{x,y-28},107,14);
-                auto const lengthMetadata=corum::ranked::ui::displayedMapMetadata(reference->levelId,reference->metadata);
-                auto* length=makeLabel(corum::ranked::mapLengthText(lengthMetadata),0.14f,{x,y-40},corum::ranked::ui::TextMuted,"semibold");
-                m_root->addChild(length,5);
+            // Step 2: back returns to the length step.
+            auto* backFace = corum::ranked::ui::surface({28, 28}, {}, kSteel, kDeepPanel2, 250, false);
+            auto* mark = corum::ranked::ui::chevron(11.0f, 2.5f, corum::ranked::ui::Text); mark->setScaleX(-1.0f); mark->setPosition({13.0f, 14.0f}); backFace->addChild(mark, 5);
+            auto* back = CCMenuItemSpriteExtra::create(backFace, this, menu_selector(CorumRankedLayer::onPlacementStepBack));
+            back->setPosition({24.0f, size.height - 24.0f}); m_menu->addChild(back);
+            auto* brand = makeLabel(tr("first-stage-pool", "FIRST STAGE POOL"), fontScale(30.0f), {brandX, headerY}, corum::ranked::ui::Text, "black", {0.0f, 0.5f});
+            corum::ranked::ui::leanLabel(brand); brand->setID("ranked-screen-title"_spr); m_root->addChild(brand, 6);
+            addChip(m_root, fmt::format(fmt::runtime(tr("placement-stage-chip", "{} STAGES · STAGE 1 / {}")), stages, stages),
+                {brandX + brand->getScaledContentSize().width + 12.0f, headerY}, ccc3(32, 35, 46), corum::ranked::ui::TextMuted, 15.0f);
+            // Left: pool grid (3 x 2), note and START.
+            auto const leftW = px(470.0f), top = size.height - kLobbyHeader, bottom = px(22.0f);
+            m_root->addChild(makeLabel(tr("choose-start-pool", "CHOOSE YOUR STARTING POOL."), fontScale(13.0f), {px(28.0f), top - 6.0f}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f}), 5);
+            auto const cellGap = px(10.0f), cellW = (leftW - cellGap * 2.0f) / 3.0f, cellH = px(74.0f);
+            static constexpr std::array<char const*, 6> ratings{"1~4", "4~7", "7~10", "10~13", "13~16", "16+"};
+            for (int pool = 1; pool <= 6; ++pool) {
+                auto const col = (pool - 1) % 3, row = (pool - 1) / 3;
+                auto const chosen = m_selectedPlacementPool == pool;
+                auto* face = corum::ranked::ui::slab({cellW, cellH}, {}, chosen ? corum::ranked::ui::AccentFill : ccc3(58, 63, 78), !chosen, corum::ranked::ui::Ink);
+                face->addChild(makeLabel(fmt::format("POOL {}", pool), fontScale(20.0f), {cellW / 2.0f, cellH / 2.0f + 6.0f}, chosen ? corum::ranked::ui::AccentInk : corum::ranked::ui::Text, "black"), 5);
+                face->addChild(makeLabel(fmt::format(fmt::runtime(tr("pool-rating", "RATING {}")), ratings[static_cast<std::size_t>(pool - 1)]), fontScale(13.0f),
+                    {cellW / 2.0f, cellH / 2.0f - 8.0f}, chosen ? corum::ranked::ui::AccentInk : corum::ranked::ui::TextMuted, "extrabold"), 5);
+                auto* item = CCMenuItemSpriteExtra::create(face, this, menu_selector(CorumRankedLayer::onPlacementPoolSelect));
+                item->setTag(pool); item->setPosition({px(28.0f) + cellW / 2.0f + static_cast<float>(col) * (cellW + cellGap), top - 14.0f - cellH / 2.0f - static_cast<float>(row) * (cellH + cellGap)});
+                m_menu->addChild(item);
+            }
+            auto const noteTop = top - 14.0f - cellH * 2.0f - cellGap - px(14.0f);
+            auto* note = CCLayerColor::create({23, 25, 34, 255}, leftW, 34.0f); note->setPosition({px(28.0f), noteTop - 34.0f}); m_root->addChild(note, 1);
+            m_root->addChild(makeLabel(tr("pool-note-1", "THIS ONLY SETS STAGE 1'S STARTING POOL."), fontScale(15.0f), {px(28.0f) + 8.0f, noteTop - 10.0f}, corum::ranked::ui::Text, "extrabold", {0.0f, 0.5f}), 5);
+            m_root->addChild(makeLabel(tr("pool-note-2", "YOUR FINAL RANK COMES FROM THE WHOLE RUN."), fontScale(15.0f), {px(28.0f) + 8.0f, noteTop - 24.0f}, corum::ranked::ui::TextMuted, "extrabold", {0.0f, 0.5f}), 5);
+            auto const pool = m_selectedPlacementPool;
+            boardButton(pool ? fmt::format(fmt::runtime(tr("start-with-pool", "START WITH POOL {}")), pool) : tr("start-placement", "START PLACEMENT"),
+                {leftW, px(76.0f)}, {px(28.0f) + leftW / 2.0f, bottom + px(38.0f)}, menu_selector(CorumRankedLayer::onStartPlacement), 30.0f, true, "ranked-placement-start"_spr,
+                pool >= 1 && pool <= 6);
+            // Right: the chosen pool's maps.
+            auto const rx = px(28.0f) + leftW + px(20.0f), rw = size.width - px(28.0f) - rx;
+            auto* panel = CCLayerColor::create({23, 25, 34, 255}, rw, top - bottom); panel->setPosition({rx, bottom}); m_root->addChild(panel, 1);
+            m_root->addChild(makeLabel(pool ? fmt::format(fmt::runtime(tr("pool-maps", "POOL {} MAPS")), pool) : tr("choose-start-pool", "CHOOSE YOUR STARTING POOL."), fontScale(14.0f),
+                {rx + px(18.0f), top - px(16.0f) - 6.0f}, corum::ranked::ui::TextMuted, "extrabold", {0.0f, 0.5f}), 5);
+            auto* drawNote = makeLabel(tr("pool-maps-note", "2 MAPS ARE DRAWN AT RANDOM EACH STAGE"), fontScale(13.0f), {rx + rw - px(18.0f), top - px(16.0f) - 6.0f}, corum::ranked::ui::TextMuted, "semibold", {1.0f, 0.5f});
+            corum::ranked::ui::fitMenuLabelWidth(drawNote, rw * 0.55f, fontScale(13.0f), 0.09f); m_root->addChild(drawNote, 5);
+            float rowY = top - px(16.0f) - 26.0f;
+            for (auto const& map : view.placement.referenceMaps) {
+                if (map.pool != pool || rowY < bottom + 14.0f) continue;
+                auto* rowFill = CCLayerColor::create({32, 35, 46, 255}, rw - px(36.0f), 22.0f); rowFill->setPosition({rx + px(18.0f), rowY - 11.0f}); m_root->addChild(rowFill, 2);
+                addMapDifficulty(map, {rx + px(18.0f) + 26.0f, rowY}, 48.0f, 14.0f);
+                auto* title = makeLabel(map.title, fontScale(15.0f), {rx + px(18.0f) + 56.0f, rowY}, corum::ranked::ui::Text, "extrabold", {0.0f, 0.5f});
+                corum::ranked::ui::fitMenuLabelWidth(title, rw - px(36.0f) - 100.0f, fontScale(15.0f), 0.1f); m_root->addChild(title, 5);
+                auto const lengthMetadata = corum::ranked::ui::displayedMapMetadata(map.levelId, map.metadata);
+                m_root->addChild(makeLabel(corum::ranked::mapLengthText(lengthMetadata), fontScale(13.0f), {rx + rw - px(18.0f) - 4.0f, rowY}, corum::ranked::ui::TextMuted, "semibold", {1.0f, 0.5f}), 5);
+                rowY -= 25.0f;
             }
         }
-
-        addButton(
-            tr("start-placement", "START PLACEMENT"),
-            {size.width / 2.0f + 78.0f, 23.0f},
-            menu_selector(CorumRankedLayer::onStartPlacement),
-            false,
-            0.53f
-        );
-        addButton(
-            tr("skip-placement", "SKIP PLACEMENT"),
-            {size.width / 2.0f - 78.0f, 23.0f},
-            menu_selector(CorumRankedLayer::onOpenPlacementSkip),
-            true,
-            0.50f
-        );
-
         auto detail = !m_localMessage.empty() ? m_localMessage : (view.error.empty() ? view.status : view.error);
         if (!detail.empty() && (!view.error.empty() || !m_localMessage.empty())) {
-            auto* status = makeLabel(
-                shorten(detail, 96),
-                0.20f,
-                {size.width / 2.0f, 7.0f},
-                view.error.empty() ? kGold : kRed,
-                "semibold"
-            );
-            corum::ranked::ui::fitMenuLabelWidth(status, size.width - 90.0f, 0.20f, 0.14f);
-            m_mainStatusLabel = status;
-            m_root->addChild(status, 5);
+            auto* status = makeLabel(shorten(detail, 96), fontScale(13.0f), {size.width / 2.0f, 7.0f}, view.error.empty() ? kGold : kRed, "semibold");
+            corum::ranked::ui::fitMenuLabelWidth(status, size.width - 90.0f, fontScale(13.0f), 0.1f);
+            m_mainStatusLabel = status; m_root->addChild(status, 5);
         }
     }
+
+    void onPlacementNextStep(CCObject*) {
+        if (m_selectedPlacementStageCount != 3 && m_selectedPlacementStageCount != 5) {
+            m_localMessage = tr("select-placement-count-first", "SELECT 3 OR 5 STAGES FIRST.");
+            return;
+        }
+        m_localMessage.clear(); m_placementPoolStep = true;
+    }
+
+    void onPlacementStepBack(CCObject*) { m_localMessage.clear(); m_placementPoolStep = false; }
 
     void renderPlacementSkipConfirm() {
         auto const size = CCDirector::sharedDirector()->getWinSize();
@@ -3827,79 +3823,125 @@ class CorumRankedLayer final : public CCLayerColor {
         syncLobbyInput();refreshLobbyHover();
     }
 
+    // P3 (placement map), from the board: STAGE n with MAP / POOL, the stage
+    // strip and the time panel; the map panel (thumbnail, title, difficulty,
+    // PLAY AGAIN); the current grade and score; and the attempts table.
     void renderPlacementMap(RuntimeView const& view) {
         auto const size = CCDirector::sharedDirector()->getWinSize();
         auto const& placement = view.placement;
         auto const& match = view.match;
-        if (match.state == "MAP_PREPARE") {
-            m_placementPrepareTimerLabel = makeLabel("", 0.27f, {size.width - 16, size.height - 16}, kGold, "extrabold");
-            m_placementPrepareTimerLabel->setAnchorPoint({1, 1});
-            m_placementPrepareTimerLabel->setID("ranked-placement-prepare-timer"_spr);
-            m_root->addChild(m_placementPrepareTimerLabel, 20);
-        }
-        auto const pool = !placement.stagePools.empty()
-            ? placement.stagePools.back()
-            : placement.startingPool;
-        addScreenHeader(
-            fmt::format("STAGE {} · MAP {}", placement.currentStageIndex, placement.currentMapIndex),
-            fmt::format("POOL {} · {}", pool, tr("solo-placement", "SOLO PLACEMENT")),
-            corum::ranked::ui::Text,
-            kAccent
-        );
-
-        auto* panel = makeNeonPanel(
-            {std::min(388.0f, size.width - 74.0f), 174.0f},
-            {size.width / 2.0f, size.height / 2.0f - 5.0f},
-            match.state == "MAP_SETTLING" ? kGold : kSteel,
-            kDeepPanel,
-            244
-        );
-        m_root->addChild(panel, 1);
-
-        if (match.currentMap) {
-            corum::ranked::ui::addRankedMapHeading(m_root,match.currentMap->levelId,match.currentMap->title,match.currentMap->metadata,
-                {size.width/2,size.height/2+58},difficultyColor(match.currentMap->difficulty));
-        }
-
-        auto* grade = corum::ranked::ui::PlacementGradeBadge::create(48.0f);
-        if (grade) {
-            grade->setGrade(placement.currentMapGrade, false);
-            grade->setPosition({size.width / 2.0f - 76.0f, size.height / 2.0f - 15.0f});
-            m_root->addChild(grade, 5);
-        }
-        auto* score = makeLabel(
-            fmt::format("{:.1f} / 500", placement.provisionalMapScore),
-            0.49f,
-            {size.width / 2.0f + 70.0f, size.height / 2.0f - 4.0f},
-            kGold,
-            "black"
-        );
-        m_root->addChild(score, 5);
-        addClearChecks(placement.currentMapClears, {size.width / 2.0f + 70.0f, size.height / 2.0f - 34.0f});
-
-        if (match.state == "MAP_PREPARE") {
-            addPreparationStatusRows(
-                {size.width / 2.0f - 80.0f, size.height / 2.0f - 63.0f},
-                {size.width / 2.0f + 80.0f, size.height / 2.0f - 63.0f},
-                144.0f
-            );
-            m_prepareLoadPercentLabel = makeLabel("0%", 0.18f,
-                {size.width / 2.0f, size.height / 2.0f - 82.0f}, kAccent, "black");
-            m_root->addChild(m_prepareLoadPercentLabel, 5);
-            addRoundOptions(59.0f);
-        }
+        auto const headerY = size.height - kLobbyHeader / 2.0f;
+        auto const pool = !placement.stagePools.empty() ? placement.stagePools.back() : placement.startingPool;
+        auto* brand = makeLabel(fmt::format("STAGE {}", placement.currentStageIndex), fontScale(30.0f), {px(28.0f), headerY}, corum::ranked::ui::Text, "black", {0.0f, 0.5f});
+        corum::ranked::ui::leanLabel(brand); brand->setID("ranked-screen-title"_spr); m_root->addChild(brand, 6);
+        auto const chipText = fmt::format("MAP {} / {} · POOL {}", placement.currentMapIndex, placement.mapsPerStage, pool);
+        auto const chipX = px(28.0f) + brand->getScaledContentSize().width + 12.0f;
+        addChip(m_root, chipText, {chipX, headerY}, ccc3(32, 35, 46), corum::ranked::ui::TextMuted, 15.0f);
         std::string stateText = preparationStageText();
         if (match.state == "MAP_PLAYING") stateText = tr("placement-map-live", "MAP LIVE · SCORE + GRADE UPDATE IN REAL TIME");
         if (match.state == "MAP_SETTLING") stateText = tr("final-attempt-progress", "FINAL ATTEMPT IN PROGRESS");
-        auto* state = makeLabel(
-            stateText,
-            0.25f,
-            {size.width / 2.0f, 34.0f},
-            match.state == "MAP_SETTLING" ? kGold : kAccent,
-            "semibold"
-        );
-        corum::ranked::ui::fitMenuLabelWidth(state, size.width - 90.0f, 0.25f, 0.16f);
-        m_root->addChild(state, 5);
+        auto const stateX = chipX + makeLabel(chipText, fontScale(15.0f), {}, corum::ranked::ui::Text, "black")->getScaledContentSize().width + px(24.0f) + 10.0f;
+        // Right: S1..Sn strip and the time panel.
+        constexpr float panelW = 74.0f, panelH = 30.0f;
+        auto const panelX = size.width - px(28.0f) - panelW / 2.0f;
+        auto* timePanel = CCLayerColor::create({23, 25, 34, 255}, panelW, panelH); timePanel->setPosition({panelX - panelW / 2.0f, headerY - panelH / 2.0f}); m_root->addChild(timePanel, 3);
+        auto* rule = CCLayerColor::create({corum::ranked::ui::Accent.r, corum::ranked::ui::Accent.g, corum::ranked::ui::Accent.b, 255}, panelW, 1.0f);
+        rule->setPosition({panelX - panelW / 2.0f, headerY + panelH / 2.0f - 1.0f}); m_root->addChild(rule, 4);
+        m_root->addChild(makeLabel(tr("time-left", "TIME LEFT"), fontScale(13.0f), {panelX, headerY + 8.0f}, corum::ranked::ui::TextMuted, "semibold"), 5);
+        if (match.state == "MAP_PREPARE") {
+            m_placementPrepareTimerLabel = makeLabel("", fontScale(15.0f), {panelX, headerY - 5.0f}, kGold, "extrabold");
+            m_placementPrepareTimerLabel->setID("ranked-placement-prepare-timer"_spr);
+            m_root->addChild(m_placementPrepareTimerLabel, 20);
+        } else {
+            m_root->addChild(makeLabel(match.state == "MAP_SETTLING" ? std::string("LAST") : std::string("LIVE"), fontScale(24.0f), {panelX, headerY - 5.0f},
+                match.state == "MAP_SETTLING" ? kGold : corum::ranked::ui::Accent, "black"), 5);
+        }
+        float stripX = panelX - panelW / 2.0f - 10.0f;
+        for (int stage = placement.totalStages; stage >= 1; --stage) {
+            auto const done = stage < placement.currentStageIndex || static_cast<int>(placement.stageResults.size()) >= stage;
+            auto const current = stage == placement.currentStageIndex;
+            auto const text = fmt::format("S{}", stage);
+            auto const w = makeLabel(text, fontScale(13.0f), {}, corum::ranked::ui::Text, "black")->getScaledContentSize().width + 10.0f;
+            stripX -= w;
+            addChip(m_root, text, {stripX, headerY}, done || current ? corum::ranked::ui::AccentFill : ccc3(32, 35, 46),
+                done || current ? corum::ranked::ui::AccentInk : corum::ranked::ui::TextMuted);
+            stripX -= 3.0f;
+        }
+        auto* state = makeLabel(stateText, fontScale(13.0f), {stateX, headerY}, match.state == "MAP_SETTLING" ? kGold : corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f});
+        corum::ranked::ui::fitMenuLabelWidth(state, std::max(40.0f, stripX - stateX - 8.0f), fontScale(13.0f), 0.09f); m_root->addChild(state, 5);
+
+        // Left: the map panel (380 px).
+        auto const top = size.height - kLobbyHeader - px(4.0f), bottom = px(22.0f);
+        auto const mapW = px(380.0f), x0 = px(28.0f);
+        auto* mapPanel = CCLayerColor::create({23, 25, 34, 255}, mapW, top - bottom); mapPanel->setPosition({x0, bottom}); m_root->addChild(mapPanel, 1);
+        auto const thumbH = px(180.0f);
+        auto* thumbBack = CCLayerColor::create({32, 35, 46, 255}, mapW, thumbH); thumbBack->setPosition({x0, top - thumbH}); m_root->addChild(thumbBack, 2);
+        addSoloThumbnail(m_root, {x0 + mapW / 2.0f, top - thumbH / 2.0f}, {mapW, thumbH}, match);
+        if (match.currentMap) {
+            auto const& map = *match.currentMap;
+            auto* title = makeLabel(map.title, fontScale(34.0f), {x0 + px(18.0f), top - thumbH - px(16.0f) - 8.0f}, corum::ranked::ui::Text, "black", {0.0f, 0.5f});
+            corum::ranked::ui::fitMenuLabelWidth(title, mapW - px(36.0f), fontScale(34.0f), 0.2f); m_root->addChild(title, 5);
+            addMapDifficulty(map, {x0 + px(18.0f) + 40.0f, top - thumbH - px(16.0f) - 28.0f}, 80.0f, 16.0f);
+            if (!map.creator.empty()) {
+                auto* by = makeLabel("by " + map.creator, fontScale(13.0f), {x0 + px(18.0f) + 86.0f, top - thumbH - px(16.0f) - 28.0f}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f});
+                corum::ranked::ui::fitMenuLabelWidth(by, mapW - px(36.0f) - 86.0f, fontScale(13.0f), 0.09f); m_root->addChild(by, 5);
+            }
+        }
+        if (match.state != "MAP_PREPARE")
+            boardButton(tr("play-again", "PLAY AGAIN"), {mapW - px(36.0f), px(42.0f)}, {x0 + mapW / 2.0f, bottom + px(16.0f) + px(21.0f)},
+                menu_selector(CorumRankedLayer::onSoloPlayAgain), 16.0f, true, "ranked-placement-play-again"_spr);
+
+        // Right: grade and score panel, then the attempts table (or, while
+        // preparing, the download rows and options).
+        auto const rx = x0 + mapW + px(20.0f), rw = size.width - px(28.0f) - rx;
+        auto const gradeH = 62.0f;
+        auto* gradePanel = CCLayerColor::create({23, 25, 34, 255}, rw, gradeH); gradePanel->setPosition({rx, top - gradeH}); m_root->addChild(gradePanel, 1);
+        if (auto* grade = corum::ranked::ui::PlacementGradeBadge::create(44.0f)) {
+            grade->setGrade(placement.currentMapGrade, false);
+            grade->setPosition({rx + px(22.0f) + 22.0f, top - gradeH / 2.0f}); m_root->addChild(grade, 5);
+        }
+        auto const gx = rx + px(22.0f) + 44.0f + px(24.0f);
+        m_root->addChild(makeLabel(tr("current-map-grade", "CURRENT MAP GRADE"), fontScale(14.0f), {gx, top - 14.0f}, corum::ranked::ui::TextMuted, "extrabold", {0.0f, 0.5f}), 5);
+        m_root->addChild(makeLabel(placement.currentMapGrade, fontScale(56.0f), {gx, top - 33.0f}, corum::ranked::ui::Text, "black", {0.0f, 0.5f}), 5);
+        m_root->addChild(makeLabel(tr("grade-updates-after-attempt", "UPDATES AFTER EACH ATTEMPT"), fontScale(13.0f), {gx, top - 51.0f}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f}), 5);
+        auto const sx = rx + rw - px(22.0f);
+        double best = 0.0;
+        for (auto const& attempt : placement.currentMapTopAttempts) best = std::max(best, attempt.progressPercent);
+        m_root->addChild(makeLabel(tr("score", "SCORE"), fontScale(14.0f), {sx, top - 14.0f}, corum::ranked::ui::TextMuted, "extrabold", {1.0f, 0.5f}), 5);
+        m_root->addChild(makeLabel(fmt::format("{:.1f}", placement.provisionalMapScore), fontScale(56.0f), {sx, top - 33.0f}, corum::ranked::ui::Accent, "black", {1.0f, 0.5f}), 5);
+        m_root->addChild(makeLabel(fmt::format(fmt::runtime(tr("best-progress-format", "BEST {}%")), static_cast<int>(std::round(best))), fontScale(13.0f), {sx, top - 51.0f},
+            corum::ranked::ui::TextMuted, "semibold", {1.0f, 0.5f}), 5);
+        auto const tableTop = top - gradeH - px(14.0f);
+        if (match.state == "MAP_PREPARE") {
+            addPreparationStatusRows({rx + rw * 0.25f, tableTop - 20.0f}, {rx + rw * 0.75f, tableTop - 20.0f}, rw * 0.42f);
+            m_prepareLoadPercentLabel = makeLabel("0%", fontScale(15.0f), {rx + rw / 2.0f, tableTop - 44.0f}, corum::ranked::ui::Accent, "black");
+            m_root->addChild(m_prepareLoadPercentLabel, 5);
+            addRoundOptions(bottom + 14.0f, rx + rw / 2.0f - 6.0f);
+        } else {
+            auto const colAttempt = rx + 8.0f, colBar = rx + px(70.0f) + 8.0f, colPct = rx + rw - px(90.0f) - 8.0f, colScore = rx + rw - 8.0f;
+            auto const head = [&](std::string const& text, float x, CCPoint anchor) {
+                m_root->addChild(makeLabel(text, fontScale(13.0f), {x, tableTop - 6.0f}, corum::ranked::ui::TextMuted, "extrabold", anchor), 5);
+            };
+            head(tr("attempt", "ATTEMPT"), colAttempt, {0.0f, 0.5f}); head(tr("progress", "PROGRESS"), colBar, {0.0f, 0.5f});
+            head("%", colPct, {1.0f, 0.5f}); head(tr("score", "SCORE"), colScore, {1.0f, 0.5f});
+            float rowY = tableTop - 6.0f - px(52.0f) / 2.0f - 6.0f;
+            std::size_t bestIndex = 0;
+            for (std::size_t i = 0; i < placement.currentMapTopAttempts.size(); ++i)
+                if (placement.currentMapTopAttempts[i].awardedScore > placement.currentMapTopAttempts[bestIndex].awardedScore) bestIndex = i;
+            for (std::size_t i = 0; i < placement.currentMapTopAttempts.size() && rowY > bottom + 10.0f; ++i) {
+                auto const& attempt = placement.currentMapTopAttempts[i];
+                auto const mine = i == bestIndex;
+                auto* row = CCLayerColor::create(mine ? ccc4(32, 38, 42, 255) : ccc4(23, 25, 34, 255), rw, px(52.0f)); row->setPosition({rx, rowY - px(26.0f)}); m_root->addChild(row, 1);
+                if (mine) { auto* edge = CCLayerColor::create({corum::ranked::ui::Accent.r, corum::ranked::ui::Accent.g, corum::ranked::ui::Accent.b, 255}, 2.0f, px(52.0f)); edge->setPosition({rx, rowY - px(26.0f)}); m_root->addChild(edge, 2); }
+                m_root->addChild(makeLabel(fmt::format("#{}", i + 1), fontScale(15.0f), {colAttempt + 4.0f, rowY}, mine ? corum::ranked::ui::Accent : corum::ranked::ui::TextMuted, "black", {0.0f, 0.5f}), 5);
+                addSkewBar(m_root, {colBar, rowY}, colPct - px(90.0f) - colBar, px(6.0f), static_cast<float>(attempt.progressPercent / 100.0),
+                    mine ? corum::ranked::ui::Accent : tierColor("SILVER"));
+                m_root->addChild(makeLabel(fmt::format("{}%", static_cast<int>(std::round(attempt.progressPercent))), fontScale(15.0f), {colPct, rowY}, corum::ranked::ui::Text, mine ? "black" : "semibold", {1.0f, 0.5f}), 5);
+                m_root->addChild(makeLabel(fmt::format("{:.1f}", attempt.awardedScore), fontScale(15.0f), {colScore, rowY}, mine ? corum::ranked::ui::Accent : corum::ranked::ui::TextMuted, "black", {1.0f, 0.5f}), 5);
+                rowY -= px(52.0f) + px(6.0f);
+            }
+            addClearChecks(placement.currentMapClears, {colScore - 4.0f, bottom + 8.0f}, true);
+        }
     }
 
     void renderPlacementMapResult(RuntimeView const& view) {
@@ -3980,12 +4022,28 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const map1Score = result.mapScores.size() > 0 ? result.mapScores[0] : 0.0;
         auto const map2Score = result.mapScores.size() > 1 ? result.mapScores[1] : 0.0;
         auto const audioKey = fmt::format("{}:{}", view.placement.runId, result.stageIndex);
-        addScreenHeader(
-            fmt::format("STAGE {} {}", result.stageIndex, tr("result", "RESULT")),
-            fmt::format("POOL {}", result.pool),
-            kGold,
-            kAccent
-        );
+        // P4 header: STAGE n RESULT with its line, and the S1..Sn strip (grade
+        // of every finished stage).
+        {
+            auto const headerY = size.height - kLobbyHeader / 2.0f;
+            auto* brand = makeLabel(fmt::format("STAGE {} {}", result.stageIndex, tr("result", "RESULT")), fontScale(30.0f), {px(28.0f), headerY},
+                corum::ranked::ui::Text, "black", {0.0f, 0.5f});
+            corum::ranked::ui::leanLabel(brand); brand->setID("ranked-screen-title"_spr); m_root->addChild(brand, 6);
+            auto* line = makeLabel(tr("stage-complete-line", "STAGE COMPLETE. CHECK THE FINAL GRADE."), fontScale(13.0f),
+                {px(28.0f) + brand->getScaledContentSize().width + 12.0f, headerY}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f});
+            corum::ranked::ui::fitMenuLabelWidth(line, size.width * 0.38f, fontScale(13.0f), 0.09f); m_root->addChild(line, 6);
+            float stripX = size.width - px(28.0f);
+            for (int stage = view.placement.totalStages; stage >= 1; --stage) {
+                std::string text = fmt::format("S{}", stage);
+                bool done = false;
+                for (auto const& stageResult : view.placement.stageResults)
+                    if (stageResult.stageIndex == stage) { done = true; if (stage != result.stageIndex) text += " · " + stageResult.stageGrade; }
+                auto const w = makeLabel(text, fontScale(13.0f), {}, corum::ranked::ui::Text, "black")->getScaledContentSize().width + 10.0f;
+                stripX -= w;
+                addChip(m_root, text, {stripX, headerY}, done ? corum::ranked::ui::AccentFill : ccc3(32, 35, 46), done ? corum::ranked::ui::AccentInk : corum::ranked::ui::TextMuted);
+                stripX -= 3.0f;
+            }
+        }
 
         auto makeGradeCard = [&](std::string const& caption, std::string const& grade, double scoreValue, float x, bool final) {
             auto* group = CCNodeRGBA::create();
@@ -4108,7 +4166,12 @@ class CorumRankedLayer final : public CCLayerColor {
         ));
 
         auto const finalStage = result.stageIndex >= view.placement.totalStages;
-        addPlacementProgress(result.stageIndex, view.placement.totalStages, {center, 67.0f}, 18.0f, 0.27f);
+        // Footer: the pool rule on the left, NEXT STAGE (and PLAY LATER) on the right.
+        {
+            auto* rule = makeLabel(tr("stage-pool-rule", "A HIGHER STAGE GRADE STARTS THE NEXT STAGE IN A HARDER POOL"), fontScale(13.0f), {px(28.0f), 25.0f},
+                corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f});
+            corum::ranked::ui::fitMenuLabelWidth(rule, size.width - px(56.0f) - 240.0f, fontScale(13.0f), 0.09f); m_root->addChild(rule, 5);
+        }
         auto* movement = makeLabel(
             finalStage
                 ? (fmt::format(fmt::runtime(tr("placement-all-complete","ALL {} MAPS COMPLETE")),view.placement.totalStages * view.placement.mapsPerStage))
@@ -4121,7 +4184,7 @@ class CorumRankedLayer final : public CCLayerColor {
         m_root->addChild(movement, 5);
         auto* button = addButton(
             finalStage ? tr("final-placement", "FINAL PLACEMENT") : tr("next-stage", "NEXT STAGE"),
-            {center + (finalStage ? 0.0f : 72.0f), 23.0f},
+            {size.width - px(28.0f) - 62.0f, 25.0f},
             menu_selector(CorumRankedLayer::onContinuePlacement),
             false,
             0.54f
@@ -4135,7 +4198,7 @@ class CorumRankedLayer final : public CCLayerColor {
         if (!finalStage) {
             auto* later = addButton(
                 tr("play-later", "PLAY LATER"),
-                {center - 72.0f, 23.0f},
+                {size.width - px(28.0f) - 186.0f, 25.0f},
                 menu_selector(CorumRankedLayer::onPausePlacement),
                 false,
                 0.54f
@@ -4152,77 +4215,87 @@ class CorumRankedLayer final : public CCLayerColor {
     void renderPlacementFinal(RuntimeView const& view) {
         auto const size = CCDirector::sharedDirector()->getWinSize();
         auto const& finalResult = view.placement.finalResult;
-        addScreenHeader(
-            tr("placement-complete", "PLACEMENT COMPLETE"),
-            finalResult.skipped
-                ? tr("placement-skipped", "PLACEMENT SKIPPED")
-                : fmt::format("{} MAPS · {} STAGES", view.placement.totalStages * view.placement.mapsPerStage, view.placement.totalStages),
-            kGold,
-            kAccent
-        );
-        // P5: with stage results, the trophy, tier and LP move left and a
-        // STAGE / POOL / GRADE table fills the right half.
-        auto const& stages = view.placement.stageResults;
-        auto const table = !finalResult.skipped && !stages.empty();
-        auto const heroX = table ? size.width * 0.30f : size.width / 2.0f;
-        auto* badge = corum::ranked::ui::createAnimatedRankBadge(
-            finalResult.displayedTier,
-            {112.0f, 112.0f},
-            corum::ranked::ui::RankBadgeDisplay::Hero
-        );
-        if (badge) {
-            badge->setPosition({heroX, size.height / 2.0f + 28.0f});
-            m_root->addChild(badge, 5);
+        auto const finalTier = upper(finalResult.displayedTier);
+        auto const tone = tierColor(finalTier);
+        // P5 board, left: the slanted section with the tier band, the 300 px
+        // trophy, the PLACED chip, the 72 px tier name and the LP row.
+        constexpr float leftW = 260.0f;
+        addSlantedFill(m_root, 0.0f, leftW, 0.0f, size.height, px(64.0f), 0.0f, corum::ranked::ui::Surface);
+        auto* band = CCLayerColor::create({tone.r, tone.g, tone.b, 51}, px(230.0f), size.height);
+        band->setPosition({px(150.0f), 0.0f}); band->setSkewX(8.0f); band->setID("ranked-placement-final-band"_spr); m_root->addChild(band, 2);
+        auto const trophy = px(300.0f);
+        if (auto* badge = corum::ranked::ui::createAnimatedRankBadge(finalResult.displayedTier, {trophy * 0.82f, trophy * 0.82f},
+                corum::ranked::ui::RankBadgeDisplay::Hero)) {
+            badge->setPosition({px(80.0f) + trophy / 2.0f, size.height - px(30.0f) - trophy / 2.0f});
+            badge->setID("ranked-placement-final-trophy"_spr); m_root->addChild(badge, 4);
         }
-        auto* tier = makeLabel(
-            fmt::format("{} - {} LP", corum::ranked::rankTierDisplay(upper(finalResult.displayedTier)), finalResult.visibleRankedScore),
-            0.55f,
-            {heroX, size.height / 2.0f - 49.0f},
-            tierColor(finalResult.displayedTier),
-            "black"
-        );
-        corum::ranked::ui::fitMenuLabelWidth(tier, table ? size.width * 0.46f : size.width - 100.0f, 0.55f, 0.32f);
-        m_root->addChild(tier, 5);
-        auto* placed = makeLabel(tr("placed", "PLACED"), 0.38f, {heroX, size.height / 2.0f - 78.0f}, kGreen, "black");
-        corum::ranked::ui::leanLabel(placed);
-        m_root->addChild(placed, 5);
-        if (table) {
-            auto const tableW = std::min(230.0f, size.width * 0.44f), tableX = size.width * 0.75f;
-            auto const rows = static_cast<float>(stages.size());
-            auto const tableH = 26.0f + 22.0f * rows;
-            auto const top = size.height / 2.0f + tableH / 2.0f + 6.0f;
-            m_root->addChild(makeNeonPanel({tableW, tableH}, {tableX, top - tableH / 2.0f}, kSteel, kDeepPanel2, 236), 1);
-            auto const left = tableX - tableW / 2.0f + 12.0f, right = tableX + tableW / 2.0f - 14.0f;
+        auto const textX = px(32.0f);
+        auto* lp = makeLabel(fmt::format("{}", finalResult.visibleRankedScore), fontScale(34.0f), {textX, px(28.0f) + 9.0f},
+            corum::ranked::ui::Text, "black", {0.0f, 0.5f});
+        m_root->addChild(lp, 6);
+        m_root->addChild(makeLabel(tr("stat-lp", "LP"), fontScale(14.0f), {textX + lp->getScaledContentSize().width + 4.0f, px(28.0f) + 6.0f},
+            corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f}), 6);
+        auto* tier = makeLabel(corum::ranked::rankTierDisplay(finalTier), fontScale(72.0f), {textX, px(28.0f) + 18.0f + 3.0f + 18.0f},
+            tone, "black", {0.0f, 0.5f});
+        corum::ranked::ui::leanLabel(tier); corum::ranked::ui::fitMenuLabelWidth(tier, leftW - 44.0f, fontScale(72.0f), 0.4f);
+        tier->setID("ranked-placement-final-tier"_spr); m_root->addChild(tier, 6);
+        addChip(m_root, finalResult.skipped ? tr("placement-skipped", "PLACEMENT SKIPPED") : tr("placed", "PLACED"),
+            {textX, px(28.0f) + 18.0f + 3.0f + 36.0f + 3.0f + 7.0f}, corum::ranked::ui::AccentFill, corum::ranked::ui::AccentInk, 15.0f);
+
+        // Right: the map count line, the STAGE / MAPS / POOL / GRADE table and
+        // the footer (SHOW STAGE RESULT, CONTINUE).
+        auto const& stages = view.placement.stageResults;
+        auto const rx0 = leftW + px(16.0f), rx1 = size.width - px(28.0f), top = size.height - px(32.0f);
+        auto const totalMaps = view.placement.totalStages * view.placement.mapsPerStage;
+        auto* count = makeLabel(finalResult.skipped ? tr("placement-skipped", "PLACEMENT SKIPPED")
+            : fmt::format(fmt::runtime(tr("all-maps-complete", "ALL {} MAPS COMPLETE")), totalMaps), fontScale(14.0f), {rx0, top - 5.0f},
+            corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f});
+        corum::ranked::ui::fitMenuLabelWidth(count, rx1 - rx0, fontScale(14.0f), 0.1f); m_root->addChild(count, 6);
+        if (!finalResult.skipped && !stages.empty()) {
+            auto const colStage = rx0 + px(12.0f), colMaps = rx0 + px(12.0f) + px(80.0f), colGrade = rx1 - px(12.0f);
+            auto const colPool = colGrade - px(80.0f) - px(70.0f);
+            auto const headY = top - 22.0f;
             auto const head = [&](std::string const& text, float x, CCPoint anchor) {
-                m_root->addChild(makeLabel(text, 0.16f, {x, top - 13.0f}, corum::ranked::ui::TextMuted, "semibold", anchor), 5);
+                m_root->addChild(makeLabel(text, fontScale(13.0f), {x, headY}, corum::ranked::ui::TextMuted, "semibold", anchor), 6);
             };
-            head("STAGE", left, {0.0f, 0.5f}); head("POOL", tableX, {0.5f, 0.5f}); head(tr("stage-grade-short", "GRADE"), right, {1.0f, 0.5f});
+            head("STAGE", colStage, {0.0f, 0.5f}); head(tr("map", "MAP"), colMaps, {0.0f, 0.5f});
+            head("POOL", colPool, {0.0f, 0.5f}); head(tr("stage-grade-short", "GRADE"), colGrade, {1.0f, 0.5f});
+            auto* rule = CCLayerColor::create({58, 63, 78, 255}, rx1 - rx0, 1.0f);
+            rule->setPosition({rx0, headY - 8.0f}); m_root->addChild(rule, 5);
+            auto const rowH = px(48.0f);
             for (std::size_t index = 0; index < stages.size(); ++index) {
                 auto const& stage = stages[index];
-                auto const y = top - 35.0f - 22.0f * static_cast<float>(index);
-                if (index % 2 == 0) {
-                    auto* stripe = CCLayerColor::create({255, 255, 255, 8}, tableW - 8.0f, 20.0f);
-                    stripe->setPosition({tableX - tableW / 2.0f + 4.0f, y - 10.0f}); m_root->addChild(stripe, 2);
+                auto const y = headY - 12.0f - rowH / 2.0f - static_cast<float>(index) * (rowH + 2.0f);
+                auto* stripe = CCLayerColor::create({corum::ranked::ui::SurfaceRaised.r, corum::ranked::ui::SurfaceRaised.g, corum::ranked::ui::SurfaceRaised.b, 255},
+                    rx1 - rx0, rowH);
+                stripe->setPosition({rx0, y - rowH / 2.0f}); m_root->addChild(stripe, 4);
+                m_root->addChild(makeLabel(std::to_string(stage.stageIndex), fontScale(15.0f), {colStage, y}, corum::ranked::ui::TextMuted, "black", {0.0f, 0.5f}), 6);
+                std::string maps;
+                for (std::size_t map = 0; map < stage.mapGrades.size(); ++map) {
+                    if (!maps.empty()) maps += "  ·  ";
+                    maps += fmt::format("{} {}", stage.mapGrades[map], map < stage.mapScores.size() ? formatPlacementScore(stage.mapScores[map]) : std::string("-"));
                 }
-                m_root->addChild(makeLabel(fmt::format("S{}", stage.stageIndex), 0.24f, {left, y}, corum::ranked::ui::Text, "black", {0.0f, 0.5f}), 5);
-                m_root->addChild(makeLabel(std::to_string(stage.pool), 0.24f, {tableX, y}, corum::ranked::ui::TextMuted, "black"), 5);
-                auto const grade = stage.stageGrade;
-                auto const color = grade == "S" ? kGold : grade == "A" ? kGreen : grade == "B" ? corum::ranked::ui::Accent : grade == "C" ? corum::ranked::ui::TextMuted : kRed;
-                m_root->addChild(makeLabel(grade, 0.30f, {right, y}, color, "black", {1.0f, 0.5f}), 5);
+                auto* mapsLabel = makeLabel(maps.empty() ? std::string("-") : maps, fontScale(15.0f), {colMaps, y}, corum::ranked::ui::Text, "black", {0.0f, 0.5f});
+                corum::ranked::ui::fitMenuLabelWidth(mapsLabel, colPool - colMaps - 8.0f, fontScale(15.0f), 0.1f); m_root->addChild(mapsLabel, 6);
+                m_root->addChild(makeLabel(std::to_string(stage.pool), fontScale(13.0f), {colPool, y}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f}), 6);
+                if (auto* grade = corum::ranked::ui::PlacementGradeBadge::create(px(34.0f))) {
+                    grade->setGrade(stage.stageGrade, false);
+                    grade->setPosition({colGrade - px(17.0f), y}); m_root->addChild(grade, 6);
+                }
             }
         }
+        auto const footY = px(28.0f) + px(38.0f);
         if (!view.error.empty()) {
-            auto* error = makeLabel(
-                shorten(view.error, 72),
-                0.22f,
-                {size.width / 2.0f, 51.0f},
-                kRed,
-                "semibold"
-            );
-            corum::ranked::ui::fitMenuLabelWidth(error, size.width - 100.0f, 0.22f, 0.15f);
-            m_root->addChild(error, 5);
+            auto* error = makeLabel(shorten(view.error, 72), fontScale(13.0f), {rx0, footY + 30.0f}, kRed, "semibold", {0.0f, 0.5f});
+            corum::ranked::ui::fitMenuLabelWidth(error, rx1 - rx0, fontScale(13.0f), 0.09f);
+            m_root->addChild(error, 6);
         }
-        addButton(tr("continue", "CONTINUE"), {size.width / 2.0f, 26.0f}, menu_selector(CorumRankedLayer::onResultClose), false, 0.60f);
+        auto const ghostW = px(190.0f), gap = px(12.0f);
+        boardButton(tr("show-stage-result", "SHOW STAGE RESULT"), {ghostW, px(42.0f)}, {rx0 + ghostW / 2.0f, footY}, menu_selector(CorumRankedLayer::onHistory),
+            15.0f, false, "ranked-placement-final-stages"_spr);
+        auto const continueW = rx1 - rx0 - ghostW - gap;
+        boardButton(tr("continue", "CONTINUE"), {continueW, px(76.0f)}, {rx1 - continueW / 2.0f, footY}, menu_selector(CorumRankedLayer::onResultClose),
+            30.0f, true, "ranked-placement-final-continue"_spr);
 
         auto const transitionKey = "placement:" + view.placement.runId;
         if (m_rankTransitionPlayedKey != transitionKey) {
@@ -6990,19 +7063,20 @@ class CorumRankedLayer final : public CCLayerColor {
         renderAfterInput();
     }
 
-    void addRoundOptions(float y) {
+    void addRoundOptions(float y, float centerX = -1.0f) {
         auto const size = CCDirector::sharedDirector()->getWinSize();
+        auto const cx = centerX >= 0.0f ? centerX : size.width / 2.0f;
         auto* level = findPlayableMap();
         auto* ldm = addButton(fmt::format("{}: {}", tr("low-detail", "LDM"), level && level->m_lowDetailModeToggled ? "ON" : "OFF"),
-            {size.width / 2.0f - 103.0f, y}, menu_selector(CorumRankedLayer::onLowDetail), false, 0.35f);
+            {cx - 103.0f, y}, menu_selector(CorumRankedLayer::onLowDetail), false, 0.35f);
         auto* shake = addButton(fmt::format("{}: {}", tr("disable-shake", "DISABLE SHAKE"), level && level->m_disableShakeToggled ? "ON" : "OFF"),
-            {size.width / 2.0f, y}, menu_selector(CorumRankedLayer::onDisableShake), false, 0.35f);
+            {cx, y}, menu_selector(CorumRankedLayer::onDisableShake), false, 0.35f);
         ldm->setID("ranked-round-ldm"_spr);
         shake->setID("ranked-round-disable-shake"_spr);
         ldm->setEnabled(level && level->m_lowDetailMode);
         if (!(level && level->m_lowDetailMode)) corum::ranked::ui::grayButtonVisual(ldm->getNormalImage());
         shake->setEnabled(level != nullptr);
-        addJukeboxButton({size.width / 2.0f + 116.0f, y}, 0.35f);
+        addJukeboxButton({cx + 116.0f, y}, 0.35f);
     }
 
     void onDownloadAllResources(CCObject*) {
@@ -7064,6 +7138,7 @@ class CorumRankedLayer final : public CCLayerColor {
         m_localMessage.clear();
         m_selectedPlacementStageCount = 0;
         m_selectedPlacementPool = 0;
+        m_placementPoolStep = false;
         m_page = Page::PlacementPoolSelection;
     }
 

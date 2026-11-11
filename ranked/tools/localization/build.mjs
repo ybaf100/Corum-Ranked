@@ -75,9 +75,9 @@ if(target!=='rules'){
  if(existsSync(sourceRoot))validateSource(sourceRoot);
 }
 if(target!=='rules')output(resolve(ranked,'../corum-ranked-mod/src/domain/TranslationCatalog.generated.hpp'),
- `// ${notice}\n#pragma once\n#include <array>\nnamespace corum::ranked {\nstruct CatalogTranslation {char const* key;char const* english;char const* korean;};\ninline constexpr std::array kTranslations {\n`+
+ `// ${notice}\n#pragma once\n#include <array>\nnamespace corum::ranked {\nstruct CatalogTranslation {char const* key;char const* english;char const* korean;};\ninline constexpr std::array<CatalogTranslation, ${Object.keys(ui).length}> kTranslations {{\n`+
  Object.entries(ui).sort(([a],[b])=>a<b?-1:a>b?1:0).map(([key,value])=>`    CatalogTranslation{${quote(key)}, ${quote(value.en)}, ${quote(value.ko)}}`).join(',\n')+
- '\n};\n} // namespace corum::ranked\n');
+ '\n}};\n} // namespace corum::ranked\n');
 if(target!=='client')output(resolve(ranked,'packages/rules/src/achievement-translations.generated.ts'),
  `// ${notice}\nconst translations = ${JSON.stringify(achievements,null,2)} as const;\n`+
  'export function achievementText(id: keyof typeof translations) {\n  const text=translations[id];\n  return {nameKo:text.name.ko,nameEn:text.name.en,descriptionKo:text.description.ko,descriptionEn:text.description.en,...("hint" in text?{hintKo:text.hint.ko,hintEn:text.hint.en}:{})};\n}\n');

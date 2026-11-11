@@ -139,7 +139,8 @@ test('Placement preparation timer follows the server deadline and does not survi
   const popup=read('src/RankedPopup.cpp');
   assert.match(popup,/if \(match.state == "MAP_PREPARE"\) \{[\s\S]*ranked-placement-prepare-timer/);
   assert.match(popup,/auto const remaining = runtime.deadlineSeconds\(\)/);
-  assert.match(popup,/m_placementPrepareTimerLabel->setAnchorPoint\(\{1, 1\}\)/);
+  // P3: the countdown sits in the header's time panel.
+  assert.match(popup,/m_placementPrepareTimerLabel = makeLabel\("", fontScale\(15\.0f\), \{panelX, headerY - 5\.0f\}/);
   const reset=popup.slice(popup.indexOf('void resetDynamicUiPointers()'),popup.indexOf('void clearUi()'));
   assert.match(reset,/m_placementPrepareTimerLabel = nullptr/);
 });
