@@ -53,9 +53,10 @@ class AssetPackTests(unittest.TestCase):
 
     def test_update_changes_tag_and_digest_together(self):
         first, a = self.build('first')
-        second, b = self.build('second', 'visuals-v2')
+        # A tag different from the one asset-pack.json currently names.
+        second, b = self.build('second', a['releaseTag'] + '-next')
         self.assertNotEqual(a['client']['assets']['sha256'], b['client']['assets']['sha256'])
-        self.assertIn('/visuals-v2/', b['downloadUrl'])
+        self.assertIn('/' + a['releaseTag'] + '-next/', b['downloadUrl'])
         self.assertNotEqual(first.read_bytes(), second.read_bytes())
 
     def test_missing_image_and_accidentally_added_image_refused(self):

@@ -31,23 +31,6 @@ inline std::string rankTierDisplay(std::string tier) {
     }
     return tier;
 }
-// Lower tiers look slightly worn next to SILVER and GOLD: a duller multiply
-// tint on every badge sprite (the finished trophy and the promotion parts
-// alike), a weaker backdrop glow, a smaller idle bob and a dimmer AQUA ring.
-// Colour and ambient only: the rank transitions animate opacity, scale,
-// position and rotation, never colour, so they keep working unchanged.
-struct RankBadgeWear {
-    unsigned char r = 255, g = 255, b = 255;
-    float glow = 1.0f, bob = 1.0f, ring = 1.0f;
-};
-inline RankBadgeWear rankBadgeWear(std::string const& tier) {
-    auto const base=rankTierBase(tier);
-    if(base=="SILVER" || base=="GOLD")return {};
-    if(base=="BRONZE")return {214,206,206,0.78f,1.0f,1.0f};
-    if(base=="AQUA")return {206,196,198,0.65f,0.75f,0.55f};
-    if(base=="RED")return {196,178,180,0.48f,0.5f,1.0f};
-    return {178,178,184,0.0f,0.0f,1.0f};
-}
 inline int silverHaloLevel(std::string const& tier) {
     return tier=="SILVER3"?0:tier=="SILVER2"?1:rankTierBase(tier)=="SILVER"?2:0;
 }
