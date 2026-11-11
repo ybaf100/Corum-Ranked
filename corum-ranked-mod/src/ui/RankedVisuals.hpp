@@ -675,6 +675,10 @@ inline CCSprite* trophy(std::string const& tier, CCSize maxSize) {
     auto const path = rankedVisualResourcePath(filename);
     CCSprite* result = nullptr;
     if (std::filesystem::exists(path)) result = CCSprite::create(path.string().c_str());
+    if (result) {
+        auto const wear = rankBadgeWear(tier);
+        result->setColor({wear.r, wear.g, wear.b});
+    }
     if (!result) {
         result = CCSprite::createWithSpriteFrameName("GJ_bigStar_001.png");
         result->setColor(tierColor(tier));

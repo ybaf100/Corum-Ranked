@@ -4,6 +4,7 @@
 #include "../domain/TransitionTrace.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <array>
 #include <cctype>
 #include <chrono>
@@ -180,9 +181,13 @@ RankBadgeAssembly createRankBadgeAssembly(std::string const& input, float badgeS
     assembly.root = centeredRoot();
     auto const rank = rankTierBase(normalizeRankName(input));
 
+    auto const wear = rankBadgeWear(rank);
     for (auto const& spec : partsFor(rank)) {
         auto* sprite = rankResourceSprite(spec.filename);
         if (!sprite) continue;
+        // Same wear tint as the finished trophy, so the hand-over at the end
+        // of a transition does not change colour.
+        sprite->setColor({wear.r, wear.g, wear.b});
         fitRankSprite(sprite, {badgeSize, badgeSize});
         sprite->setPosition(CCPointZero);
         assembly.root->addChild(sprite, spec.z);
@@ -317,19 +322,24 @@ CCNode* createRankBadgeBackdrop(
     auto const longest = std::max(maxSize.width, maxSize.height);
     auto const compact = display == RankBadgeDisplay::Compact;
     auto const genericExtent = longest * (compact ? 1.20f : 1.52f);
+    auto const wear = rankBadgeWear(rank);
+    auto const worn = [&](int value) { return static_cast<GLubyte>(std::clamp(std::lround(value * wear.glow), 0L, 255L)); };
 
-    auto* genericGlow = ambientSprite(
-        ambient,
-        "fx-rank-radial-glow-white.png",
-        {genericExtent, genericExtent},
-        0,
-        compact ? 28 : static_cast<GLubyte>(goldRankTier(rank) ? 96 : 62),
-        &profile.color
-    );
-    pulseOpacity(genericGlow, compact ? 20 : 42, compact ? 42 : 86, compact ? 1.25f : 1.05f);
+    if (wear.glow > 0.0f) {
+        auto* genericGlow = ambientSprite(
+            ambient,
+            "fx-rank-radial-glow-white.png",
+            {genericExtent, genericExtent},
+            0,
+            worn(compact ? 28 : goldRankTier(rank) ? 96 : 62),
+            &profile.color
+        );
+        pulseOpacity(genericGlow, worn(compact ? 20 : 42), worn(compact ? 42 : 86), compact ? 1.25f : 1.05f);
+    }
 
     if (rankTierBase(rank) == "AQUA" && !compact) {
-        auto* orbit = ambientSprite(ambient, "fx-rank-broken-ring-white.png", {longest * 1.32f, longest * 1.32f}, 3, 72, &profile.color);
+        auto const ringOpacity = static_cast<GLubyte>(std::lround(72.0f * wear.ring));
+        auto* orbit = ambientSprite(ambient, "fx-rank-broken-ring-white.png", {longest * 1.32f, longest * 1.32f}, 3, ringOpacity, &profile.color);
         if (orbit) orbit->runAction(CCRepeatForever::create(CCRotateBy::create(6.2f, 360.0f)));
     }
 
@@ -355,16 +365,18 @@ CCNode* createAnimatedRankBadge(
     finalBadge->setPosition(CCPointZero);
     badgeMotion->addChild(finalBadge, 10);
 
-    if (!compact) {
+    auto const bob = rankBadgeWear(rank).bob;
+    if (!compact && bob > 0.0f) {
+        auto const lift = (hero ? 2.2f : 1.4f) * bob, tilt = 0.65f * bob;
         badgeMotion->runAction(CCRepeatForever::create(CCSequence::create(
             CCSpawn::create(
-                CCEaseSineInOut::create(CCMoveBy::create(1.35f, {0.0f, hero ? 2.2f : 1.4f})),
-                CCEaseSineInOut::create(CCRotateBy::create(1.35f, 0.65f)),
+                CCEaseSineInOut::create(CCMoveBy::create(1.35f, {0.0f, lift})),
+                CCEaseSineInOut::create(CCRotateBy::create(1.35f, tilt)),
                 nullptr
             ),
             CCSpawn::create(
-                CCEaseSineInOut::create(CCMoveBy::create(1.35f, {0.0f, hero ? -2.2f : -1.4f})),
-                CCEaseSineInOut::create(CCRotateBy::create(1.35f, -0.65f)),
+                CCEaseSineInOut::create(CCMoveBy::create(1.35f, {0.0f, -lift})),
+                CCEaseSineInOut::create(CCRotateBy::create(1.35f, -tilt)),
                 nullptr
             ),
             nullptr
