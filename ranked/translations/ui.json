@@ -3922,5 +3922,33 @@
   "assets-included": {
     "en": "INCLUDED IN THE MOD",
     "ko": "모드에 포함"
+  },
+  "achievement-max-stage": {
+    "en": "MAX STAGE",
+    "ko": "최고 단계"
+  },
+  "achievement-not-yet": {
+    "en": "NOT YET",
+    "ko": "미달성"
+  },
+  "page-count": {
+    "en": "PAGE {} / {}",
+    "ko": "{} / {}쪽"
+  },
+  "history-cutoff-players": {
+    "en": "CUTOFF {}",
+    "ko": "컷오프 {}명"
+  },
+  "history-gap-first": {
+    "en": "TO 1ST",
+    "ko": "1위와"
+  },
+  "history-record": {
+    "en": "RECORD",
+    "ko": "기록"
+  },
+  "history-tap-player": {
+    "en": "TAP A PLAYER FOR INFO",
+    "ko": "플레이어를 누르면 정보"
   }
 }

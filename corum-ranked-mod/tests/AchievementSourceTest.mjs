@@ -67,25 +67,16 @@ test('Lobby and Achievement text keep native-readable sizing', () => {
     assert.match(selector, /onAchievementTitleClear[\s\S]{0,120}0\.56f/);
     assert.match(selector, /onAchievementTitleSelectorClose[\s\S]{0,120}0\.56f/);
 
-    assert.match(achievements, /achievementScreenLayout\(size.width,size.height\)/);
-    assert.match(achievements, /title,\s*0\.40f/);
-    assert.match(achievements, /description,\s*0\.25f/);
+    // H3 board grid: three columns by two rows, six cards a page; the 18 px
+    // title, the 13 px description (wrapped to two lines, never cut), and the
+    // CLAIM / TITLE buttons on the bottom row.
+    assert.match(achievements, /constexpr std::size_t perPage = 6;/);
+    assert.match(achievements, /auto const cardWidth = \(gridRight - gridLeft - 2\.0f \* gridGap\) \/ 3\.0f;/);
+    assert.match(achievements, /title, fontScale\(18\.0f\)/);
+    assert.match(achievements, /fitWrappedMenuLabel\(descriptionLabel, description, cardWidth - 16\.0f, 18\.0f, fontScale\(13\.0f\)\)/);
     assert.doesNotMatch(achievements, /shorten\(description/);
-    // contentWidth = cardWidth - 92: the description keeps the same cardWidth - 90 width.
-    assert.match(achievements, /auto const contentWidth = cardWidth - 92\.0f;/);
-    // The description wraps (two lines) inside the text column, which ends
-    // before the claim/title buttons, and only then shrinks.
-    assert.match(achievements, /auto const buttonLeft = center\.x \+ cardWidth \/ 2\.0f - 39\.0f - 33\.0f\*cardScale;/);
-    assert.match(achievements, /auto const textWidth = std::max\(40\.0f, std::min\(contentWidth, buttonLeft - 6\.0f - left\)\);/);
-    assert.match(achievements, /fitWrappedMenuLabel\(descriptionLabel, description, textWidth, 27\.0f\*cardScale, 0\.25f\*cardScale\)/);
-    // Holder line: readable first (0.24, floor 0.18), the rest of the text column.
-    assert.match(achievements, /fitMenuLabelWidth\(holdersLabel, holderWidth, 0\.24f\*cardScale, 0\.18f\*cardScale\)/);
-    assert.match(achievements, /progressText,\s*0\.30f/);
-    // Card buttons (rarity card frame): captions at 0.30*cardScale, the same
-    // floor as the former 0.62 caption inside a 0.50-scaled button (0.31).
-    assert.equal((achievements.match(/AchievementButtonStyle::(?:Muted|Title),\s*0\.30f\*cardScale\)/g) ?? []).length, 2);
-    // Page buttons: 0.42 in a 26x20 face (the former 0.62 x 0.52 = 0.32).
-    assert.match(achievements, /AchievementButtonStyle::Disabled, 0\.42f\)/);
+    assert.match(achievements, /AchievementButtonStyle::Claim, 0\.20f\)/);
+    assert.match(achievements, /AchievementButtonStyle::Title,\s*0\.20f\)/);
     assert.match(achievements, /onAchievementPrevious/);assert.match(achievements, /onAchievementNext/);
 });
 
@@ -135,8 +126,9 @@ test('both Death Match icons use committed-best plus valid live progress', () =>
 test('rarity card frame: double frame, gems, and a travelling border shine on achieved tier 4/5 cards', () => {
     const frame = read('../src/ui/AchievementCardFrame.cpp');
     const achievements = body(popup, 'void renderAchievements(', 'void renderHistoryList(');
-    assert.match(achievements, /AchievementCardFrame::create\(\{cardWidth, cardHeight\}, cardTier, achieved\)/);
-    assert.match(achievements, /frame->setGems\(/);
+    // H3 cards are flat board panels with the tier colour as the top rule;
+    // the frame class stays for the toasts and its own shine rules.
+    assert.match(achievements, /if \(cardTier > 0 \|\| achieved\)/);
     // Growth IV/V and Legendary/Mythic (tier 4/5), only once achieved.
     assert.match(frame, /if \(m_achieved && m_tier >= 4\) \{/);
     assert.match(frame, /clockwiseBorderStroke\(/);
