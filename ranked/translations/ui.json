@@ -3662,5 +3662,49 @@
   "ban-instruction": {
     "en": "BAN ONE MAP.",
     "ko": "맵 하나를 금지하세요."
+  },
+  "cleared-short": {
+    "en": "CLEAR",
+    "ko": "클리어"
+  },
+  "points-short": {
+    "en": "PTS",
+    "ko": "점"
+  },
+  "opponent-ahead": {
+    "en": "OPPONENT AHEAD",
+    "ko": "상대 우세"
+  },
+  "you-ahead": {
+    "en": "YOU AHEAD",
+    "ko": "내 우세"
+  },
+  "round-live": {
+    "en": "PLAYING",
+    "ko": "진행 중"
+  },
+  "round-waiting": {
+    "en": "WAITING",
+    "ko": "대기"
+  },
+  "play-again": {
+    "en": "PLAY AGAIN",
+    "ko": "다시 플레이"
+  },
+  "settling": {
+    "en": "SETTLING...",
+    "ko": "결과 집계 중..."
+  },
+  "round-draw": {
+    "en": "ROUND DRAW",
+    "ko": "라운드 무승부"
+  },
+  "round-won-mine": {
+    "en": "MY ROUND",
+    "ko": "내 라운드 승리"
+  },
+  "round-lost-mine": {
+    "en": "ROUND LOST",
+    "ko": "라운드 패배"
   }
 }
