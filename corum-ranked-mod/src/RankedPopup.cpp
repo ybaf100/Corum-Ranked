@@ -6746,11 +6746,12 @@ class CorumRankedLayer final : public CCLayerColor {
         historyText(panel,own->qualified?tr("history-qualified","QUALIFIED"):tr("history-eliminated","ELIMINATED"),.25f,{width/2,48},width-14,own->qualified?kGreen:kRed);
         historyText(panel,round.cutoff?fmt::format("{} {}%",tr("history-cutoff-gap","CUTOFF GAP"),corum::ranked::rankedScoreText((round.deathmatch?own->progress:std::trunc(own->progress))-*round.cutoff,round.deathmatch,true)):"",.22f,{width/2,28},width-14,corum::ranked::ui::TextMuted);
     }
-    void historySurvivalBoard(corum::ranked::HistoryRound const& round,CCSize size) {
+    // H2 left column (.panel, 300 board px): thumbnail or difficulty face,
+    // round badge, map name, rate with creator and cutoff, YOUR RECORD and
+    // VIEW LEVEL. The record lines come from the caller.
+    void historyMapColumn(corum::ranked::HistoryRound const& round,float top,float bottom,std::string const& recordValue,ccColor3B recordTone,std::string const& recordDetail) {
         using namespace corum::ranked;
-        auto const top=size.height-kLobbyHeader-22.0f-6.0f,bottom=40.0f,left=px(28.0f),right=size.width-px(28.0f);
-        // Left (.panel, 300 board px): thumbnail, map name, difficulty with the
-        // creator and cutoff, YOUR RECORD and VIEW LEVEL.
+        auto const left=px(28.0f);
         constexpr float panelW=150.0f;
         auto* panel=makeNeonPanel({panelW,top-bottom},{left+panelW/2.0f,(top+bottom)/2.0f},kDeepPanel,kDeepPanel,255);m_root->addChild(panel,2);
         panel->setID("ranked-history-level-panel"_spr);
@@ -6781,25 +6782,113 @@ class CorumRankedLayer final : public CCLayerColor {
         ui::fitMenuLabelWidth(by,panelW-54.0f,fontScale(13.0f),0.08f);m_root->addChild(by,5);
         // YOUR RECORD (#20232E): the lime progress and place, attempts and the gap to first.
         y-=14.0f;
-        auto const own=std::find_if(round.standings.begin(),round.standings.end(),[](auto const& p){return p.own;});
         constexpr float recordH=42.0f;
         auto* record=makeNeonPanel({panelW-16.0f,recordH},{left+panelW/2.0f,y-recordH/2.0f},historyRoundColor(round),ccc3(32,35,46),255);m_root->addChild(record,4);
         m_root->addChild(makeLabel(tr("history-your-record","YOUR RECORD"),fontScale(13.0f),{left+14.0f,y-8.0f},ui::TextMuted,"semibold",{0.0f,0.5f}),6);
-        if(own==round.standings.end()){
-            m_root->addChild(makeLabel(tr("history-not-participant","DID NOT PLAY THIS ROUND"),fontScale(15.0f),{left+14.0f,y-23.0f},ui::TextMuted,"extrabold",{0.0f,0.5f}),6);
-        }else{
-            auto const place=own->rank>0?fmt::format("{}#{}",own->tiedPlayers>1?"=":"",own->rank):std::string("-");
-            auto* value=makeLabel(fmt::format("{}% · {}",rankedScoreText(own->progress,round.deathmatch),place),fontScale(24.0f),{left+14.0f,y-21.0f},
-                own->qualified?ui::Accent:kRed,"black",{0.0f,0.5f});
-            ui::fitMenuLabelWidth(value,panelW-28.0f,fontScale(24.0f),0.12f);m_root->addChild(value,6);
-            std::string gap;
-            if(!round.standings.empty()&&round.standings.front().rank==1&&round.standings.front().id!=own->id)
-                gap=fmt::format(" · {} {}%p",tr("history-gap-first","TO 1ST"),rankedScoreText(own->progress-round.standings.front().progress,round.deathmatch,true));
-            auto* detail=makeLabel(fmt::format("{} {}{}",own->attempts,tr("history-attempts","ATTEMPTS"),gap),fontScale(13.0f),{left+14.0f,y-34.0f},ui::TextMuted,"semibold",{0.0f,0.5f});
+        auto* value=makeLabel(recordValue,fontScale(recordDetail.empty()?15.0f:24.0f),{left+14.0f,y-21.0f},recordTone,recordDetail.empty()?"extrabold":"black",{0.0f,0.5f});
+        ui::fitMenuLabelWidth(value,panelW-28.0f,fontScale(24.0f),0.12f);m_root->addChild(value,6);
+        if(!recordDetail.empty()){
+            auto* detail=makeLabel(recordDetail,fontScale(13.0f),{left+14.0f,y-34.0f},ui::TextMuted,"semibold",{0.0f,0.5f});
             ui::fitMenuLabelWidth(detail,panelW-28.0f,fontScale(13.0f),0.08f);m_root->addChild(detail,6);
         }
         auto* view=historyButton(m_root,tr("history-view-level","VIEW LEVEL"),{left+panelW/2.0f,bottom+14.0f},panelW-16.0f,menu_selector(CorumRankedLayer::onHistoryLevel),round.levelId);
         if(round.levelId<=0)ui::grayButtonVisual(view);
+    }
+    // Solo round: YOU and the opponent as two table rows (name, tier before,
+    // best progress, cleared, round result), then the series panel.
+    void historySoloBoard(HistoryMatchView const& item,corum::ranked::HistoryRound const& round,CCSize size) {
+        using namespace corum::ranked;
+        auto const top=size.height-kLobbyHeader-22.0f-6.0f,bottom=40.0f,left=px(28.0f),right=size.width-px(28.0f);
+        auto const ownB=item.side=="B";
+        auto const ownBest=ownB?round.bestB:round.bestA,otherBest=ownB?round.bestA:round.bestB;
+        auto const ownCleared=ownB?round.clearedB:round.clearedA;
+        auto const outcome=round.deathmatch?round.winnerSide:round.result;
+        auto const tied=outcome.empty()||outcome=="DRAW",won=!tied&&outcome==item.side;
+        historyMapColumn(round,top,bottom,ownBest?rankedScoreText(*ownBest,round.deathmatch)+"%":tr("history-unavailable","UNAVAILABLE"),
+            tied?kGold:won?ui::Accent:kRed,ownCleared?tr("history-cleared","CLEARED"):tr("history-not-cleared","NOT CLEARED"));
+        constexpr float panelW=150.0f;
+        auto const tableX=left+panelW+9.0f,tableW=right-tableX;
+        auto const colName=tableX+10.0f,colTier=right-150.0f,colRecord=right-80.0f,colResult=right-26.0f;
+        auto const headY=top-6.0f;
+        auto const head=[&](std::string const& text,float x,CCPoint anchor){m_root->addChild(makeLabel(text,fontScale(13.0f),{x,headY},ui::TextMuted,"extrabold",anchor),5);};
+        head(tr("leaderboard-player","PLAYER"),colName,{0.0f,0.5f});head(tr("leaderboard-tier","TIER"),colTier,{0.0f,0.5f});
+        head(tr("history-record","RECORD"),colRecord,{1.0f,0.5f});head(tr("result","RESULT"),colResult,{0.5f,0.5f});
+        constexpr float rowH=30.0f;
+        // The rows sit in a tap scroll so a name opens the public profile.
+        auto const viewportH=2.0f*rowH+3.0f,viewportTop=headY-9.0f;
+        auto* scroll=ui::createRankedTapScroll({tableW,viewportH},[weak=WeakRef(this)](CCPoint start,CCPoint end){if(auto owner=weak.lock())owner->onHistoryPlayerTap(start,end);});
+        m_historyBoardScroll=scroll;scroll->setID("ranked-history-board-scroll"_spr);scroll->setPosition({tableX,viewportTop-viewportH});m_root->addChild(scroll,3);
+        auto* content=scroll->m_contentLayer;content->setContentSize({tableW,viewportH});
+        float rowY=viewportH-rowH/2.0f;
+        for(auto const* side:{item.side=="B"?"B":"A",item.side=="B"?"A":"B"}){
+            auto const own=std::string(side)==item.side;
+            auto const person=item.record["players"][side];SurvivalStanding player;
+            player.id=side;player.name=person["name"].asString().unwrapOr("");player.bot=person["isBot"].asBool().unwrapOr(false);
+            player.accountId=player.bot?0:numFromString<int>(person["gdAccountId"].asString().unwrapOr("0")).unwrapOr(0);
+            player.tier=item.record["profileBefore"][side]["displayedTier"].asString().unwrapOr("");
+            if(player.name.empty())player.name=own?tr("you","YOU"):item.opponentName;
+            auto const fill=own?ccc3(32,38,42):ui::Surface;
+            auto* stripe=CCLayerColor::create({fill.r,fill.g,fill.b,255},tableW,rowH);stripe->setPosition({0.0f,rowY-rowH/2.0f});content->addChild(stripe,1);
+            if(own){auto* edge=CCLayerColor::create({ui::Accent.r,ui::Accent.g,ui::Accent.b,255},2.0f,rowH);edge->setPosition({0.0f,rowY-rowH/2.0f});content->addChild(edge,2);}
+            // The name keeps the public-profile tap (title and LP under it).
+            historyPlayerName(content,player,{colName-tableX+(colTier-colName-10.0f)/2.0f,rowY},colTier-colName-10.0f,own?ui::Accent:ui::Text,item.matchId,false);
+            auto const tier=upper(player.tier);
+            if(!tier.empty()){auto* tierLabel=makeLabel(rankTierDisplay(tier),fontScale(13.0f),{colTier-tableX,rowY},tierColor(tier),"black",{0.0f,0.5f});
+                ui::fitMenuLabelWidth(tierLabel,60.0f,fontScale(13.0f),0.08f);content->addChild(tierLabel,5);}
+            auto const best=own?ownBest:otherBest;auto const cleared=own?ownCleared:(ownB?round.clearedA:round.clearedB);
+            content->addChild(makeLabel(best?rankedScoreText(*best,round.deathmatch)+"%":std::string("-"),fontScale(20.0f),{colRecord-tableX,rowY+3.0f},cleared?kGold:ui::Text,"black",{1.0f,0.5f}),5);
+            content->addChild(makeLabel(cleared?tr("history-cleared","CLEARED"):tr("history-not-cleared","NOT CLEARED"),fontScale(12.0f),{colRecord-tableX,rowY-9.0f},ui::TextMuted,"semibold",{1.0f,0.5f}),5);
+            auto const rowWon=!tied&&outcome==side;
+            auto const result=tied?tr("tie","TIE"):rowWon?tr("win","WIN"):tr("lose","LOSE");
+            auto* probe=makeLabel(result,fontScale(12.0f),{},ui::Text,"black");auto const chipW=probe->getScaledContentSize().width+px(16.0f);
+            addChip(content,result,{colResult-tableX-chipW/2.0f,rowY},tied?ccc3(32,35,46):rowWon?ui::AccentFill:kRed,tied?ui::TextMuted:ui::AccentInk,12.0f);
+            rowY-=rowH+3.0f;
+        }
+        scroll->scrollToTop();
+        rowY=viewportTop-viewportH-rowH/2.0f+3.0f;
+        // Series panel: the series score, this round's verdict and the DM link.
+        auto const panelTop=rowY+rowH/2.0f-6.0f,panelH=std::min(70.0f,panelTop-bottom);
+        m_root->addChild(makeNeonPanel({tableW,panelH},{tableX+tableW/2.0f,panelTop-panelH/2.0f},tied?kGold:won?kAccent:kRed,kDeepPanel,255),2);
+        auto const ownScore=ownB?item.roundWinsB:item.roundWinsA,otherScore=ownB?item.roundWinsA:item.roundWinsB;
+        m_root->addChild(makeLabel(tr("series","SERIES"),fontScale(13.0f),{tableX+10.0f,panelTop-12.0f},ui::TextMuted,"extrabold",{0.0f,0.5f}),5);
+        auto* series=makeLabel(fmt::format("{} : {}",ownScore,otherScore),fontScale(34.0f),{tableX+10.0f,panelTop-32.0f},ui::Text,"black",{0.0f,0.5f});
+        ui::leanLabel(series);m_root->addChild(series,5);
+        auto* verdict=makeLabel(tied?tr("tie","TIE"):won?tr("history-your-round-win","YOU WIN THIS ROUND"):tr("history-rival-round-win","RIVAL WINS THIS ROUND"),fontScale(16.0f),
+            {right-10.0f,panelTop-22.0f},tied?kGold:won?ui::Accent:kRed,"black",{1.0f,0.5f});
+        ui::fitMenuLabelWidth(verdict,tableW*0.6f,fontScale(16.0f),0.1f);m_root->addChild(verdict,5);
+        if(round.nextDeathmatch>0)m_root->addChild(makeLabel(fmt::format("{} DM {}",tr("history-continued","CONTINUED IN"),round.nextDeathmatch),fontScale(13.0f),
+            {right-10.0f,panelTop-38.0f},ui::TextMuted,"semibold",{1.0f,0.5f}),5);
+    }
+    // A round without a confirmed result: the map column and the note.
+    void historyPendingBoard(HistoryMatchView const& item,corum::ranked::HistoryRound const& round,CCSize size) {
+        using namespace corum::ranked;
+        auto const top=size.height-kLobbyHeader-22.0f-6.0f,bottom=40.0f,left=px(28.0f),right=size.width-px(28.0f);
+        historyMapColumn(round,top,bottom,item.inProgress?tr("history-in-progress","MATCH IN PROGRESS"):tr("history-unavailable","UNAVAILABLE"),kGold,"");
+        constexpr float panelW=150.0f;
+        auto const tableX=left+panelW+9.0f,tableW=right-tableX;
+        m_root->addChild(makeNeonPanel({tableW,58.0f},{tableX+tableW/2.0f,top-29.0f},kGold,kDeepPanel,255),2);
+        auto* line=makeLabel(item.inProgress?tr("history-round-live","This round is still in progress."):tr("history-round-unfinished","This round has no confirmed result."),
+            fontScale(18.0f),{tableX+10.0f,top-20.0f},ui::Text,"black",{0.0f,0.5f});
+        ui::fitMenuLabelWidth(line,tableW-20.0f,fontScale(18.0f),0.1f);m_root->addChild(line,5);
+        auto* help=makeLabel(item.inProgress?tr("history-round-live-help","Final records and rankings appear after the round ends."):tr("history-unavailable","UNAVAILABLE"),
+            fontScale(13.0f),{tableX+10.0f,top-40.0f},ui::TextMuted,"semibold",{0.0f,0.5f});
+        ui::fitMenuLabelWidth(help,tableW-20.0f,fontScale(13.0f),0.08f);m_root->addChild(help,5);
+    }
+    void historySurvivalBoard(corum::ranked::HistoryRound const& round,CCSize size) {
+        using namespace corum::ranked;
+        auto const top=size.height-kLobbyHeader-22.0f-6.0f,bottom=40.0f,left=px(28.0f),right=size.width-px(28.0f);
+        auto const own=std::find_if(round.standings.begin(),round.standings.end(),[](auto const& p){return p.own;});
+        std::string recordValue=tr("history-not-participant","DID NOT PLAY THIS ROUND"),recordDetail;ccColor3B recordTone=ui::TextMuted;
+        if(own!=round.standings.end()){
+            auto const place=own->rank>0?fmt::format("{}#{}",own->tiedPlayers>1?"=":"",own->rank):std::string("-");
+            recordValue=fmt::format("{}% · {}",rankedScoreText(own->progress,round.deathmatch),place);recordTone=own->qualified?ui::Accent:kRed;
+            std::string gap;
+            if(!round.standings.empty()&&round.standings.front().rank==1&&round.standings.front().id!=own->id)
+                gap=fmt::format(" · {} {}%p",tr("history-gap-first","TO 1ST"),rankedScoreText(own->progress-round.standings.front().progress,round.deathmatch,true));
+            recordDetail=fmt::format("{} {}{}",own->attempts,tr("history-attempts","ATTEMPTS"),gap);
+        }
+        historyMapColumn(round,top,bottom,recordValue,recordTone,recordDetail);
+        constexpr float panelW=150.0f;
         // Right: # / PLAYER / RECORD / ATTEMPTS / RESULT (.th, .tr; own row .tr.me).
         auto const tableX=left+panelW+9.0f,tableW=right-tableX;
         auto const colRank=tableX+8.0f,colIcon=tableX+30.0f,colName=tableX+42.0f,colResult=right-24.0f,colAttempts=right-58.0f,colRecord=right-90.0f;
@@ -6893,70 +6982,12 @@ class CorumRankedLayer final : public CCLayerColor {
         for(int i=m_historyTabPage*tabs;i<std::min(static_cast<int>(rounds.size()),(m_historyTabPage+1)*tabs);++i)
             historyTab(rounds[i].label,{(size.width-layout.width)/2+50+(i%tabs)*54.f,tabY},49,menu_selector(CorumRankedLayer::onHistoryRound),i,rounds[i].key==m_historyRound,survival?std::optional<ccColor3B>{historyRoundColor(rounds[i])}:std::nullopt);
         if(pages>1){historyButton(m_root,"<",{(size.width-layout.width)/2+12,tabY},24,menu_selector(CorumRankedLayer::onHistoryRoundPage),-1);historyButton(m_root,">",{(size.width+layout.width)/2-12,tabY},24,menu_selector(CorumRankedLayer::onHistoryRoundPage),1);}
-        // H2 board body for a confirmed Survival round: the map / own-record
-        // panel on the left and the round table on the right.
-        if(survival && round.completed){historySurvivalBoard(round,size);return;}
-        auto const viewport=CCSize{layout.width,layout.height};auto* scroll=corum::ranked::ui::createRankedTapScroll(viewport,[weak=WeakRef(this)](CCPoint start,CCPoint end){if(auto owner=weak.lock())owner->onHistoryPlayerTap(start,end);});m_historyBoardScroll=scroll;scroll->setID("ranked-history-board-scroll"_spr);scroll->setPosition({(size.width-layout.width)/2,layout.bottom});m_root->addChild(scroll,3);
-        auto* content=scroll->m_contentLayer;
-        if(!round.completed){
-            auto const mapWidth=std::min(layout.width,390.f),mapHeight=(round.roundBadge.isObject()?310.f:corum::ranked::historyMapPanelHeight(mapWidth,historyHasThumbnail(round)));
-            auto const h=std::max(viewport.height,mapHeight+75);content->setContentSize({layout.width,h});
-            historyText(content,item.inProgress?tr("history-round-live","This round is still in progress."):tr("history-round-unfinished","This round has no confirmed result."),.32f,{layout.width/2,h-25},layout.width-20,kAccent);
-            historyText(content,item.inProgress?tr("history-round-live-help","Final records and rankings appear after the round ends."):tr("history-unavailable","UNAVAILABLE"),.25f,{layout.width/2,h-51},layout.width-20,corum::ranked::ui::TextMuted);
-            historyMapPanel(content,round,{layout.width/2,h-75-mapHeight/2},mapWidth,mapHeight);scroll->scrollToTop();return;
-        }
-        if(!survival){
-            auto const mapWidth=layout.split?layout.mapWidth:std::min(layout.width,390.f);auto const boardWidth=layout.split?layout.width-mapWidth-10:layout.width;
-            auto const mapHeight=(round.roundBadge.isObject()?310.f:corum::ranked::historyMapPanelHeight(mapWidth,historyHasThumbnail(round)));
-            auto const h=std::max(viewport.height,layout.split?std::max(mapHeight,205.f):mapHeight+205);content->setContentSize({layout.width,h});
-            historyMapPanel(content,round,{layout.split?mapWidth/2:layout.width/2,h-mapHeight/2},mapWidth,mapHeight);
-            auto const boardX=layout.split?mapWidth+10:0.f,boardTop=layout.split?h:h-mapHeight-12;
-            auto* panel=makeNeonPanel({boardWidth,190},{boardX+boardWidth/2,boardTop-95},historyColor(item),kDeepPanel2,240);content->addChild(panel,2);
-            auto const ownB=item.side=="B";auto const ownScore=ownB?item.roundWinsB:item.roundWinsA,otherScore=ownB?item.roundWinsA:item.roundWinsB;
-            historyText(panel,fmt::format("{} : {}",ownScore,otherScore),.42f,{boardWidth/2,169},boardWidth*.22f,kAccent,true);
-            for(auto const* side:{"A","B"}){
-                auto const person=item.record["players"][side];corum::ranked::SurvivalStanding player;
-                player.id=side;player.name=person["name"].asString().unwrapOr("");player.bot=person["isBot"].asBool().unwrapOr(false);
-                player.accountId=player.bot?0:numFromString<int>(person["gdAccountId"].asString().unwrapOr("0")).unwrapOr(0);
-                player.tier=item.record["profileBefore"][side]["displayedTier"].asString().unwrapOr("");
-                auto const own=std::string(side)==item.side;if(player.name.empty())player.name=own?tr("you","YOU"):item.opponentName;
-                historyPlayerName(panel,player,{boardWidth*(own?.22f:.78f),171},boardWidth*.31f,own?kAccent:kGold);
-            }
-            auto const otherSide=ownB?"A":"B";auto const ownTier=item.record["profileBefore"][item.side]["displayedTier"].asString().unwrapOr(""),otherTier=item.record["profileBefore"][otherSide]["displayedTier"].asString().unwrapOr("");
-            historyText(panel,ownTier,.22f,{boardWidth*.25f,137},boardWidth*.44f,kGold);historyText(panel,otherTier,.22f,{boardWidth*.75f,137},boardWidth*.44f,kGold);
-            historyProgress(panel,ownB?round.bestB:round.bestA,ownB?round.clearedB:round.clearedA,round.deathmatch,{boardWidth*.25f,111},boardWidth*.4f,kAccent);
-            historyProgress(panel,ownB?round.bestA:round.bestB,ownB?round.clearedA:round.clearedB,round.deathmatch,{boardWidth*.75f,111},boardWidth*.4f,kGold);
-            auto const outcome=round.deathmatch?round.winnerSide:round.result;
-            auto const tied=outcome.empty()||outcome=="DRAW";
-            historyText(panel,tied?tr("tie","TIE"):outcome==item.side?tr("history-your-round-win","YOU WIN THIS ROUND"):tr("history-rival-round-win","RIVAL WINS THIS ROUND"),.28f,{boardWidth/2,45},boardWidth-14,tied?kGold:outcome==item.side?kGreen:kRed);
-            if(round.nextDeathmatch>0)historyText(panel,fmt::format("{} DM {}",tr("history-continued","CONTINUED IN"),round.nextDeathmatch),.24f,{boardWidth/2,20},boardWidth-16,corum::ranked::ui::TextMuted);
-        }else{
-            auto const mapWidth=layout.split?layout.mapWidth:std::min(layout.width,390.f),mapHeight=(round.roundBadge.isObject()?310.f:corum::ranked::historyMapPanelHeight(mapWidth,historyHasThumbnail(round)));
-            auto const boardHeight=58.f+round.standings.size()*70;auto const h=std::max(viewport.height,layout.split?std::max({220.f,mapHeight,boardHeight}):mapHeight+250.f+boardHeight);content->setContentSize({layout.width,h});
-            historyMapPanel(content,round,{layout.split?mapWidth/2:layout.width/2,h-mapHeight/2},mapWidth,mapHeight);
-            auto const boardX=layout.split?layout.mapWidth+8:0.f,boardTop=layout.split?h:h-mapHeight-244;
-            auto const width=layout.boardWidth;
-            auto* board=makeNeonPanel({width,boardHeight},{boardX+width/2,boardTop-boardHeight/2},kSteel,kDeepPanel2,240);content->addChild(board,2);
-            auto const cutoff=round.cutoff?corum::ranked::rankedScoreText(*round.cutoff,round.deathmatch)+"%":"-";
-            historyText(board,fmt::format("{} {} · {} {}/{}",tr("history-cutoff","CUTOFF"),cutoff,tr("history-qualified","QUALIFIED"),round.qualifiedCount,round.target),.23f,{width/2,boardHeight-16},width-14,kAccent);
-            float y=boardHeight-62;
-            auto const columns=corum::ranked::historyRosterColumns(width);
-            for(auto const& p:round.standings){
-                auto const color=p.own?kAccent:p.cleared?kGold:p.qualified?kGreen:kRed;
-                if(p.own){auto* emphasis=makeNeonPanel({width-8,60},{width/2,y-4},kAccent,kDeepPanel,240);board->addChild(emphasis,2);}
-                historyText(board,p.rank>0?fmt::format("{}{}",p.tiedPlayers>1?"=":"",p.rank):"-",.27f,{columns.rank,y},30,color);
-                auto const suffix=p.forfeited?tr("history-forfeit","FORFEIT"):p.qualified?tr("history-qualified","QUALIFIED"):tr("history-eliminated","ELIMINATED");
-                corum::ranked::SurvivalStanding player;player.id=p.id;player.name=p.name;player.rank=p.rank;player.bot=p.bot;player.accountId=p.accountId;player.tier=p.tier;
-                auto* iconHolder=CCNode::create();iconHolder->setPosition({columns.icon,y});board->addChild(iconHolder,5);m_historyIcons.push_back({WeakRef<CCNode>(iconHolder),player});
-                historyPlayerName(board,player,{columns.name+columns.nameWidth/2,y+7},columns.nameWidth,color);
-                historyText(board,fmt::format("{} {} · {}",p.attempts,tr("history-attempts","ATTEMPTS"),suffix),.21f,{columns.name,y-23},width-columns.name-12,color,false,{0,.5f});
-                historyText(board,corum::ranked::rankedScoreText(p.progress,round.deathmatch)+"%",.34f,{columns.best,y+5},columns.bestWidth,color,true);
-                if(p.cutoffBoundary){auto* line=CCLayerColor::create({kGold.r,kGold.g,kGold.b,220});line->setContentSize({width-16,1});line->setPosition({8,y-35});board->addChild(line,3);}
-                y-=70;
-            }
-            historyOwnPanel(content,round,{layout.split?layout.width-layout.ownWidth/2:layout.width/2,layout.split?h-110:h-mapHeight-122},layout.split?layout.ownWidth:std::min(layout.width,390.f),220);
-        }
-        scroll->scrollToTop();
+        // H2 board body, two columns: the map / own-record column on the left;
+        // the round table (Survival), the versus rows (Solo) or the pending
+        // note on the right.
+        if(!round.completed){historyPendingBoard(item,round,size);return;}
+        if(survival){historySurvivalBoard(round,size);return;}
+        historySoloBoard(item,round,size);
     }
     void updateHistoryIcons() {
         auto* scroll=m_historyBoardScroll;if(!scroll)return;
