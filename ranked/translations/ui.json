@@ -4010,5 +4010,9 @@
   "guide-achievements-body": {
     "en": "Achievements give AP, and an equipped title shows with your name. Survival round results become round badges.",
     "ko": "도전과제를 달성하면 AP를 받고, 칭호를 장착하면 이름 뒤에 표시됩니다. 서바이벌 라운드 결과는 라운드 뱃지로 모입니다."
+  },
+  "badge-tap": {
+    "en": "TAP A BADGE FOR DETAILS",
+    "ko": "뱃지를 눌러서 상세 보기"
   }
 }

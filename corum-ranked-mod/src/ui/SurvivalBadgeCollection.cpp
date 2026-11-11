@@ -7,7 +7,6 @@
 #include "../RankedRuntime.hpp"
 #include <Geode/ui/Popup.hpp>
 #include <Geode/binding/GJDifficultySprite.hpp>
-#include <Geode/cocos/misc_nodes/CCClippingNode.h>
 #include <Geode/cocos/draw_nodes/CCDrawNode.h>
 #include <Geode/utils/web.hpp>
 #include <cctype>
@@ -55,41 +54,9 @@ class BadgeDetail final:public Popup {
 public:
     static BadgeDetail* create(matjson::Value data,matjson::Value selected,bool eliminated,std::function<void()> closed){auto* p=new BadgeDetail;if(p->init(std::move(data),std::move(selected),eliminated,std::move(closed))){p->autorelease();return p;}delete p;return nullptr;}
 };
-// Own the complete gesture: a drag can never activate a badge. All content is
-// clipped, with a fixed five-slot viewport on every supported aspect ratio.
-class BadgeStrip final:public CCLayer {
-    CCNode* m_content=nullptr;std::function<void(std::size_t)> m_tap;std::size_t m_count=0;
-    float m_offset=0,m_origin=0,m_distance=0;CCPoint m_start{};int m_touch=-1;
-public:
-    static BadgeStrip* create(std::vector<matjson::Value> const& rows,std::int64_t eliminatedCount,std::function<void(std::size_t)> tap){
-        auto* p=new BadgeStrip;if(!p->init()){delete p;return nullptr;}p->autorelease();p->setContentSize({440,112});p->m_count=rows.size()+1;p->m_tap=std::move(tap);
-        auto* stencil=CCDrawNode::create();CCPoint points[]={{0,0},{440,0},{440,112},{0,112}};stencil->drawPolygon(points,4,{1,1,1,1},0,{1,1,1,1});
-        auto* clip=CCClippingNode::create(stencil);p->addChild(clip);p->m_content=CCNode::create();clip->addChild(p->m_content);
-        for(std::size_t i=0;i<p->m_count;++i){
-            auto const last=i==rows.size();
-            // H4 card (.panel): a flat surface behind each badge; the badge
-            // keeps its face, grade frame and the X for eliminations.
-            auto* card=CCLayerColor::create({Surface.r,Surface.g,Surface.b,255},80,108);card->setPosition({4.f+88*i,2});p->m_content->addChild(card,1);
-            auto const edge=last?Red:SurfaceSoft;
-            auto* rule=CCLayerColor::create({edge.r,edge.g,edge.b,255},80,1.5f);rule->setPosition({4.f+88*i,108.5f});p->m_content->addChild(rule,2);
-            auto* cell=survivalCollectionBadge(last?0:static_cast<int>(rows[i]["nativeCode"].asInt().unwrapOr(0)),last?"ELIMINATED":"",68);
-            cell->setPosition({44.f+88*i,66});p->m_content->addChild(cell,5);
-            auto const count=last?eliminatedCount:survivalBadgeCollectionTotal(rows[i]["counts"]);
-            auto* label=menuLabel(fmt::format("{}",count),.29f,{44.f+88*i,14},last?Red:Text,FontWeight::ExtraBold);
-            fitFullMenuLabel(label,76,22,.29f);p->m_content->addChild(label,5);
-        }
-        p->setTouchEnabled(true);return p;
-    }
-    void registerWithTouchDispatcher()override{CCDirector::sharedDirector()->getTouchDispatcher()->addPrioTargetedDelegate(this,-65000,true);}
-    bool ccTouchBegan(CCTouch* touch,CCEvent*)override{if(m_touch!=-1||!isVisible())return false;auto at=convertToNodeSpace(touch->getLocation());if(!CCRect(0,0,440,112).containsPoint(at))return false;m_start=at;m_origin=m_offset;m_distance=0;m_touch=touch->getID();return true;}
-    void ccTouchMoved(CCTouch* touch,CCEvent*)override{if(touch->getID()!=m_touch)return;auto at=convertToNodeSpace(touch->getLocation());m_distance=std::max(m_distance,std::hypot(at.x-m_start.x,at.y-m_start.y));m_offset=survivalBadgeGalleryOffset(m_origin+m_start.x-at.x,m_count,440);m_content->setPositionX(-m_offset);}
-    void ccTouchEnded(CCTouch* touch,CCEvent* event)override{if(touch->getID()!=m_touch)return;ccTouchMoved(touch,event);m_touch=-1;auto at=convertToNodeSpace(touch->getLocation());if(m_distance<=6&&CCRect(0,0,440,112).containsPoint(at)&&m_tap)m_tap(static_cast<std::size_t>((at.x+m_offset)/88));}
-    void ccTouchCancelled(CCTouch* touch,CCEvent*)override{if(touch->getID()==m_touch)m_touch=-1;}
-    void onExit()override{m_touch=-1;m_tap={};CCLayer::onExit();}
-};
 class BadgeCollection final:public Popup {
     std::string m_session;std::uint64_t m_generation=0;bool m_closed=false,m_busy=false;
-    matjson::Value m_data;CCNode* m_root=nullptr;CCLabelBMFont* m_status=nullptr;CCLabelBMFont* m_total=nullptr;BadgeStrip* m_strip=nullptr;
+    matjson::Value m_data;CCNode* m_root=nullptr;CCLabelBMFont* m_status=nullptr;CCLabelBMFont* m_total=nullptr;std::vector<CCMenuItemSpriteExtra*> m_cards;
     geode::async::TaskHolder<web::WebResponse> m_request;
     bool init()override{
         // H4 board page (568 x 320 canvas): ink ground, the leaning brand with
@@ -102,7 +69,7 @@ class BadgeCollection final:public Popup {
         m_status=menuLabel(i18n::text("loading","Loading..."),13.f/64.f,{46+brand->getScaledContentSize().width+10,302},TextMuted,FontWeight::SemiBold);m_status->setAnchorPoint({0,.5f});m_root->addChild(m_status,5);
         auto* earnedCaption=menuLabel(i18n::text("badge-total-earned","TOTAL EARNED"),13.f/64.f,{554,309},TextMuted,FontWeight::SemiBold);earnedCaption->setAnchorPoint({1,.5f});m_root->addChild(earnedCaption,5);
         m_total=menuLabel("-",24.f/64.f,{554,296},Accent,FontWeight::Black);m_total->setAnchorPoint({1,.5f});m_root->addChild(m_total,5);
-        auto* hint=menuLabel(i18n::text("badge-drag","DRAG TO EXPLORE · TAP FOR DETAILS"),13.f/64.f,{284,62},TextMuted,FontWeight::SemiBold);fitFullMenuLabel(hint,520,14,13.f/64.f);m_root->addChild(hint,5);
+        auto* hint=menuLabel(i18n::text("badge-tap","TAP A BADGE FOR DETAILS"),13.f/64.f,{284,62},TextMuted,FontWeight::SemiBold);fitFullMenuLabel(hint,520,14,13.f/64.f);m_root->addChild(hint,5);
         auto* face=slab({90,17},{},ccc3(58,63,78),true,Ink);auto* refreshLabel=menuLabel(i18n::text("refresh","REFRESH"),14.f/64.f,{45,8.5f},Text,FontWeight::ExtraBold);face->addChild(refreshLabel,5);
         auto* retry=CCMenuItemSpriteExtra::create(face,this,menu_selector(BadgeCollection::refresh));retry->setPosition({284,30});m_buttonMenu->addChild(retry);
         m_session=RankedRuntime::get().spectatorLiveSessionToken();scheduleUpdate();refresh(nullptr);return true;
@@ -110,7 +77,7 @@ class BadgeCollection final:public Popup {
     void refresh(CCObject*){
         if(m_closed||m_busy)return;m_busy=true;auto const generation=++m_generation;auto const session=m_session;
         m_status->setString(i18n::text("loading","Loading...").c_str());
-        if(m_strip){m_strip->removeFromParentAndCleanup(true);m_strip=nullptr;}
+        clearCards();
         web::WebRequest request;request.header("Authorization","Bearer "+session);request.followRedirects(false);request.timeout(std::chrono::seconds(15));
         m_request.spawn(request.get("https://api.52-74-37-130.sslip.io/api/ranked/survival/badges"),[weak=WeakRef(this),generation,session](web::WebResponse response){
             auto p=weak.lock();if(!p||p->m_closed||p->m_generation!=generation||session!=RankedRuntime::get().spectatorLiveSessionToken())return;p->m_busy=false;
@@ -122,15 +89,48 @@ class BadgeCollection final:public Popup {
             p->m_status->setString(i18n::text("badge-official-rounds","OFFICIAL SURVIVAL ROUND RESULTS").c_str());p->m_status->setColor(TextMuted);
             std::int64_t earned=0;for(auto const& row:rows)earned+=survivalBadgeCollectionTotal(row["counts"]);
             p->m_total->setString(fmt::format("{}",earned).c_str());
-            // The 440-point strip scales to the 540-point board width.
-            p->m_strip=BadgeStrip::create(rows,p->m_data["totals"]["ELIMINATED"].asInt().unwrapOr(0),[weak](std::size_t index){if(auto owner=weak.lock())owner->detail(index);});
-            p->m_strip->setScale(540.f/440.f);p->m_strip->setPosition({14,96});p->m_root->addChild(p->m_strip,5);
+            p->layoutCards(rows,p->m_data["totals"]["ELIMINATED"].asInt().unwrapOr(0));
         });
     }
+    void clearCards(){for(auto* card:m_cards)card->removeFromParentAndCleanup(true);m_cards.clear();}
+    // Every badge on one board: up to six cards a row, rows shrink to fit and
+    // the last row is centred. Nothing is clipped or dragged, so the board
+    // reads the same on 16:9 phones and 4:3 iPads.
+    void layoutCards(std::vector<matjson::Value> const& rows,std::int64_t eliminated){
+        clearCards();
+        auto const count=rows.size()+1;
+        auto const columns=std::min<std::size_t>(count,6),lines=(count+columns-1)/columns;
+        constexpr float left=14,right=554,bottom=78,top=274,gap=8;
+        auto const cellW=std::min(96.f,(right-left-gap*static_cast<float>(columns-1))/static_cast<float>(columns));
+        auto const cellH=std::min(132.f,(top-bottom-gap*static_cast<float>(lines-1))/static_cast<float>(lines));
+        auto const gridH=cellH*static_cast<float>(lines)+gap*static_cast<float>(lines-1);
+        auto const gridTop=(top+bottom+gridH)/2;
+        for(std::size_t i=0;i<count;++i){
+            auto const last=i==rows.size();auto const line=i/columns,column=i%columns;
+            auto const inLine=std::min(columns,count-line*columns);
+            auto const lineW=cellW*static_cast<float>(inLine)+gap*static_cast<float>(inLine-1);
+            auto const x=(left+right-lineW)/2+static_cast<float>(column)*(cellW+gap)+cellW/2;
+            auto const y=gridTop-static_cast<float>(line)*(cellH+gap)-cellH/2;
+            // H4 card (.panel): a flat surface behind each badge; the badge
+            // keeps its face, grade frame and the X for eliminations.
+            auto* face=CCNode::create();face->setContentSize({cellW,cellH});
+            auto* card=CCLayerColor::create({Surface.r,Surface.g,Surface.b,255},cellW,cellH);face->addChild(card,1);
+            auto const edge=last?Red:SurfaceSoft;
+            auto* rule=CCLayerColor::create({edge.r,edge.g,edge.b,255},cellW,1.5f);rule->setPosition({0,cellH-1.5f});face->addChild(rule,2);
+            auto const side=std::min(cellW*.86f,cellH*.6f);
+            auto* cell=survivalCollectionBadge(last?0:static_cast<int>(rows[i]["nativeCode"].asInt().unwrapOr(0)),last?"ELIMINATED":"",side);
+            cell->setPosition({cellW/2,cellH*.58f});face->addChild(cell,5);
+            auto const total=last?eliminated:survivalBadgeCollectionTotal(rows[i]["counts"]);
+            auto* label=menuLabel(fmt::format("{}",total),.34f,{cellW/2,std::max(12.f,cellH*.13f)},last?Red:Text,FontWeight::ExtraBold);
+            fitFullMenuLabel(label,cellW-6,22,.34f);face->addChild(label,5);
+            auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(BadgeCollection::onCard));
+            item->setTag(static_cast<int>(i));item->setPosition({x,y});m_buttonMenu->addChild(item);m_cards.push_back(item);
+        }
+    }
+    void onCard(CCObject* sender){if(sender)detail(static_cast<std::size_t>(sender->getTag()));}
     void detail(std::size_t index){
-        if(m_closed||!m_strip)return;auto rows=survivalBadgeCollectionRows(m_data);if(index>rows.size())return;
-        auto* popup=BadgeDetail::create(m_data,index<rows.size()?rows[index]:matjson::Value(),index==rows.size(),[weak=WeakRef(this)]{if(auto owner=weak.lock();owner&&!owner->m_closed&&owner->m_strip)owner->m_strip->setTouchEnabled(true);});
-        if(popup){m_strip->setTouchEnabled(false);popup->show();}
+        if(m_closed||m_cards.empty())return;auto rows=survivalBadgeCollectionRows(m_data);if(index>rows.size())return;
+        if(auto* popup=BadgeDetail::create(m_data,index<rows.size()?rows[index]:matjson::Value(),index==rows.size(),[]{}))popup->show();
     }
     void update(float)override{if(m_session!=RankedRuntime::get().spectatorLiveSessionToken())onClose(nullptr);}
     void onExit()override{m_closed=true;++m_generation;m_request.cancel();unscheduleUpdate();Popup::onExit();}

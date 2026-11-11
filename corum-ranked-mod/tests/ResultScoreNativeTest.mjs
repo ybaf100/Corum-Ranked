@@ -1010,8 +1010,9 @@ int main() {
     assert.match(method(popupSource,'void addRoundOptions('),/addJukeboxButton\(\{cx \+ 116.0f, y\}/);
     assert.match(method(popupSource,'void addPlayerCard('),/center.x \+ \(self \? -55 : 55\)/);
     const main=method(popupSource,'void renderModeCard(');
-    // L1 half: the 190 px trophy at the top right, the rank (or streak) in the stat row.
-    assert.match(main,/auto const trophy = px\(190\.0f\);/);
+    // L1 half: the 190 px trophy at the top right (smaller on halves narrower
+    // than a 568-point screen's), the rank (or streak) in the stat row.
+    assert.match(main,/auto const trophy = px\(190\.0f\) \* std::min\(1\.0f, halfW \/ \(\(568\.0f \+ px\(56\.0f\)\) \/ 2\.0f\)\);/);
     assert.match(main,/thirdValue->setID\("ranked-profile-standing"_spr\)/);
 });
 

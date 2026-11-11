@@ -76,6 +76,7 @@
 #include <Geode/binding/LevelInfoLayer.hpp>
 #include <Geode/binding/MusicDownloadManager.hpp>
 #include <Geode/ui/ScrollLayer.hpp>
+#include <Geode/cocos/misc_nodes/CCClippingNode.h>
 #include <Geode/ui/Notification.hpp>
 #include <tuple>
 #include <Geode/binding/SimplePlayer.hpp>
@@ -627,6 +628,9 @@ class CorumRankedLayer final : public CCLayerColor {
     bool m_achievementToastPlaying = false;
     bool m_uiFadingOut = false;
     bool m_fadeInNextRender = true;
+    // A tap that changes the page (or a page's tab / list position) rebuilds
+    // at once instead of waiting for the runtime-key settle time.
+    std::string m_renderedLocalUi;
     SteadyClock::time_point m_uiTransitionDeadline {};
     CCLabelBMFont* m_resourceCountLabel = nullptr;
     CCLayerColor* m_resourceProgressFill = nullptr;
@@ -1077,25 +1081,68 @@ class CorumRankedLayer final : public CCLayerColor {
         // every menu several times a second, so taps never landed and a tap on
         // a rebuilt menu could crash.
         auto const enteringMatch = matched && m_renderedUiKey.rfind("match:", 0) != 0;
-        if (!enteringMatch && key != m_stableKeyCandidate) { m_stableKeyCandidate = key; m_stableKeySince = now; return false; }
-        if (!enteringMatch && now - m_stableKeySince < std::chrono::milliseconds(300)) return false;
+        auto const localUi = localUiSignature();
+        auto const immediate = enteringMatch || localUi != m_renderedLocalUi;
+        if (!immediate && key != m_stableKeyCandidate) { m_stableKeyCandidate = key; m_stableKeySince = now; return false; }
+        if (!immediate && now - m_stableKeySince < std::chrono::milliseconds(300)) return false;
         m_stableKeyCandidate.clear();
         if (RankedRuntime::get().view().stage == RuntimeStage::Matched)
             log::info("[RankedUi] rebuild {} -> {}", m_renderedUiKey, key);
-        auto const fadeOut = uiFadeOutSeconds();
-        if (fadeOut <= 0.0 || !m_fadeRoot) {
-            m_renderedUiKey = key;
-            m_fadeInNextRender = true;
-            return true;
-        }
+        // The page is rebuilt now, under a still of the old one that dissolves
+        // away: no dark gap between pages and the rebuild hitch stays hidden.
+        m_renderedUiKey = key;
+        m_renderedLocalUi = localUi;
+        m_fadeInNextRender = !beginCrossfade(crossfadeSeconds());
+        return true;
+    }
 
-        m_uiFadingOut = true;
-        m_uiTransitionDeadline = now + std::chrono::milliseconds(
-            static_cast<int>(std::round(fadeOut * 1000.0))
-        );
-        m_fadeRoot->stopAllActions();
-        m_fadeRoot->runAction(CCFadeTo::create(static_cast<float>(fadeOut), 0));
+    // What the player chose on this screen: page, tabs, list positions and
+    // the title selector. Runtime data never changes it.
+    std::string localUiSignature() const {
+        return fmt::format("{}|{}|{}|{}|{}|{}|{}|{}|{}", static_cast<int>(m_page), m_achievementPage, m_achievementScope,
+            static_cast<int>(m_historyScope), m_historyIndex, m_historyTabPage, m_historyOrder, m_historyResult, m_titleSelectorAchievement);
+    }
+
+    static bool clipsContent(CCNode* node) {
+        if (!node || !node->isVisible()) return false;
+        if (typeinfo_cast<CCClippingNode*>(node) || typeinfo_cast<CCScrollLayerExt*>(node)) return true;
+        for (auto* child : CCArrayExt<CCNode*>(node->getChildren())) if (clipsContent(child)) return true;
         return false;
+    }
+
+    float crossfadeSeconds() const {
+        return static_cast<float>(std::clamp(uiFadeInSeconds() + uiFadeOutSeconds() * 0.5, 0.0, 0.6));
+    }
+
+    // Captures the visible page into a texture above the page root and fades
+    // it out. Opaque by construction (alpha writes are masked after an opaque
+    // clear), so the dissolve never shows holes. Returns false when nothing
+    // was captured; the caller then fades the new page in instead.
+    bool beginCrossfade(float seconds) {
+        if (auto* previous = getChildByID("ranked-screen-crossfade"_spr)) previous->removeFromParentAndCleanup(true);
+        if (!m_fadeRoot || seconds <= 0.0f || !isRunning() || !isVisible()) return false;
+        // Scroll views clip with the screen's scissor and clipping nodes with
+        // its stencil; neither maps onto an off-screen texture, so such pages
+        // (history, map pool, result) fade the new page in instead.
+        if (clipsContent(m_fadeRoot)) return false;
+        auto const size = CCDirector::sharedDirector()->getWinSize();
+        auto* still = CCRenderTexture::create(static_cast<int>(std::ceil(size.width)), static_cast<int>(std::ceil(size.height)), kCCTexture2DPixelFormat_RGBA8888);
+        if (!still || !still->getSprite()) return false;
+        m_fadeRoot->stopAllActions();
+        still->beginWithClear(0.0f, 0.0f, 0.0f, 1.0f);
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+        m_fadeRoot->visit();
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        still->end();
+        m_fadeRoot->setOpacity(255);
+        still->setID("ranked-screen-crossfade"_spr);
+        still->setPosition({size.width / 2.0f, size.height / 2.0f});
+        auto* sprite = still->getSprite();
+        sprite->setBlendFunc({GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA});
+        addChild(still, 50);
+        sprite->runAction(CCEaseSineInOut::create(CCFadeTo::create(seconds, 0)));
+        still->runAction(CCSequence::create(CCDelayTime::create(seconds), CCRemoveSelf::create(), nullptr));
+        return true;
     }
 
     void applyFadeInIfNeeded() {
@@ -1108,7 +1155,7 @@ class CorumRankedLayer final : public CCLayerColor {
             return;
         }
         m_fadeRoot->setOpacity(0);
-        m_fadeRoot->runAction(CCFadeTo::create(static_cast<float>(fadeIn), 255));
+        m_fadeRoot->runAction(CCEaseSineOut::create(CCFadeTo::create(static_cast<float>(fadeIn), 255)));
     }
 
     void syncAudioMode() {
@@ -2385,6 +2432,9 @@ class CorumRankedLayer final : public CCLayerColor {
     // font size of N px is label scale N / 64. Lobby groups sit at the origin
     // at scale 1 and draw in screen points.
     static constexpr float kLobbyHeader = 36.0f, kLobbyFooter = 38.0f;
+    // Floating SETTINGS button outside the page tree: 92 x 28 centred at
+    // (width - inset - 46, 27), so its top edge is at 41.
+    static constexpr float kSettingsButtonWidth = 92.0f, kSettingsButtonInset = 20.0f, kSettingsButtonTop = 41.0f;
     static float px(float value) { return value / 2.0f; }
     static float fontScale(float cssPx) { return cssPx / 64.0f; }
 
@@ -2486,7 +2536,9 @@ class CorumRankedLayer final : public CCLayerColor {
             auto* band = CCLayerColor::create({tone.r, tone.g, tone.b, 41}, px(200.0f), y1 - y0);
             band->setPosition({x1 - (survival ? px(96.0f) : px(44.0f)) - px(200.0f), y0}); band->setSkewX(8.0f);
             band->setID("ranked-profile-tier-band"_spr); m_root->addChild(band, 2);
-            auto const trophy = px(190.0f);
+            // Sized for a 568-point screen; narrower (iPad) halves shrink it so
+            // the trophy and its halo stay clear of the season timer.
+            auto const trophy = px(190.0f) * std::min(1.0f, halfW / ((568.0f + px(56.0f)) / 2.0f));
             CCPoint const emblemAt {x1 - (survival ? px(84.0f) : px(28.0f)) - trophy / 2.0f, y1 - px(14.0f) - trophy / 2.0f};
             // On a tier change since the last visit the old trophy hands over.
             auto const tierShift = seen.valid && !seen.tier.empty() && seen.tier != nowTier;
@@ -3319,7 +3371,10 @@ class CorumRankedLayer final : public CCLayerColor {
             CCPoint const ring {(x1 + win.width - rightW) / 2.0f, (bottom + top) / 2.0f};
             m_queueRadar = CCDrawNode::create();
             m_queueRadar->setBlendFunc({GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA});
-            m_queueRadar->setPosition(ring); m_queueRadar->setScale(std::min(100.0f, (top - bottom) / 2.0f - 8.0f) / 46.0f);
+            // The rings never reach into the profile section or the search
+            // column: narrow (iPad) screens get a smaller radar.
+            auto const radarRadius = std::min({100.0f, (top - bottom) / 2.0f - 8.0f, (win.width - rightW - x1) / 2.0f - 6.0f});
+            m_queueRadar->setPosition(ring); m_queueRadar->setScale(std::max(20.0f, radarRadius) / 46.0f);
             m_queueContents->addChild(m_queueRadar,3);
             m_queueSurvivalArena = false;
             m_radarBlips.clear(); m_queueSweepAngle = 0.0f; m_radarFrameAt = {};
@@ -6288,7 +6343,9 @@ class CorumRankedLayer final : public CCLayerColor {
         m_achievementPage = std::min(m_achievementPage, pageCount - 1);
         auto const start = m_achievementPage * perPage;
         auto const gridLeft = px(28.0f), gridRight = size.width - px(28.0f), gridGap = 5.0f;
-        auto const gridTop = size.height - 84.0f - 11.0f - 6.0f, gridBottom = 30.0f;
+        // The floating SETTINGS button (92 x 28, bottom right) owns the footer's
+        // right end, so the grid stops above it and the pager sits to its left.
+        auto const gridTop = size.height - 84.0f - 11.0f - 6.0f, gridBottom = kSettingsButtonTop + 5.0f;
         auto const cardWidth = (gridRight - gridLeft - 2.0f * gridGap) / 3.0f;
         auto const cardHeight = (gridTop - gridBottom - gridGap) / 2.0f;
         for (std::size_t slot = 0; slot < perPage && start + slot < order.size(); ++slot) {
@@ -6416,10 +6473,11 @@ class CorumRankedLayer final : public CCLayerColor {
         // Footer: n / m PAGE and the ghost page buttons on the right.
         if (pageCount > 1 && !titleSelectorOpen) {
             m_root->addChild(makeLabel(fmt::format(fmt::runtime(tr("page-count", "{} / {} PAGE")), m_achievementPage + 1, pageCount), fontScale(13.0f),
-                {px(28.0f), 15.0f}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f}), 5);
-            boardButton("<", {24.0f, px(34.0f)}, {size.width - px(28.0f) - 24.0f - 4.0f - 12.0f, 15.0f}, menu_selector(CorumRankedLayer::onAchievementPrevious),
+                {px(28.0f), 20.0f}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f}), 5);
+            auto const pagerRight = size.width - kSettingsButtonInset - kSettingsButtonWidth - 8.0f;
+            boardButton("<", {24.0f, px(34.0f)}, {pagerRight - 24.0f - 4.0f - 12.0f, 20.0f}, menu_selector(CorumRankedLayer::onAchievementPrevious),
                 14.0f, false, "ranked-achievement-previous"_spr, m_achievementPage > 0);
-            boardButton(">", {24.0f, px(34.0f)}, {size.width - px(28.0f) - 12.0f, 15.0f}, menu_selector(CorumRankedLayer::onAchievementNext),
+            boardButton(">", {24.0f, px(34.0f)}, {pagerRight - 12.0f, 20.0f}, menu_selector(CorumRankedLayer::onAchievementNext),
                 14.0f, false, "ranked-achievement-next"_spr, m_achievementPage + 1 < pageCount);
         }
         renderAchievementTitleSelector(view);
