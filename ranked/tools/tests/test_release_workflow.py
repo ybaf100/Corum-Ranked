@@ -71,13 +71,18 @@ class ReleaseWorkflowTest(unittest.TestCase):
         self.assertFalse(actual_activation(success, deploy='false'))
 
     def test_build_only_does_not_disable_server_decision_or_make_a_client(self):
-        run = workflow('ranked-release.yml')['jobs']['policy']['steps'][0]['run']
+        run = next(s for s in workflow('ranked-release.yml')['jobs']['policy']['steps'] if s.get('id') == 'policy')['run']
         code = run.split("python3 - <<'PY'\n", 1)[1].rsplit('\nPY', 1)[0]
         import os
         import tempfile
         from unittest.mock import patch
-        for message, publish, deploy in [('[publish-r2] [deploy-lightsail]', True, True), ('[build only] [deploy-lightsail]', False, True), ('[publish-r2] [no-deploy]', True, False), ('[no-deploy]', False, False), ('ordinary', False, False)]:
-            with tempfile.NamedTemporaryFile() as out, patch.dict(os.environ, {'MESSAGE':message, 'PUBLISH':'false', 'AUTO_DEPLOY':'false', 'EVENT':'push', 'GITHUB_OUTPUT':out.name}):
+        # A version-changing main push releases without markers; markers stay
+        # accepted, and [build only] / [no-deploy] remain opt-outs.
+        cases = [('[publish-r2] [deploy-lightsail]', 'false', True, True), ('[build only] [deploy-lightsail]', 'false', False, True),
+                 ('[publish-r2] [no-deploy]', 'false', True, False), ('[no-deploy]', 'false', False, False), ('ordinary', 'false', False, False),
+                 ('ordinary', 'true', True, True), ('[no-deploy]', 'true', True, False), ('[build only]', 'true', False, True)]
+        for message, changed, publish, deploy in cases:
+            with tempfile.NamedTemporaryFile() as out, patch.dict(os.environ, {'MESSAGE':message, 'PUBLISH':'false', 'AUTO_DEPLOY':'false', 'EVENT':'push', 'VERSION_CHANGED':changed, 'GITHUB_OUTPUT':out.name}):
                 exec(code, {})
                 value = Path(out.name).read_text()
                 self.assertIn('publish='+str(publish).lower(), value)

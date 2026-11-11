@@ -14,18 +14,41 @@ jobs:
       publish: ${{ steps.policy.outputs.publish }}
       deploy: ${{ steps.policy.outputs.deploy }}
     steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          filter: blob:none
+      # A main push that changes the client version releases in one run:
+      # Debug R2 publication, then Singapore activation. No commit marker is
+      # needed; pushes that keep the version only validate and build.
+      - id: version
+        env:
+          BEFORE: ${{ github.event.before }}
+        shell: bash
+        run: |
+          version_of() { python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])'; }
+          now="$(version_of < corum-ranked-mod/mod.json)"
+          before=""
+          if [[ "$BEFORE" =~ ^[0-9a-f]{40}$ && ! "$BEFORE" =~ ^0+$ ]] && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            before="$(git show "${BEFORE}:corum-ranked-mod/mod.json" | version_of)"
+          fi
+          changed=false; [[ "$now" != "$before" ]] && changed=true
+          printf 'Client version %s -> %s (changed=%s)\n' "${before:-none}" "$now" "$changed"
+          printf 'changed=%s\n' "$changed" >> "$GITHUB_OUTPUT"
       - id: policy
         env:
           EVENT: ${{ github.event_name }}
           MESSAGE: ${{ github.event.head_commit.message }}
           PUBLISH: ${{ vars.RANKED_PUBLISH_R2 }}
           AUTO_DEPLOY: ${{ vars.LIGHTSAIL_AUTO_DEPLOY }}
+          VERSION_CHANGED: ${{ steps.version.outputs.changed }}
         run: |
           python3 - <<'PY'
           import os
           message = os.environ['MESSAGE']
-          publish = '[build only]' not in message and (os.environ['PUBLISH'] == 'true' or '[publish-r2]' in message or '[deploy-lightsail]' in message)
-          deploy = '[no-deploy]' not in message and (os.environ['EVENT'] == 'workflow_dispatch' or os.environ['AUTO_DEPLOY'] == 'true' or '[deploy-lightsail]' in message)
+          release = os.environ['EVENT'] == 'push' and os.environ.get('VERSION_CHANGED') == 'true'
+          publish = '[build only]' not in message and (os.environ['PUBLISH'] == 'true' or '[publish-r2]' in message or '[deploy-lightsail]' in message or release)
+          deploy = '[no-deploy]' not in message and (os.environ['EVENT'] == 'workflow_dispatch' or os.environ['AUTO_DEPLOY'] == 'true' or '[deploy-lightsail]' in message or release)
           with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
               out.write(f'publish={str(publish).lower()}\ndeploy={str(deploy).lower()}\n')
           PY
