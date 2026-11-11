@@ -22,10 +22,12 @@ class ProductionReleaseTest(unittest.TestCase):
         for channel, update in self.config["modUpdates"].items():
             update["downloadUrl"] = f"{BASE}/ranked/{channel}-{VERSION}/Corum-Ranked-{VERSION}-{channel}.geode"
 
-    def verify(self, expected_sha=None):
-        with patch.object(production.clients, "wait_for_clients", return_value=self.packages), \
+    def verify(self, expected_sha=None, server_sha=None, client_sha=None):
+        with patch.object(production.clients, "wait_for_clients", return_value=self.packages) as clients, \
              patch.object(production, "read_json", side_effect=[self.health, self.ready, self.config]):
-            return production.verify(VERSION, BASE, expected_sha)
+            result = production.verify(VERSION, BASE, expected_sha, server_sha, client_sha)
+            self.client_calls = clients.call_args_list
+            return result
 
     def test_both_public_channels_and_readiness_must_match(self):
         self.assertTrue(self.verify()["ready"])
@@ -42,6 +44,15 @@ class ProductionReleaseTest(unittest.TestCase):
             self.health['sourceSha'] = source
             with self.assertRaisesRegex(ValueError, 'Active server source SHA'):
                 self.verify('a'*40)
+
+    def test_server_only_release_pins_the_server_and_verifies_earlier_clients_by_bytes(self):
+        self.health['sourceSha'] = 'c'*40
+        self.assertEqual(self.verify(server_sha='c'*40, client_sha='')['sourceSha'], 'c'*40)
+        self.assertEqual(self.client_calls[-1].args, (BASE, VERSION, 0))
+        self.verify(server_sha='c'*40, client_sha='a'*40)
+        self.assertEqual(self.client_calls[-1].args, (BASE, VERSION, 0, 'a'*40))
+        with self.assertRaisesRegex(ValueError, 'Active server source SHA'):
+            self.verify(server_sha='d'*40, client_sha='')
 
     def test_bad_readiness_version_hash_or_url_fails(self):
         cases = [("ready", "schemaReady", False), ("ready", "rankedReady", False),

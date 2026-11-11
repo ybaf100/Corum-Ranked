@@ -19,8 +19,8 @@ def dependencies(job):
     return [needs] if isinstance(needs, str) else needs
 
 
-def actual_activation(results, publish='true', deploy='true'):
-    expression = workflow('ranked-release.yml')['jobs']['activate']['if']
+def actual_activation(results, publish='true', deploy='true', job='activate'):
+    expression = workflow('ranked-release.yml')['jobs'][job]['if']
     expression = expression.replace('always()', 'True').replace('&&', ' and ').replace('||', ' or ')
     expression = expression.replace('needs.policy.outputs.publish', repr(publish)).replace('needs.policy.outputs.deploy', repr(deploy))
     expression = re.sub(r'needs\.([\w-]+)\.result', lambda m: repr(results.get(m[1], 'skipped')), expression)
@@ -47,6 +47,10 @@ class ReleaseWorkflowTest(unittest.TestCase):
         self.assertEqual(set(dependencies(jobs['publish-debug'])), {'policy', 'validation', 'debug'})
         self.assertNotIn('always()', jobs['publish-debug']['if'])
         self.assertEqual(set(dependencies(jobs['activate'])), {'policy', 'validation', 'debug', 'image', 'publish-debug'})
+        # Same client version: the server deploys without waiting for the client build.
+        self.assertEqual(set(dependencies(jobs['activate-server'])), {'policy', 'validation', 'image'})
+        for name in ('activate', 'activate-server'):
+            self.assertEqual(jobs[name]['uses'], './.github/workflows/deploy-ranked-lightsail.yml')
 
     def test_workflows_run_on_main_or_manually_only(self):
         for path in W.glob('*.yml'):
@@ -69,6 +73,15 @@ class ReleaseWorkflowTest(unittest.TestCase):
                 with self.subTest(name=name, status=status):
                     self.assertFalse(actual_activation({**success, name: status}))
         self.assertFalse(actual_activation(success, deploy='false'))
+        # Exactly one activation path runs: a new client publishes first.
+        self.assertFalse(actual_activation(success, publish='false'))
+        server = {'validation': 'success', 'image': 'success'}
+        self.assertTrue(actual_activation(server, publish='false', job='activate-server'))
+        self.assertFalse(actual_activation(server, publish='true', job='activate-server'))
+        self.assertFalse(actual_activation(server, publish='false', deploy='false', job='activate-server'))
+        for name in server:
+            for status in ('failure', 'cancelled', 'skipped'):
+                self.assertFalse(actual_activation({**server, name: status}, publish='false', job='activate-server'))
 
     def test_build_only_does_not_disable_server_decision_or_make_a_client(self):
         run = next(s for s in workflow('ranked-release.yml')['jobs']['policy']['steps'] if s.get('id') == 'policy')['run']
@@ -76,10 +89,11 @@ class ReleaseWorkflowTest(unittest.TestCase):
         import os
         import tempfile
         from unittest.mock import patch
-        # A version-changing main push releases without markers; markers stay
-        # accepted, and [build only] / [no-deploy] remain opt-outs.
+        # Every main push deploys the server; a version-changing one also
+        # publishes its client. Markers stay accepted, and [build only] /
+        # [no-deploy] remain opt-outs.
         cases = [('[publish-r2] [deploy-lightsail]', 'false', True, True), ('[build only] [deploy-lightsail]', 'false', False, True),
-                 ('[publish-r2] [no-deploy]', 'false', True, False), ('[no-deploy]', 'false', False, False), ('ordinary', 'false', False, False),
+                 ('[publish-r2] [no-deploy]', 'false', True, False), ('[no-deploy]', 'false', False, False), ('ordinary', 'false', False, True),
                  ('ordinary', 'true', True, True), ('[no-deploy]', 'true', True, False), ('[build only]', 'true', False, True)]
         for message, changed, publish, deploy in cases:
             with tempfile.NamedTemporaryFile() as out, patch.dict(os.environ, {'MESSAGE':message, 'PUBLISH':'false', 'AUTO_DEPLOY':'false', 'EVENT':'push', 'VERSION_CHANGED':changed, 'GITHUB_OUTPUT':out.name}):
@@ -87,6 +101,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
                 value = Path(out.name).read_text()
                 self.assertIn('publish='+str(publish).lower(), value)
                 self.assertIn('deploy='+str(deploy).lower(), value)
+                self.assertIn('release='+changed, value)
 
     def test_stale_check_occurs_after_upload_before_restricted_activation(self):
         jobs = workflow('deploy-ranked-lightsail.yml')['jobs']

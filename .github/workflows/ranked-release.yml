@@ -13,14 +13,16 @@ jobs:
     outputs:
       publish: ${{ steps.policy.outputs.publish }}
       deploy: ${{ steps.policy.outputs.deploy }}
+      release: ${{ steps.policy.outputs.release }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           filter: blob:none
-      # A main push that changes the client version releases in one run:
-      # Debug R2 publication, then Singapore activation. No commit marker is
-      # needed; pushes that keep the version only validate and build.
+      # Every main push deploys the server. One that changes the client
+      # version first publishes its Debug package to R2 (activation waits for
+      # it); one that keeps the version deploys as soon as validation and the
+      # image are ready. No commit marker is needed.
       - id: version
         env:
           BEFORE: ${{ github.event.before }}
@@ -48,9 +50,9 @@ jobs:
           message = os.environ['MESSAGE']
           release = os.environ['EVENT'] == 'push' and os.environ.get('VERSION_CHANGED') == 'true'
           publish = '[build only]' not in message and (os.environ['PUBLISH'] == 'true' or '[publish-r2]' in message or '[deploy-lightsail]' in message or release)
-          deploy = '[no-deploy]' not in message and (os.environ['EVENT'] == 'workflow_dispatch' or os.environ['AUTO_DEPLOY'] == 'true' or '[deploy-lightsail]' in message or release)
+          deploy = '[no-deploy]' not in message and (os.environ['EVENT'] in ('push', 'workflow_dispatch') or os.environ['AUTO_DEPLOY'] == 'true' or '[deploy-lightsail]' in message)
           with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
-              out.write(f'publish={str(publish).lower()}\ndeploy={str(deploy).lower()}\n')
+              out.write(f'publish={str(publish).lower()}\ndeploy={str(deploy).lower()}\nrelease={str(release).lower()}\n')
           PY
   # validate -> debug build -> debug publication -> Lightsail production.
   # Release builds and Debug-OFF validation are paused (pre-launch); the
@@ -91,13 +93,29 @@ jobs:
     secrets:
       r2_access_key_id: ${{ secrets.RANKED_R2_ACCESS_KEY_ID }}
       r2_secret_access_key: ${{ secrets.RANKED_R2_SECRET_ACCESS_KEY }}
+  # A new client: activation (and its required version) waits for the
+  # complete Debug build and its R2 publication.
   activate:
     needs: [policy, validation, debug, image, publish-debug]
     if: >-
-      always() && needs.policy.outputs.deploy == 'true' &&
+      always() && needs.policy.outputs.deploy == 'true' && needs.policy.outputs.publish == 'true' &&
       needs.validation.result == 'success' &&
       needs.debug.result == 'success' && needs.image.result == 'success' &&
-      (needs.policy.outputs.publish != 'true' || needs.publish-debug.result == 'success')
+      needs.publish-debug.result == 'success'
+    uses: ./.github/workflows/deploy-ranked-lightsail.yml
+    with:
+      coordinated: true
+      mode: deploy
+      prepared_image: Corum-Ranked-Server-${{ github.sha }}
+    secrets: inherit
+  # Same client version: deploy the server without waiting for the client
+  # build. The deploy re-verifies that version's already-published packages
+  # and fails when none is public.
+  activate-server:
+    needs: [policy, validation, image]
+    if: >-
+      always() && needs.policy.outputs.deploy == 'true' && needs.policy.outputs.publish != 'true' &&
+      needs.validation.result == 'success' && needs.image.result == 'success'
     uses: ./.github/workflows/deploy-ranked-lightsail.yml
     with:
       coordinated: true

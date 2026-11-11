@@ -110,13 +110,26 @@ jobs:
           docker save "corum-ranked:${GITHUB_SHA}" | gzip -1 > "/tmp/corum-ranked-${GITHUB_SHA}.tar.gz"
 
       - name: Verify published clients before required-version activation
+        id: clients
         if: inputs.mode == 'deploy'
         env:
           RANKED_DOWNLOAD_BASE_URL: ${{ vars.RANKED_DOWNLOAD_BASE_URL || 'https://pub-11442f32945446a49b9da0a5e69f2451.r2.dev' }}
         run: |
           python3 -m unittest discover -s ranked/tools/tests -p 'test_published_clients.py'
           version="$(python3 -c 'import json; print(json.load(open("corum-ranked-mod/mod.json"))["version"])')"
-          python3 ranked/tools/verify-published-clients.py --base "$RANKED_DOWNLOAD_BASE_URL" --version "$version" --wait-seconds 0 --expected-sha "$GITHUB_SHA"
+          if python3 ranked/tools/verify-published-clients.py --base "$RANKED_DOWNLOAD_BASE_URL" --version "$version" --wait-seconds 0 --expected-sha "$GITHUB_SHA"; then
+            echo "client_sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # A server-only source keeps a client version whose packages were
+          # published by an earlier source. Activate only when that version's
+          # packages are public and intact (full bytes, identity, every
+          # platform, one source SHA); an unpublished version fails here.
+          if ! python3 ranked/tools/verify-published-clients.py --base "$RANKED_DOWNLOAD_BASE_URL" --version "$version" --wait-seconds 0; then
+            echo "::error::No intact public $version client package. Publish the client (bump the version) before deploying."
+            exit 1
+          fi
+          echo "client_sha=" >> "$GITHUB_OUTPUT"
 
       - name: Reject superseded source immediately before activation
         id: fresh
@@ -169,5 +182,6 @@ jobs:
         if: steps.activation.outputs.activated == 'true'
         env:
           RANKED_DOWNLOAD_BASE_URL: ${{ vars.RANKED_DOWNLOAD_BASE_URL || 'https://pub-11442f32945446a49b9da0a5e69f2451.r2.dev' }}
-        run: python3 ranked/tools/verify-production-release.py --expected-sha "$GITHUB_SHA"
+          CLIENT_SHA: ${{ steps.clients.outputs.client_sha }}
+        run: python3 ranked/tools/verify-production-release.py --server-sha "$GITHUB_SHA" --client-sha "$CLIENT_SHA"
 

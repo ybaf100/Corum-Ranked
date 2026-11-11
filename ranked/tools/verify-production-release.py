@@ -21,12 +21,17 @@ def read_json(path):
         return json.load(response)
 
 
-def verify(version, base, expected_sha=None):
-    packages = clients.wait_for_clients(base, version, 0, expected_sha) if expected_sha else clients.wait_for_clients(base, version, 0)
+def verify(version, base, expected_sha=None, server_sha=None, client_sha=None):
+    # expected_sha pins both the server and the published clients to one
+    # source. A server-only release keeps the clients of an earlier source:
+    # then only server_sha is pinned and the clients are verified by bytes.
+    server_sha = server_sha or expected_sha
+    client_sha = expected_sha if client_sha is None else (client_sha or None)
+    packages = clients.wait_for_clients(base, version, 0, client_sha) if client_sha else clients.wait_for_clients(base, version, 0)
     health = read_json("/health")
     if health.get("status") != "ok" or health.get("service") != "corum-ranked-server":
         raise ValueError("Singapore health failed")
-    if expected_sha is not None and health.get("sourceSha") != expected_sha:
+    if server_sha is not None and health.get("sourceSha") != server_sha:
         raise ValueError("Active server source SHA differs from the verified clients")
     ready = read_json("/ready")
     if not all(ready.get(key) is True for key in ("ready", "databaseConnected", "databaseReady", "schemaReady")):
@@ -48,7 +53,7 @@ def verify(version, base, expected_sha=None):
             raise ValueError(f"{channel}: unexpected live download URL")
     result = {"api": API, "version": version, "health": True, "ready": True,
               "clients": packages, "modes": config.get("modes", {})}
-    if expected_sha is not None:
+    if server_sha is not None:
         result["sourceSha"] = health["sourceSha"]
     print(json.dumps(result), flush=True)
     return result
@@ -57,7 +62,9 @@ def verify(version, base, expected_sha=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--expected-sha")
+    parser.add_argument("--server-sha")
+    parser.add_argument("--client-sha", help="empty: clients published by an earlier source")
     args = parser.parse_args()
     version = json.loads((ROOT / "corum-ranked-mod/mod.json").read_text())["version"]
     verify(version, os.environ.get("RANKED_DOWNLOAD_BASE_URL") or
-           "https://pub-11442f32945446a49b9da0a5e69f2451.r2.dev", args.expected_sha)
+           "https://pub-11442f32945446a49b9da0a5e69f2451.r2.dev", args.expected_sha, args.server_sha, args.client_sha)
