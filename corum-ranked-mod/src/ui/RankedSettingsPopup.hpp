@@ -9,9 +9,9 @@
 #include "RankedCreditsPopup.hpp"
 #include "RankedPopupLayout.hpp"
 #include "RankedConfirmPopup.hpp"
+#include "RankedBoardSlider.hpp"
 #include "../replay/SurvivalReplaySeekSpeed.hpp"
 #include "../debug/DebugLogUploader.hpp"
-#include <Geode/binding/Slider.hpp>
 #include <Geode/ui/Popup.hpp>
 #include <array>
 #include <functional>
@@ -29,58 +29,79 @@ struct RankedSettingsHooks {
 // Q1 board: title and X, language, menu BGM, replay seek speed, the four
 // Survival defaults as switches, and a row of ghost buttons.
 class RankedSettingsPopup final : public Popup {
-    static constexpr float kWidth = 340, kHeight = 296, kPad = 12;
+    // Board px / 2: the 680 x 592 .pop with 20 x 24 px padding.
+    static constexpr float kWidth = 340, kHeight = 296, kPad = 12, kRight = kWidth - kPad;
     RankedSettingsHooks m_hooks;
-    Slider* m_volume = nullptr;
+    RankedBoardSlider* m_volume = nullptr;
     CCLabelBMFont* m_percent = nullptr;
     CCLabelBMFont* m_forumStatus = nullptr;
     CCLabelBMFont* m_forumCooldown = nullptr;
     CCMenuItemSpriteExtra* m_refreshRecords = nullptr;
     CCMenuItemSpriteExtra *m_defaultLdm=nullptr,*m_defaultShake=nullptr,*m_thumbnails=nullptr,*m_selectionMotion=nullptr;
     std::array<CCMenuItemSpriteExtra*,4> m_seekOptions{};
+    std::array<float,4> m_seekWidths{};
     bool m_refreshDisabled = false;
     bool m_closed = false, m_exited = false, m_dirty = false;
 
-    static CCNode* ghostFace(std::string const& text, float width, ccColor3B color = Text) {
-        auto* face = surface({width, 20}, {}, Steel, SurfaceRaised, 250, true);
-        auto* caption = menuLabel(text, .22f, {width / 2, 10}, color, FontWeight::ExtraBold);
-        fitSingleLineMenuLabel(caption, width - 10, 14, .22f); face->addChild(caption, 5);
+    // A 1 px (board 2 px) frame around a box; `skipLeft` joins it to the
+    // box before it (.lang / .seg button+button {border-left:0}).
+    static void frame(CCNode* face, CCSize size, ccColor3B color, bool skipLeft = false) {
+        auto line = [&](float x, float y, float w, float h) {
+            auto* edge = CCLayerColor::create({color.r, color.g, color.b, 255}, w, h); edge->setPosition({x, y}); face->addChild(edge, 2);
+        };
+        line(0, 0, size.width, 1); line(0, size.height - 1, size.width, 1);
+        if (!skipLeft) line(0, 0, 1, size.height);
+        line(size.width - 1, 0, 1, size.height);
+    }
+    static CCNode* box(CCSize size) {
+        auto* face = CCNode::create(); face->setContentSize(size); face->setAnchorPoint({.5f, .5f}); return face;
+    }
+    // .btn.ghost.xs: 34 px tall, 14 px padding, a slanted #3A3F4E outline.
+    static CCNode* ghostFace(std::string const& text) {
+        auto* measure = menuLabel(text, 14.f / 64.f, {}, Text, FontWeight::ExtraBold);
+        auto const width = measure->getScaledContentSize().width + 14.0f;
+        auto* face = slab({width, 17}, {}, ccc3(58, 63, 78), true, Ink);
+        auto* caption = menuLabel(text, 14.f / 64.f, {width / 2, 8.5f}, Text, FontWeight::ExtraBold);
+        fitSingleLineMenuLabel(caption, width - 6, 12, 14.f / 64.f); face->addChild(caption, 5);
         return face;
     }
     CCNode* refreshButtonFace(bool disabled) {
-        auto* face = ghostFace(i18n::text("forum-refresh", "Refresh forum records"), 92);
+        auto* face = ghostFace(i18n::text("forum-refresh", "Refresh forum records"));
         if (disabled) grayButtonVisual(face);
         return face;
     }
-    // Board .xbtn: a square ghost button with an X drawn from two bars.
+    // .xbtn: 44 px square, a #2B2F3C frame and an 18 px X.
     static CCNode* closeFace() {
-        auto* face = surface({20, 20}, {}, Steel, SurfaceRaised, 250, true);
+        auto* face = box({22, 22}); frame(face, {22, 22}, ccc3(43, 47, 60));
         for (int i = 0; i < 2; ++i) {
-            auto* bar = CCLayerColor::create({Text.r, Text.g, Text.b, 255});
-            bar->setContentSize({11, 2}); bar->setPosition({10 - 5.5f, 10 - 1}); bar->setRotation(i ? -45.f : 45.f);
-            face->addChild(bar, 5);
+            auto* bar = CCLayerColor::create({Text.r, Text.g, Text.b, 255}, 10.0f, 1.3f);
+            bar->setPosition({11 - 5.0f, 11 - 0.65f}); bar->setRotation(i ? -45.f : 45.f); face->addChild(bar, 5);
         }
         return face;
     }
-    // Board .toggle: a full-width row with its caption on the left and a
-    // switch on the right; the whole row is the touch target.
+    // .toggle row: the 16 px caption on the left, the slanted 58 x 30 px
+    // switch on the right (lime with a dark knob when on).
     static CCNode* toggleFace(std::string const& caption, bool on) {
-        auto* face = CCNode::create(); face->setAnchorPoint({.5f, .5f}); face->setContentSize({kWidth - kPad * 2, 18});
-        auto* name = menuLabel(caption, .24f, {0, 9}, Text, FontWeight::ExtraBold);
-        fitSingleLineMenuLabel(name, kWidth - kPad * 2 - 40, 14, .24f); name->setAnchorPoint({0, .5f}); face->addChild(name, 5);
-        auto const track = on ? Accent : SurfaceSoft;
-        auto* rail = CCLayerColor::create({track.r, track.g, track.b, 255}, 26, 12);
-        rail->setPosition({kWidth - kPad * 2 - 26, 3}); face->addChild(rail, 4);
-        auto const knob = on ? AccentInk : TextMuted;
-        auto* thumb = CCLayerColor::create({knob.r, knob.g, knob.b, 255}, 8, 8);
-        thumb->setPosition({on ? 16.f : 2.f, 2}); rail->addChild(thumb, 1);
+        constexpr float rowW = kWidth - kPad * 2, rowH = 15;
+        auto* face = box({rowW, rowH});
+        auto* name = menuLabel(caption, .25f, {0, rowH / 2}, Text, FontWeight::ExtraBold);
+        fitSingleLineMenuLabel(name, rowW - 40, 13, .25f); name->setAnchorPoint({0, .5f}); face->addChild(name, 5);
+        auto const track = on ? AccentFill : ccc3(43, 47, 60);
+        auto* rail = CCLayerColor::create({track.r, track.g, track.b, 255}, 29, 15);
+        rail->setPosition({rowW - 29, 0}); rail->setSkewX(8.0f); face->addChild(rail, 4);
+        auto const knob = on ? Ink : TextMuted;
+        auto* thumb = CCLayerColor::create({knob.r, knob.g, knob.b, 255}, 10, 10);
+        thumb->setPosition({on ? 16.5f : 2.5f, 2.5f}); rail->addChild(thumb, 1);
         return face;
     }
-    // Board .lang / .seg: the chosen cell is filled, the rest are ghosts.
-    static CCNode* segmentFace(std::string const& text, float width, bool on, ccColor3B color = Accent) {
-        auto* face = surface({width, 18}, {}, on ? color : Steel, on ? color : SurfaceRaised, 255, true);
-        auto* caption = menuLabel(text, .21f, {width / 2, 9}, on ? AccentInk : TextMuted, FontWeight::ExtraBold);
-        fitSingleLineMenuLabel(caption, width - 6, 13, .21f); face->addChild(caption, 5);
+    // .lang / .seg cell: the chosen one filled #A6DE24, the rest framed.
+    static CCNode* cellFace(std::string const& text, CCSize size, bool on, bool first, float css) {
+        auto* face = box(size);
+        if (on) {
+            auto* fill = CCLayerColor::create({AccentFill.r, AccentFill.g, AccentFill.b, 255}, size.width, size.height); face->addChild(fill, 1);
+        } else frame(face, size, ccc3(43, 47, 60), !first);
+        auto* caption = menuLabel(text, css / 64.f, {size.width / 2, size.height / 2}, on ? AccentInk : TextMuted, on ? FontWeight::Black : FontWeight::ExtraBold);
+        fitSingleLineMenuLabel(caption, size.width - 4, size.height - 4, css / 64.f); face->addChild(caption, 5);
         return face;
     }
 
@@ -91,8 +112,8 @@ class RankedSettingsPopup final : public Popup {
         m_bgSprite->setVisible(false);m_closeBtn->setVisible(false);setID("ranked-settings-popup"_spr);
         auto* content=rankedPopupContent(m_mainLayer,m_buttonMenu,layout);
         auto* panel=surface({kWidth,kHeight},{kWidth/2,kHeight/2},Accent,Surface,255,true);content->addChild(panel,0);
-        auto add=[&](std::string const& text,CCPoint position,CCSize bounds,float scale,ccColor3B color,FontWeight weight=FontWeight::ExtraBold,float anchor=0.f){
-            auto* label=menuLabel(text,scale,position,color,weight);fitSingleLineMenuLabel(label,bounds.width,bounds.height,scale);
+        auto add=[&](std::string const& text,CCPoint position,float width,float scale,ccColor3B color,FontWeight weight=FontWeight::ExtraBold,float anchor=0.f){
+            auto* label=menuLabel(text,scale,position,color,weight);fitSingleLineMenuLabel(label,width,scale*48,scale);
             label->setAnchorPoint({anchor,.5f});panel->addChild(label,10);return label;
         };
         m_hooks=std::move(hooks);
@@ -101,72 +122,70 @@ class RankedSettingsPopup final : public Popup {
         auto button=[&](CCNode* face,SEL_MenuHandler handler,CCPoint at,int tag=0){
             auto* item=CCMenuItemSpriteExtra::create(face,this,handler);item->setPosition(at);item->setTag(tag);menu->addChild(item);return item;
         };
-        auto const right=kWidth-kPad;
-        // Title row: the leaning 28 px title and the X.
-        if(auto* title=add(i18n::text("settings","Settings"),{kPad,276},{240,24},28.f/64.f,Text,FontWeight::Black))leanLabel(title);
-        button(closeFace(),menu_selector(RankedSettingsPopup::onClose),{right-10,276})->setID("ranked-settings-close"_spr);
-        // Language: KO / EN.
-        add(i18n::text("settings-language","Language"),{kPad,248},{180,14},.27f,Text);
-        add(i18n::text("settings-language-scope","Ranked screen language"),{kPad,237},{180,11},.19f,TextMuted,FontWeight::SemiBold);
+        constexpr float label = 16.f / 64.f, caption = 13.f / 64.f;
+        // Title row (44 px): .pttl and .xbtn.
+        if(auto* title=add(i18n::text("settings","Settings"),{kPad,275},240,28.f/64.f,Text,FontWeight::Black))leanLabel(title);
+        button(closeFace(),menu_selector(RankedSettingsPopup::onClose),{kRight-11,275})->setID("ranked-settings-close"_spr);
+        // Language row: caption column and .lang (two 48 x 44 px cells).
+        add(i18n::text("settings-language","Language"),{kPad,251},200,label,Text);
+        add(i18n::text("settings-language-scope","Ranked screen language"),{kPad,240},200,caption,TextMuted,FontWeight::SemiBold);
         auto const korean=i18n::isKorean();
-        button(segmentFace("KO",34,korean),menu_selector(RankedSettingsPopup::onLanguage),{right-53,242},1)->setID("ranked-settings-language-ko"_spr);
-        button(segmentFace("EN",34,!korean),menu_selector(RankedSettingsPopup::onLanguage),{right-17,242},0)->setID("ranked-settings-language-en"_spr);
-        // Menu BGM with its value on the right and the slider below.
-        add(i18n::text("ranked-volume","Ranked menu BGM"),{kPad,215},{220,14},.27f,Text);
-        add(i18n::text("ranked-volume-scope","Lobby, matchmaking and results BGM"),{kPad,204},{220,11},.19f,TextMuted,FontWeight::SemiBold);
-        m_percent=add("",{right,210},{60,16},.30f,Accent,FontWeight::ExtraBold,1.f);
-        m_volume=Slider::create(this,menu_selector(RankedSettingsPopup::onVolume),1.2f);if(!m_volume)return false;
-        m_volume->setID("ranked-volume-slider"_spr);m_volume->setPosition({kWidth/2,186});m_volume->setValue(RankedVolumeControl::get().volume());panel->addChild(m_volume,20);
+        button(cellFace("KO",{24,22},korean,true,14),menu_selector(RankedSettingsPopup::onLanguage),{kRight-36,246},1)->setID("ranked-settings-language-ko"_spr);
+        button(cellFace("EN",{24,22},!korean,false,14),menu_selector(RankedSettingsPopup::onLanguage),{kRight-12,246},0)->setID("ranked-settings-language-en"_spr);
+        // Menu BGM: caption column, the value (.val) on the right, the slider row below.
+        add(i18n::text("ranked-volume","Ranked menu BGM"),{kPad,223},250,label,Text);
+        add(i18n::text("ranked-volume-scope","Lobby, matchmaking and results BGM"),{kPad,212},250,caption,TextMuted,FontWeight::SemiBold);
+        m_percent=add("",{kRight,218},60,24.f/64.f,Text,FontWeight::Black,1.f);
+        m_volume=RankedBoardSlider::create(kWidth-kPad*2,RankedVolumeControl::get().volume(),this,[this]{onVolume(nullptr);});
+        if(!m_volume)return false;
+        m_volume->setID("ranked-volume-slider"_spr);m_volume->setPosition({kPad,194});panel->addChild(m_volume,20);
         updatePercent();
-        // Replay & spectate seek speed: a four-cell segmented control.
-        add(i18n::text("replay-seek-speed","Replay & spectate seek speed"),{kPad,163},{156,14},.27f,Text);
-        add(i18n::text("replay-seek-scope","Faster seeking works the device harder"),{kPad,152},{156,11},.19f,TextMuted,FontWeight::SemiBold);
+        // Replay & spectate seek speed: caption column and the four-cell .seg.
+        float segW=0;
+        for(std::size_t i=0;i<m_seekOptions.size();++i){
+            m_seekWidths[i]=menuLabel(seekName(replay::kReplaySeekSpeeds[i]),14.f/64.f,{},Text,FontWeight::ExtraBold)->getScaledContentSize().width+14;
+            segW+=m_seekWidths[i];
+        }
+        add(i18n::text("replay-seek-speed","Replay & spectate seek speed"),{kPad,182},kRight-segW-kPad-8,label,Text);
+        add(i18n::text("replay-seek-scope","Faster seeking works the device harder"),{kPad,171},kRight-segW-kPad-8,caption,TextMuted,FontWeight::SemiBold);
+        float segX=kRight-segW;
         for(std::size_t i=0;i<m_seekOptions.size();++i){
             auto const speed=replay::kReplaySeekSpeeds[i];
-            m_seekOptions[i]=button(seekOptionFace(speed,false),menu_selector(RankedSettingsPopup::onSeekOption),
-                {right-148+19+37.f*static_cast<float>(i),157},replay::replaySeekSpeedToInt(speed));
+            m_seekOptions[i]=button(seekOptionFace(i,false),menu_selector(RankedSettingsPopup::onSeekOption),{segX+m_seekWidths[i]/2,177},replay::replaySeekSpeedToInt(speed));
+            segX+=m_seekWidths[i];
         }
         m_seekOptions[0]->setID("replay-seek-speed-button"_spr);updateSeekOptions();
-        // Survival defaults.
-        add(i18n::text("survival-default-options","SURVIVAL DEFAULTS"),{kPad,131},{220,12},.22f,Accent);
+        // Survival defaults (.sec) and the four switch rows.
+        add(i18n::text("survival-default-options","SURVIVAL DEFAULTS"),{kPad,156},250,14.f/64.f,TextMuted);
         auto const defaults=SurvivalOptionsPreferences::get().defaults();
         auto& preferences=SurvivalOptionsPreferences::get();
-        auto toggle=[&](std::string const& caption,bool value,float y,int tag){
-            return button(toggleFace(caption,value),menu_selector(RankedSettingsPopup::onDefaults),{kWidth/2,y},tag);
+        auto toggle=[&](std::string const& text,bool value,float y,int tag){
+            return button(toggleFace(text,value),menu_selector(RankedSettingsPopup::onDefaults),{kWidth/2,y},tag);
         };
-        m_defaultLdm=toggle(i18n::text("survival-default-ldm","Default LDM"),defaults.lowDetail,113,0);m_defaultLdm->setID("survival-default-ldm-switch"_spr);
-        m_defaultShake=toggle(i18n::text("survival-default-shake","Default Disable Shake"),defaults.disableShake,93,1);m_defaultShake->setID("survival-default-shake-switch"_spr);
-        m_thumbnails=toggle(i18n::text("survival-image-thumbnails","Level Thumbnails"),preferences.thumbnails(),73,2);
+        m_defaultLdm=toggle(i18n::text("survival-default-ldm","Default LDM"),defaults.lowDetail,139,0);m_defaultLdm->setID("survival-default-ldm-switch"_spr);
+        m_defaultShake=toggle(i18n::text("survival-default-shake","Default Disable Shake"),defaults.disableShake,119,1);m_defaultShake->setID("survival-default-shake-switch"_spr);
+        m_thumbnails=toggle(i18n::text("survival-image-thumbnails","Level Thumbnails"),preferences.thumbnails(),99,2);
         m_thumbnails->setID("survival-thumbnails-switch"_spr);
-        m_selectionMotion=toggle(i18n::text("survival-selection-motion","Fancy Level Selection Animation"),preferences.selectionMotion(),53,3);
+        m_selectionMotion=toggle(i18n::text("survival-selection-motion","Fancy Level Selection Animation"),preferences.selectionMotion(),79,3);
         m_selectionMotion->setID("survival-selection-motion-switch"_spr);
         // Forum record status above the ghost button row.
-        m_forumStatus=add("",{kPad,34},{200,12},.19f,TextMuted,FontWeight::SemiBold);
-        m_forumCooldown=add("",{right,34},{110,12},.19f,TextMuted,FontWeight::SemiBold,1.f);m_forumCooldown->setID("ranked-forum-refresh-cooldown"_spr);
-        m_refreshRecords=button(refreshButtonFace(false),menu_selector(RankedSettingsPopup::onRefreshRecords),{kPad+46,16});
+        m_forumStatus=add("",{kPad,38},200,caption,TextMuted,FontWeight::SemiBold);
+        m_forumCooldown=add("",{kRight,38},110,caption,TextMuted,FontWeight::SemiBold,1.f);m_forumCooldown->setID("ranked-forum-refresh-cooldown"_spr);
+        // Bottom row (.btn.ghost.xs, 10 px gaps): forum refresh, update
+        // channel, logs (Debug builds), and CREDITS on the right.
+        float x=kPad;
+        auto place=[&](CCMenuItemSpriteExtra* item){auto const w=item->getContentSize().width;item->setPosition({x+w/2,18.5f});x+=w+5;return item;};
+        m_refreshRecords=place(button(refreshButtonFace(false),menu_selector(RankedSettingsPopup::onRefreshRecords),{0,0}));
         m_refreshRecords->setID("ranked-forum-refresh-button"_spr);
-        float x=kPad+92+6;
-        if(m_hooks.updateChannel){
-            button(ghostFace(i18n::text("update-channel","UPDATE CHANNEL"),76),menu_selector(RankedSettingsPopup::onUpdateChannel),{x+38,16})
-                ->setID("ranked-settings-update-channel"_spr);
-            x+=76+6;
-        }
+        if(m_hooks.updateChannel)place(button(ghostFace(i18n::text("update-channel","UPDATE CHANNEL")),menu_selector(RankedSettingsPopup::onUpdateChannel),{0,0}))
+            ->setID("ranked-settings-update-channel"_spr);
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
-        button(ghostFace(i18n::text("debug-send-logs","SEND LOGS"),64),menu_selector(RankedSettingsPopup::onSendLogs),{x+32,16})
-            ->setID("ranked-settings-send-logs"_spr);
+        place(button(ghostFace(i18n::text("debug-send-logs","SEND LOGS")),menu_selector(RankedSettingsPopup::onSendLogs),{0,0}))->setID("ranked-settings-send-logs"_spr);
 #endif
-        (void)x;
-        button(ghostFace("CREDITS",64),menu_selector(RankedSettingsPopup::onCredits),{right-32,16})->setID("ranked-credits-button"_spr);
+        auto* credits=button(ghostFace("CREDITS"),menu_selector(RankedSettingsPopup::onCredits),{0,0});
+        credits->setPosition({kRight-credits->getContentSize().width/2,18.5f});credits->setID("ranked-credits-button"_spr);
         RankedRuntime::get().fetchForumRecords();schedule(schedule_selector(RankedSettingsPopup::updateForumStatus),.15f);updateForumStatus(0);
-        // Includes the one-time migration if this is the first Settings visit.
-        m_dirty=true;return true;
-    }
     static replay::ReplaySeekSpeed seekSpeed(){return replay::replaySeekSpeedFromInt(static_cast<int>(Mod::get()->getSavedValue<int64_t>("replay-seek-speed",1)));}
-    static ccColor3B seekColor(replay::ReplaySeekSpeed speed){
-        switch(speed){case replay::ReplaySeekSpeed::Low:return Steel;case replay::ReplaySeekSpeed::Fast:return Gold;
-            case replay::ReplaySeekSpeed::UltraFast:return Red;case replay::ReplaySeekSpeed::Normal:break;}
-        return Accent;
-    }
     static std::string seekName(replay::ReplaySeekSpeed speed){
         switch(speed){case replay::ReplaySeekSpeed::Low:return i18n::text("replay-seek-low","Low");
             case replay::ReplaySeekSpeed::Fast:return i18n::text("replay-seek-fast","Fast");
@@ -174,15 +193,13 @@ class RankedSettingsPopup final : public Popup {
             case replay::ReplaySeekSpeed::Normal:break;}
         return i18n::text("replay-seek-normal","Normal");
     }
-    CCNode* seekOptionFace(replay::ReplaySeekSpeed speed,bool selected){
-        return segmentFace(seekName(speed),35,selected,seekColor(speed));
+    CCNode* seekOptionFace(std::size_t index,bool selected){
+        return cellFace(seekName(replay::kReplaySeekSpeeds[index]),{m_seekWidths[index],19},selected,index==0,14);
     }
-    // Fast is filled yellow and UltraFast red when chosen; the rest lime.
     void updateSeekOptions(){
         auto const current=seekSpeed();
-        for(std::size_t i=0;i<m_seekOptions.size();++i)if(auto* item=m_seekOptions[i]){
-            auto const speed=replay::kReplaySeekSpeeds[i];item->setNormalImage(seekOptionFace(speed,speed==current));
-        }
+        for(std::size_t i=0;i<m_seekOptions.size();++i)if(auto* item=m_seekOptions[i])
+            item->setNormalImage(seekOptionFace(i,replay::kReplaySeekSpeeds[i]==current));
     }
     void setSeekSpeed(replay::ReplaySeekSpeed speed){
         Mod::get()->setSavedValue<int64_t>("replay-seek-speed",replay::replaySeekSpeedToInt(speed));m_dirty=true;
