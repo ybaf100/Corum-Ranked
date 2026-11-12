@@ -25,7 +25,11 @@ inline GuideCarouselState& guideCarouselState() { static GuideCarouselState stat
 
 class RankedGuideCarousel final : public cocos2d::CCNode {
     std::array<cocos2d::CCNode*, kGuideSlideCount> m_slides {};
-    std::array<cocos2d::CCLayerColor*, kGuideSlideCount> m_dots {};
+    // One segment per slide: passed slides full, the current one fills over
+    // its five seconds, the rest stay empty. Shows how many pages there are.
+    std::array<cocos2d::CCLayerColor*, kGuideSlideCount> m_tracks {};
+    std::array<cocos2d::CCLayerColor*, kGuideSlideCount> m_fills {};
+    float m_segmentWidth = 24.0f;
     cocos2d::CCLabelBMFont* m_counter = nullptr;
     cocos2d::CCSize m_size;
     int m_from = -1, m_direction = 1;
@@ -186,8 +190,15 @@ class RankedGuideCarousel final : public cocos2d::CCNode {
             (this->*specs[i].diagram)(slide);
             m_slides[i] = slide;
         }
-        // Dots under the text column; the arrows sit at the bottom right.
-        for (int i = 0; i < kGuideSlideCount; ++i) m_dots[static_cast<std::size_t>(i)] = box(this, 16.0f + static_cast<float>(i) * 12.0f, 12.0f, 8.0f, 3.0f, SurfaceSoft, 255, 3);
+        // Segmented progress bar under the text column; the arrows sit at the bottom right.
+        constexpr float kGap = 4.0f;
+        auto const available = std::max(70.0f, size.width - 16.0f - 84.0f);
+        m_segmentWidth = std::min(28.0f, (available - kGap * (kGuideSlideCount - 1)) / kGuideSlideCount);
+        for (int i = 0; i < kGuideSlideCount; ++i) {
+            auto const x = 16.0f + static_cast<float>(i) * (m_segmentWidth + kGap);
+            m_tracks[static_cast<std::size_t>(i)] = box(this, x, 12.0f, m_segmentWidth, 3.0f, SurfaceSoft, 255, 3);
+            m_fills[static_cast<std::size_t>(i)] = box(this, x, 12.0f, 0.0f, 3.0f, Accent, 255, 4);
+        }
         auto* menu = cocos2d::CCMenu::create(); menu->setPosition(cocos2d::CCPointZero); addChild(menu, 10);
         for (int i = 0; i < 2; ++i) {
             auto* face = slab({24.0f, 16.0f}, {}, GhostEdge, true, Ink);
@@ -226,10 +237,9 @@ class RankedGuideCarousel final : public cocos2d::CCNode {
             slide->setVisible(opacity > 0.01f);
             slide->setPositionX(offset);
             propagateModeOpacity(slide, static_cast<GLubyte>(std::lround(opacity * 255.0f)));
-            auto* dot = m_dots[static_cast<std::size_t>(i)];
-            dot->setColor(i == state.index ? Accent : SurfaceSoft);
-            dot->setContentSize({i == state.index ? 16.0f : 8.0f, 3.0f});
-            dot->setPositionX(16.0f + static_cast<float>(i) * 12.0f + (i > state.index ? 8.0f : 0.0f));
+            auto const fill = i < state.index ? 1.0f : i > state.index ? 0.0f
+                : std::clamp(state.elapsed / kGuideSlideSeconds, 0.0f, 1.0f);
+            m_fills[static_cast<std::size_t>(i)]->setContentSize({m_segmentWidth * fill, 3.0f});
         }
         m_counter->setString(fmt::format("{:02} / {:02}", state.index + 1, kGuideSlideCount).c_str());
         if (m_from >= 0 && m_switch >= kGuideInDelay + kGuideInSeconds) m_from = -1;
