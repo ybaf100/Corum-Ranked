@@ -99,3 +99,13 @@ int main(){CCNode menu,face;CCLayerColor border,fill;fill.color={15,28,50};CCLab
     const dir=mkdtempSync(join(tmpdir(),'corum-gray-native-'));
     try{writeFileSync(join(dir,'test.cpp'),cpp);execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Wpedantic','-Werror',join(dir,'test.cpp'),'-o',join(dir,'test')],{stdio:'pipe'});execFileSync(join(dir,'test'),[],{stdio:'pipe'});}finally{rmSync(dir,{recursive:true,force:true});}
 });
+
+test('settings init closes before the member helpers that follow it',()=>{
+    const popup=read('src/ui/RankedSettingsPopup.hpp');
+    const init=body(popup,'bool init(RankedSettingsHooks hooks)');
+    assert.match(init,/m_dirty=true;return true;\s*\}$/);
+    assert.doesNotMatch(init,/static replay::ReplaySeekSpeed seekSpeed/);
+    for(const member of ['void updateForumStatus(float)','void onVolume(CCObject*)','void onSendLogs(CCObject*)','void onCredits(CCObject*)'])
+        assert.ok(popup.indexOf(member)>popup.indexOf(init)+init.length-1,member);
+    assert.match(popup,/RankedBoardSlider::create\(/);
+});

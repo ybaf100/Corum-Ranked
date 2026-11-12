@@ -185,6 +185,9 @@ class RankedSettingsPopup final : public Popup {
         auto* credits=button(ghostFace("CREDITS"),menu_selector(RankedSettingsPopup::onCredits),{0,0});
         credits->setPosition({kRight-credits->getContentSize().width/2,18.5f});credits->setID("ranked-credits-button"_spr);
         RankedRuntime::get().fetchForumRecords();schedule(schedule_selector(RankedSettingsPopup::updateForumStatus),.15f);updateForumStatus(0);
+        // Includes the one-time migration if this is the first Settings visit.
+        m_dirty=true;return true;
+    }
     static replay::ReplaySeekSpeed seekSpeed(){return replay::replaySeekSpeedFromInt(static_cast<int>(Mod::get()->getSavedValue<int64_t>("replay-seek-speed",1)));}
     static std::string seekName(replay::ReplaySeekSpeed speed){
         switch(speed){case replay::ReplaySeekSpeed::Low:return i18n::text("replay-seek-low","Low");
