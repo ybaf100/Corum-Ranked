@@ -87,6 +87,7 @@
 #include <cctype>
 #include <cmath>
 #include <iomanip>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -556,8 +557,9 @@ class CorumRankedLayer final : public CCLayerColor {
     // Season timers: one shared under the title, or one per mode card. Ref
     // keeps a detached node valid; only timers still in the scene update.
     Ref<corum::ranked::ui::SeasonTimer> m_seasonShared, m_seasonSolo, m_seasonSurvival;
+    std::pair<float, float> m_seasonSlot{0.0f, 0.0f};
     std::map<std::string, RadarBlip> m_radarBlips;
-    CCMenuItemSpriteExtra *m_queueLeave = nullptr, *m_queueFill = nullptr;
+    CCMenuItemSpriteExtra *m_queueLeave = nullptr, *m_queueFill = nullptr, *m_queueFreePlay = nullptr;
     float m_statusTextWidth = 0;
     corum::ranked::ui::LobbyHover* m_lobbyHover = nullptr;
     std::string m_achievementScope = "SHARED";
@@ -805,6 +807,8 @@ class CorumRankedLayer final : public CCLayerColor {
         present(m_seasonShared.data(), view.soloSeason, view.soloEnabled);
         present(m_seasonSolo.data(), view.soloSeason, view.soloEnabled);
         present(m_seasonSurvival.data(), view.survivalSeason, view.survivalEnabled);
+        for (auto* timer : {m_seasonShared.data(), m_seasonSolo.data(), m_seasonSurvival.data()})
+            if (timer && timer->getParent()) fitSeasonHeader(timer);
     }
     bool seasonShared(RuntimeView const& view) const {
         return corum::ranked::seasonTimerShared(view.soloSeason, view.soloEnabled, view.survivalSeason, view.survivalEnabled);
@@ -1379,7 +1383,7 @@ class CorumRankedLayer final : public CCLayerColor {
         m_queueContents = nullptr; m_queueMenu = nullptr; m_queuePlayers = m_queueWait = m_queueMinimum = m_queueHint = m_queueHeading = nullptr;
         m_queueRingCyan = m_queueRingGold = m_queueSweep = m_queueOpponentBox = nullptr; m_queueCenter = m_queueOpponentMark = m_queueOpponentLabel = nullptr;
         m_queueRadar = nullptr; m_queueRangeLabel = nullptr;
-        m_queueSlots.clear(); m_queueFillBar = nullptr; m_queueLeave = m_queueFill = nullptr; m_queueShown = m_queueAnimating = false;
+        m_queueSlots.clear(); m_queueFillBar = nullptr; m_queueLeave = m_queueFill = m_queueFreePlay = nullptr; m_queueShown = m_queueAnimating = false;
         resetDynamicUiPointers();
         corum::ranked::ui::cancelMenuTouch(m_menu);
         cancelNestedMenuTouches(m_root);
@@ -1552,7 +1556,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 target
             );
             if (m_prepareLoadFill) {
-                m_prepareLoadFill->setContentSize({m_prepareLoadWidth * m_prepareLoadVisual, 8.0f});
+                m_prepareLoadFill->setContentSize({m_prepareLoadWidth * m_prepareLoadVisual, m_prepareLoadFill->getContentSize().height});
             }
             if (m_prepareLoadPercentLabel) {
                 m_prepareLoadPercentLabel->setString(
@@ -2288,7 +2292,7 @@ class CorumRankedLayer final : public CCLayerColor {
                     : stages == 5 ? tr("placement-five-stage-info", "5 STAGES · 10 MAPS · MAX PLACEMENT BRONZE · CANNOT CHANGE AFTER START.") : tr("select-placement-count-first", "SELECT 3 OR 5 STAGES FIRST."),
                 fontScale(13.0f), {size.width / 2.0f, footY}, stages == 3 ? kRed : corum::ranked::ui::TextMuted, "semibold");
             corum::ranked::ui::fitMenuLabelWidth(summary, size.width - px(56.0f) - px(210.0f) - px(240.0f) - 20.0f, fontScale(13.0f), 0.09f); m_root->addChild(summary, 5);
-            boardButton(tr("next", "NEXT"), {px(240.0f), px(76.0f)}, {size.width - px(28.0f) - px(120.0f), footY}, menu_selector(CorumRankedLayer::onPlacementNextStep), 30.0f, true,
+            boardButton(tr("start-placement", "START PLACEMENT"), {px(240.0f), px(76.0f)}, {size.width - px(28.0f) - px(120.0f), footY}, menu_selector(CorumRankedLayer::onPlacementNextStep), 30.0f, true,
                 "ranked-placement-next"_spr, stages == 3 || stages == 5);
         } else {
             // Step 2: back returns to the length step.
@@ -2822,12 +2826,19 @@ class CorumRankedLayer final : public CCLayerColor {
         // Row 1: name and equipped title, or the demotion warning (Survival).
         auto const warning = survival ? view.survival.profile.demotionWarning : view.demotionWarning;
         if (survival && warning) {
-            auto* rule = CCLayerColor::create({32, 35, 46, 255}, width, 30.0f); rule->setPosition({x0, top - 30.0f}); m_root->addChild(rule, 1);
+            // L3 .panel.rule-red: the warning line left, the recovery LP right.
+            constexpr float panelH = 22.0f;
+            auto* rule = CCLayerColor::create({23, 25, 34, 255}, width, panelH); rule->setPosition({x0, top - panelH}); m_root->addChild(rule, 1);
             auto* edge = CCLayerColor::create({kRed.r, kRed.g, kRed.b, 255}, width, 1.0f); edge->setPosition({x0, top - 1.0f}); m_root->addChild(edge, 2);
-            m_root->addChild(makeLabel(tr("demotion-warning", "DEMOTION WARNING"), fontScale(16.0f), {x0 + 8.0f, top - 10.0f}, corum::ranked::ui::Text, "extrabold", {0.0f, 0.5f}), 4);
-            if (view.survival.warningRecoveryLp)
-                m_root->addChild(makeLabel(fmt::format(fmt::runtime(tr("lp-warning-recovery","Clears at {} LP")), *view.survival.warningRecoveryLp),
-                    fontScale(13.0f), {x0 + 8.0f, top - 22.0f}, kRed, "semibold", {0.0f, 0.5f}), 4);
+            float recoveryW = 0.0f;
+            if (view.survival.warningRecoveryLp) {
+                auto* recovery = makeLabel(fmt::format(fmt::runtime(tr("lp-warning-recovery","Clears at {} LP")), *view.survival.warningRecoveryLp),
+                    fontScale(13.0f), {x1 - 8.0f, top - panelH / 2.0f}, kRed, "semibold", {1.0f, 0.5f});
+                m_root->addChild(recovery, 4); recoveryW = recovery->getScaledContentSize().width + 12.0f;
+            }
+            auto* line = makeLabel(tr("demotion-warning-detail", "Losing the next match may demote you."), fontScale(15.0f), {x0 + 8.0f, top - panelH / 2.0f},
+                corum::ranked::ui::Text, "semibold", {0.0f, 0.5f});
+            corum::ranked::ui::fitMenuLabelWidth(line, width - 16.0f - recoveryW, fontScale(15.0f), 0.1f); m_root->addChild(line, 4);
         } else {
             auto* account = GJAccountManager::get();
             auto* player = makeLabel(account ? std::string(account->m_username) : std::string(), fontScale(34.0f), {x0, top - 9.0f}, corum::ranked::ui::Text, "black", {0.0f, 0.5f});
@@ -2839,13 +2850,13 @@ class CorumRankedLayer final : public CCLayerColor {
                 corum::ranked::ui::fitMenuLabelWidth(title, width * 0.3f, fontScale(15.0f), 0.1f); m_root->addChild(title, 4);
             }
         }
-        // Header buttons on the right of row 1: HISTORY and ACHIEVEMENTS / BADGES.
-        boardButton(tr("history", "HISTORY"), {px(110.0f), px(34.0f)}, {x1 - px(55.0f) - px(118.0f), top - 9.0f}, menu_selector(CorumRankedLayer::onHistory),
-            14.0f, false, "ranked-panel-history"_spr);
-        if (survival) boardButton(tr("badges", "BADGES"), {px(110.0f), px(34.0f)}, {x1 - px(55.0f), top - 9.0f}, menu_selector(CorumRankedLayer::onBadgeCollection),
-            14.0f, false, "ranked-panel-badges"_spr);
-        else boardButton(tr("achievement-trophy", "TROPHY"), {px(110.0f), px(34.0f)}, {x1 - px(55.0f), top - 9.0f}, menu_selector(CorumRankedLayer::onAchievements),
-            14.0f, false, "ranked-panel-achievements"_spr);
+        // L2 row 1 right: HISTORY and ACHIEVEMENTS (L3 has them in the header).
+        if (!survival) {
+            boardButton(tr("history", "HISTORY"), {px(110.0f), px(34.0f)}, {x1 - px(55.0f) - px(118.0f), top - 9.0f}, menu_selector(CorumRankedLayer::onHistory),
+                14.0f, false, "ranked-panel-history"_spr);
+            boardButton(tr("achievement-trophy", "TROPHY"), {px(110.0f), px(34.0f)}, {x1 - px(55.0f), top - 9.0f}, menu_selector(CorumRankedLayer::onAchievements),
+                14.0f, false, "ranked-panel-achievements"_spr);
+        }
 
         // Row 2: season ladder with the current and next tier marks.
         auto const progress = tierProgressFor(view, survival);
@@ -3045,6 +3056,23 @@ class CorumRankedLayer final : public CCLayerColor {
 
     // L header (.hdr, 72 px): back, then RANKED or the mode's number chip and
     // name; season in the middle; population and KO / EN on the right.
+    // Width of a node's visible children (labels, faces) in its own space.
+    static float childrenWidth(CCNode* node) {
+        if (!node || !node->getChildren()) return 0.0f;
+        auto lo = std::numeric_limits<float>::max(), hi = -std::numeric_limits<float>::max();
+        for (auto* child : CCArrayExt<CCNode*>(node->getChildren())) {
+            if (!child->isVisible()) continue;
+            auto const box = child->boundingBox();
+            if (box.size.width <= 0.0f) continue;
+            lo = std::min(lo, box.getMinX()); hi = std::max(hi, box.getMaxX());
+        }
+        return hi > lo ? hi - lo : 0.0f;
+    }
+
+    // L1 header: back, RANKED, the season timer, population and KO / EN.
+    // L2 / L3 (boards): the 01 / 02 chip, the mode name with its Korean
+    // name, then season, population and the page's ghost buttons (L3:
+    // HISTORY and BADGES) on the right; the language lives in Settings.
     void addLobbyHeader(RuntimeView const& view, std::optional<corum::ranked::RankedMode> mode) {
         auto const size = CCDirector::sharedDirector()->getWinSize();
         auto const y = size.height - kLobbyHeader / 2.0f;
@@ -3056,30 +3084,70 @@ class CorumRankedLayer final : public CCLayerColor {
         auto* brand = makeLabel(!mode ? "RANKED" : *mode == corum::ranked::RankedMode::Survival ? "SURVIVAL" : "SOLO RANKED", fontScale(30.0f), {x, y},
             corum::ranked::ui::Text, "black", {0.0f, 0.5f});
         corum::ranked::ui::leanLabel(brand); brand->setID("ranked-screen-title"_spr); m_root->addChild(brand, 6);
-        // KO / EN (.lang): two 24 x 22 boxes at the right edge.
         auto const korean = corum::ranked::i18n::isKorean();
-        auto const langBox = [&](char const* text, bool on, float cx, SEL_MenuHandler selector, char const* id) {
-            auto* face = CCLayerColor::create(on ? ccc4(166, 222, 36, 255) : ccc4(0, 0, 0, 0), px(48.0f), px(44.0f));
-            auto* border = CCLayerColor::create({43, 47, 60, 255}, px(48.0f), 1.0f); border->setPosition({0.0f, px(44.0f) - 1.0f}); face->addChild(border);
-            auto* bottom = CCLayerColor::create({43, 47, 60, 255}, px(48.0f), 1.0f); face->addChild(bottom);
-            face->addChild(makeLabel(text, fontScale(14.0f), {px(24.0f), px(22.0f)}, on ? corum::ranked::ui::AccentInk : corum::ranked::ui::TextMuted, "black"), 2);
-            auto* item = CCMenuItemSpriteExtra::create(face, this, selector);
-            item->setPosition({cx, y}); item->setID(std::string(GEODE_MOD_ID) + "/" + id); m_menu->addChild(item);
-        };
-        langBox("EN", !korean, size.width - px(28.0f) - px(24.0f), menu_selector(CorumRankedLayer::onEnglish), "ranked-language-english");
-        langBox("KO", korean, size.width - px(28.0f) - px(72.0f), menu_selector(CorumRankedLayer::onKorean), "ranked-language-korean");
-        if (auto* population = corum::ranked::ui::LobbyPopulationView::create()) {
-            population->setID("ranked-lobby-population"_spr); population->setPosition({size.width - px(28.0f) - px(96.0f) - 60.0f, y});
-            population->updatePopulation({view.lobbyOffline, view.lobbyOnline, view.lobbyPopulationKnown}); m_root->addChild(population, 7);
+        float leftEnd = x + brand->getScaledContentSize().width + 8.0f;
+        if (mode && korean) {
+            auto* name = makeLabel(*mode == corum::ranked::RankedMode::Survival ? tr("survival", "SURVIVAL") : tr("solo-ranked", "SOLO RANKED"), fontScale(14.0f),
+                {leftEnd, y}, corum::ranked::ui::TextMuted, "extrabold", {0.0f, 0.5f});
+            name->setID("ranked-screen-subtitle"_spr); m_root->addChild(name, 6);
+            leftEnd += name->getScaledContentSize().width + 8.0f;
         }
-        // Season: the shared timer, or the open mode's own timer, centred.
+        float right = size.width - px(28.0f);
+        if (!mode) {
+            // KO / EN (.lang): two 24 x 22 boxes at the right edge.
+            auto const langBox = [&](char const* text, bool on, float cx, SEL_MenuHandler selector, char const* id) {
+                auto* face = CCLayerColor::create(on ? ccc4(166, 222, 36, 255) : ccc4(0, 0, 0, 0), px(48.0f), px(44.0f));
+                auto* border = CCLayerColor::create({43, 47, 60, 255}, px(48.0f), 1.0f); border->setPosition({0.0f, px(44.0f) - 1.0f}); face->addChild(border);
+                auto* bottom = CCLayerColor::create({43, 47, 60, 255}, px(48.0f), 1.0f); face->addChild(bottom);
+                face->addChild(makeLabel(text, fontScale(14.0f), {px(24.0f), px(22.0f)}, on ? corum::ranked::ui::AccentInk : corum::ranked::ui::TextMuted, "black"), 2);
+                auto* item = CCMenuItemSpriteExtra::create(face, this, selector);
+                item->setPosition({cx, y}); item->setID(std::string(GEODE_MOD_ID) + "/" + id); m_menu->addChild(item);
+            };
+            langBox("EN", !korean, right - px(24.0f), menu_selector(CorumRankedLayer::onEnglish), "ranked-language-english");
+            langBox("KO", korean, right - px(72.0f), menu_selector(CorumRankedLayer::onKorean), "ranked-language-korean");
+            right -= px(96.0f) + 8.0f;
+        } else if (*mode == corum::ranked::RankedMode::Survival) {
+            // L3 header: HISTORY and BADGES (.btn.ghost.xs).
+            auto const headerButton = [&](std::string const& text, SEL_MenuHandler selector, std::string const& id) {
+                auto const width = std::max(px(84.0f), makeLabel(text, fontScale(14.0f), {}, corum::ranked::ui::Text, "extrabold")->getScaledContentSize().width + px(28.0f));
+                boardButton(text, {width, px(34.0f)}, {right - width / 2.0f, y}, selector, 14.0f, false, id);
+                right -= width + 5.0f;
+            };
+            headerButton(tr("badges", "BADGES"), menu_selector(CorumRankedLayer::onBadgeCollection), "ranked-panel-badges"_spr);
+            headerButton(tr("history", "HISTORY"), menu_selector(CorumRankedLayer::onHistory), "ranked-panel-history"_spr);
+            right -= 4.0f;
+        }
+        if (auto* population = corum::ranked::ui::LobbyPopulationView::create()) {
+            population->setID("ranked-lobby-population"_spr);
+            population->updatePopulation({view.lobbyOffline, view.lobbyOnline, view.lobbyPopulationKnown});
+            auto const width = std::max(60.0f, childrenWidth(population));
+            population->setPosition({right - width / 2.0f, y}); m_root->addChild(population, 7);
+            right -= width + 10.0f;
+        }
+        // Season: the shared timer, or the open mode's own timer, in the slot
+        // between the title and the right group (fitSeasonHeader keeps it there).
         m_seasonShared = nullptr; m_seasonSolo = nullptr; m_seasonSurvival = nullptr;
+        m_seasonSlot = {leftEnd, right};
         auto const& season = mode && *mode == corum::ranked::RankedMode::Survival ? view.survivalSeason : view.soloSeason;
         if ((seasonShared(view) || mode) && season.targetAtMs) if (auto* timer = corum::ranked::ui::SeasonTimer::create(false)) {
-            timer->setPosition({size.width / 2.0f + 20.0f, y}); m_root->addChild(timer, 7);
+            timer->setPosition({(leftEnd + right) / 2.0f, y}); timer->setID("ranked-header-season"_spr); m_root->addChild(timer, 7);
             if (seasonShared(view)) m_seasonShared = timer;
             else if (*mode == corum::ranked::RankedMode::Survival) m_seasonSurvival = timer; else m_seasonSolo = timer;
         }
+    }
+
+    // The header season timer stays inside its slot: right-aligned against
+    // the population on L2 / L3, centred on L1, shrunk when the slot is short.
+    void fitSeasonHeader(corum::ranked::ui::SeasonTimer* timer) {
+        if (!timer || timer->getID() != "ranked-header-season"_spr) return;
+        auto const width = childrenWidth(timer);
+        auto const slot = std::max(1.0f, m_seasonSlot.second - m_seasonSlot.first);
+        if (width <= 0.0f) return;
+        auto const scale = std::clamp(slot / width, 0.0f, 1.0f);
+        timer->setScale(scale); timer->setVisible(scale >= 0.6f);
+        auto const mode = m_modeTransition.selected();
+        auto const cx = mode ? m_seasonSlot.second - width * scale / 2.0f : (m_seasonSlot.first + m_seasonSlot.second) / 2.0f;
+        timer->setPositionX(cx);
     }
 
     // Footer face (.foot button): fill, 3 px top rule and caption; resized in place.
@@ -3149,11 +3217,12 @@ class CorumRankedLayer final : public CCLayerColor {
         std::vector<CCNode*> row;
         if(auto* debug=typeinfo_cast<CCMenuItemSpriteExtra*>(m_lobbyToolbar->getChildByID("ranked-lobby-debug"_spr)); debug && debug->isVisible()) row.push_back(debug);
         if(auto* freePlay=typeinfo_cast<CCMenuItemSpriteExtra*>(m_lobbyToolbar->getChildByID("ranked-lobby-free-play"_spr))) {
+            // L4 / L5: FREE PLAY lives on the queue page itself.
             auto const& survival=corum::ranked::SurvivalRuntime::get();
-            auto const visible=m_page==Page::Live && mode && m_queueShown && !m_queueAnimating &&
+            auto const available=m_page==Page::Live && mode && m_queueShown && !m_queueAnimating &&
                 (*mode==corum::ranked::RankedMode::Survival ? survival.canQueueFreePlay() : survival.canSoloQueueFreePlay());
-            if(freePlay->isVisible()!=visible)freePlay->setVisible(visible);
-            if(visible) row.push_back(freePlay);
+            if(freePlay->isVisible())freePlay->setVisible(false);
+            if(m_queueFreePlay && m_queueFreePlay->isVisible()!=available)m_queueFreePlay->setVisible(available);
         }
         auto const navVisible=!mode;
         std::vector<CCMenuItemSpriteExtra*> nav;
@@ -3357,7 +3426,7 @@ class CorumRankedLayer final : public CCLayerColor {
     void buildQueueContents(corum::ranked::RankedMode mode, CCLayerColor* card) {
         (void)card;
         if (m_queueContents) m_queueContents->removeFromParentAndCleanup(true);
-        m_queueSlots.clear(); m_queuePlayers = m_queueWait = m_queueMinimum = m_queueHint = m_queueHeading = nullptr; m_queueLeave = m_queueFill = nullptr;
+        m_queueSlots.clear(); m_queuePlayers = m_queueWait = m_queueMinimum = m_queueHint = m_queueHeading = nullptr; m_queueLeave = m_queueFill = m_queueFreePlay = nullptr;
         m_queueRingCyan = m_queueRingGold = m_queueSweep = m_queueOpponentBox = nullptr; m_queueCenter = m_queueOpponentMark = m_queueOpponentLabel = nullptr;
         m_queueRadar = nullptr; m_queueRangeLabel = nullptr; m_queueFillBar = nullptr;
         auto const win = CCDirector::sharedDirector()->getWinSize();
@@ -3439,9 +3508,13 @@ class CorumRankedLayer final : public CCLayerColor {
             m_queueContents->addChild(m_queueOpponentLabel, 5);
             m_queueContents->addChild(makeLabel(tr("revealed-on-match", "REVEALED WHEN MATCHED"), fontScale(13.0f), {rx + 30.0f, ry - 6.0f}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f}), 5);
             ry -= 30.0f;
-            auto* note = makeLabel(tr("match-moves-now", "A FOUND MATCH STARTS RIGHT AWAY"), fontScale(13.0f), {rx + rw / 2.0f, ry}, corum::ranked::ui::TextMuted, "semibold");
+            // L4: FREE PLAY (.btn.ghost.sm) with its line, then CANCEL MATCHING.
+            m_queueFreePlay = boardButton(tr("survival-free-play", "FREE PLAY"), {rw, px(42.0f)}, {rx + rw / 2.0f, ry}, menu_selector(CorumRankedLayer::onQueueFreePlay),
+                16.0f, false, "ranked-queue-free-play"_spr);
+            m_queueFreePlay->setVisible(false);
+            auto* note = makeLabel(tr("match-moves-now", "A FOUND MATCH STARTS RIGHT AWAY"), fontScale(13.0f), {rx + rw / 2.0f, ry - 16.0f}, corum::ranked::ui::TextMuted, "semibold");
             corum::ranked::ui::fitMenuLabelWidth(note, rw, fontScale(13.0f), 0.1f); m_queueContents->addChild(note, 5);
-            m_queueLeave = boardButton(tr("cancel-matching", "CANCEL MATCHING"), {rw, px(42.0f)}, {rx + rw / 2.0f, ry - 20.0f}, menu_selector(CorumRankedLayer::onLeave),
+            m_queueLeave = boardButton(tr("cancel-matching", "CANCEL MATCHING"), {rw, px(42.0f)}, {rx + rw / 2.0f, ry - 38.0f}, menu_selector(CorumRankedLayer::onLeave),
                 16.0f, false, "ranked-queue-leave"_spr);
         } else {
             // ---- L5 (Survival): counts row, fat bar, seat grid, cancel row.
@@ -3499,11 +3572,18 @@ class CorumRankedLayer final : public CCLayerColor {
             // Bottom row: the reveal note and CANCEL MATCHING.
             auto* note = makeLabel(tr("seat-fade-note", "NEW PLAYERS FADE INTO OPEN SEATS · NAMES SHOW WHEN THE MATCH STARTS"), fontScale(13.0f),
                 {x0, bottom + 14.0f}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f});
-            corum::ranked::ui::fitMenuLabelWidth(note, width - 120.0f, fontScale(13.0f), 0.1f); m_queueContents->addChild(note, 5);
+            float buttonsLeft = x1 - px(170.0f);
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
             m_queueFill = boardButton(tr("survival-fill-bots","FILL WITH BOTS"), {px(170.0f), px(42.0f)}, {x1 - px(85.0f) - px(180.0f), bottom + 14.0f},
                 menu_selector(CorumRankedLayer::onSurvivalFillBots), 16.0f, false, "survival-queue-fill-bots"_spr);
+            buttonsLeft -= px(180.0f);
 #endif
+            // L5: FREE PLAY (.btn.ghost.sm) left of CANCEL MATCHING.
+            m_queueFreePlay = boardButton(tr("survival-free-play", "FREE PLAY"), {px(150.0f), px(42.0f)}, {buttonsLeft - px(10.0f) - px(75.0f), bottom + 14.0f},
+                menu_selector(CorumRankedLayer::onQueueFreePlay), 16.0f, false, "survival-queue-free-play"_spr);
+            m_queueFreePlay->setVisible(false);
+            buttonsLeft -= px(160.0f);
+            corum::ranked::ui::fitMenuLabelWidth(note, std::max(40.0f, buttonsLeft - x0 - 10.0f), fontScale(13.0f), 0.1f); m_queueContents->addChild(note, 5);
             m_queueLeave = boardButton(tr("cancel-matching", "CANCEL MATCHING"), {px(170.0f), px(42.0f)}, {x1 - px(85.0f), bottom + 14.0f},
                 menu_selector(CorumRankedLayer::onSurvivalLeaveQueue), 16.0f, false, "survival-queue-leave"_spr);
         }
@@ -4024,46 +4104,33 @@ class CorumRankedLayer final : public CCLayerColor {
             kAccent
         );
 
-        auto makeGradeCard = [&](std::string const& caption, std::string const& grade, std::string const& scoreText, float x, bool final) {
-            auto* group = CCNode::create();
-            group->setContentSize({88.0f, 102.0f});
-            group->setAnchorPoint({0.5f, 0.5f});
-            group->setPosition({x, size.height / 2.0f + 4.0f});
-            auto* panel = makeNeonPanel({88.0f, 102.0f}, {44.0f, 51.0f}, final ? kGold : kSteel, kDeepPanel, 248);
-            group->addChild(panel, 1);
-            auto* title = makeLabel(caption, 0.20f, {44.0f, 87.0f}, final ? kGold : kAccent, "semibold");
-            corum::ranked::ui::fitMenuLabelWidth(title, 76.0f, 0.20f, 0.14f);
-            group->addChild(title, 3);
-            if (grade == "?") {
-                group->addChild(makeLabel("?", 0.68f, {44.0f, 53.0f}, corum::ranked::ui::TextMuted, "black"), 4);
-            } else {
-                auto* badge = corum::ranked::ui::PlacementGradeBadge::create(40.0f);
-                if (badge) {
-                    badge->setGrade(grade, false);
-                    badge->setPosition({44.0f, 54.0f});
-                    group->addChild(badge, 4);
-                }
-            }
-            auto* score = makeLabel(scoreText, 0.18f, {44.0f, 16.0f}, corum::ranked::ui::TextMuted, "semibold");
-            corum::ranked::ui::fitMenuLabelWidth(score, 76.0f, 0.18f, 0.13f);
-            group->addChild(score, 4);
-            m_root->addChild(group, 5);
+        // Between maps: the P4 row with the stage grade still open.
+        auto const rowW = px(260.0f) * 2.0f + px(190.0f) + 4.0f * px(36.0f) + 2.0f * 18.0f;
+        auto const k = std::min(1.0f, (size.width - px(56.0f)) / rowW);
+        auto const rowY = size.height / 2.0f + 2.0f;
+        float rowX = (size.width - rowW * k) / 2.0f;
+        auto const mapPanel = [&](std::string const& caption, std::string const& grade, std::string const& scoreText) {
+            auto const w = px(260.0f) * k, h = 112.0f * k, cx = rowX + w / 2.0f;
+            auto* fill = CCLayerColor::create({23, 25, 34, 255}, w, h); fill->setPosition({cx - w / 2.0f, rowY - h / 2.0f}); m_root->addChild(fill, 1);
+            m_root->addChild(makeLabel(caption, fontScale(13.0f) * k, {cx, rowY + h / 2.0f - 12.0f * k}, corum::ranked::ui::TextMuted, "semibold"), 3);
+            if (grade == "?") m_root->addChild(makeLabel("?", fontScale(56.0f) * k, {cx, rowY + 2.0f * k}, corum::ranked::ui::TextMuted, "black"), 4);
+            else if (auto* badge = corum::ranked::ui::PlacementGradeBadge::create(60.0f * k)) { badge->setGrade(grade, false); badge->setPosition({cx, rowY + 2.0f * k}); m_root->addChild(badge, 4); }
+            m_root->addChild(makeLabel(scoreText, fontScale(13.0f) * k, {cx, rowY - h / 2.0f + 11.0f * k}, corum::ranked::ui::TextMuted, "semibold"), 4);
+            rowX += w + px(36.0f) * k;
         };
-
-        auto const center = size.width / 2.0f;
-        makeGradeCard("MAP 1", map1Grade, map1Known ? fmt::format("{} / 500", formatPlacementScore(map1Score)) : "--", center - 112.0f, false);
-        makeGradeCard("MAP 2", map2Grade, map2Known ? fmt::format("{} / 500", formatPlacementScore(map2Score)) : "--", center, false);
-        makeGradeCard(tr("stage-grade", "STAGE GRADE"), "?", "--", center + 112.0f, true);
-        m_root->addChild(makeLabel("+", 0.48f, {center - 56.0f, size.height / 2.0f + 4.0f}, kGold, "black"), 6);
-        m_root->addChild(makeLabel(">", 0.46f, {center + 56.0f, size.height / 2.0f + 4.0f}, kAccent, "black"), 6);
-
-        addButton(
-            placement.currentMapIndex == 1 ? tr("next-map", "NEXT MAP") : tr("show-stage-result", "SHOW STAGE RESULT"),
-            {center, 27.0f},
-            menu_selector(CorumRankedLayer::onContinuePlacement),
-            false,
-            0.60f
-        );
+        auto const symbol = [&](char const* text, ccColor3B color) {
+            m_root->addChild(makeLabel(text, fontScale(56.0f) * k, {rowX + 9.0f * k, rowY}, color, "black"), 6);
+            rowX += 18.0f * k + px(36.0f) * k;
+        };
+        mapPanel("MAP 1", map1Grade, map1Known ? fmt::format("{} / 500", formatPlacementScore(map1Score)) : "--");
+        symbol("+", corum::ranked::ui::TextMuted);
+        mapPanel("MAP 2", map2Grade, map2Known ? fmt::format("{} / 500", formatPlacementScore(map2Score)) : "--");
+        symbol("=", corum::ranked::ui::TextMuted);
+        auto const blockCx = rowX + px(190.0f) * k / 2.0f;
+        m_root->addChild(makeLabel(tr("stage-grade", "STAGE GRADE"), fontScale(14.0f) * k, {blockCx, rowY + 62.0f * k}, corum::ranked::ui::TextMuted, "extrabold"), 3);
+        m_root->addChild(makeLabel("?", fontScale(96.0f) * k, {blockCx, rowY + 4.0f * k}, corum::ranked::ui::TextMuted, "black"), 4);
+        boardButton(placement.currentMapIndex == 1 ? tr("next-map", "NEXT MAP") : tr("show-stage-result", "SHOW STAGE RESULT"), {px(240.0f), px(76.0f)},
+            {size.width - px(28.0f) - px(120.0f), px(10.0f) + px(45.0f)}, menu_selector(CorumRankedLayer::onContinuePlacement), 30.0f, true, "ranked-placement-next-map"_spr);
     }
 
     void renderPlacementStageResult(RuntimeView const& view) {
@@ -4098,104 +4165,58 @@ class CorumRankedLayer final : public CCLayerColor {
             }
         }
 
-        auto makeGradeCard = [&](std::string const& caption, std::string const& grade, double scoreValue, float x, bool final) {
-            auto* group = CCNodeRGBA::create();
-            group->setContentSize({88.0f, 102.0f});
-            group->setAnchorPoint({0.5f, 0.5f});
-            group->setPosition({x, size.height / 2.0f + 4.0f});
-            group->setCascadeColorEnabled(true);
-            group->setCascadeOpacityEnabled(true);
-            auto* panel = makeNeonPanel({88.0f, 102.0f}, {44.0f, 51.0f}, final ? kGold : kSteel, kDeepPanel, 248);
-            group->addChild(panel, 1);
-            auto* title = makeLabel(caption, 0.20f, {44.0f, 87.0f}, final ? kGold : kAccent, "semibold");
-            corum::ranked::ui::fitMenuLabelWidth(title, 76.0f, 0.20f, 0.14f);
-            group->addChild(title, 3);
-            auto* badge = corum::ranked::ui::PlacementGradeBadge::create(40.0f);
-            if (badge) {
-                badge->setGrade(grade, false);
-                badge->setPosition({44.0f, 54.0f});
-                group->addChild(badge, 4);
-            }
-            auto* score = makeLabel(
-                fmt::format("{} / 500", formatPlacementScore(scoreValue)),
-                0.18f,
-                {44.0f, 16.0f},
-                final ? kGold : corum::ranked::ui::TextMuted,
-                "semibold"
-            );
-            corum::ranked::ui::fitMenuLabelWidth(score, 76.0f, 0.18f, 0.13f);
-            group->addChild(score, 4);
-            m_root->addChild(group, 5);
-            return group;
-        };
 
-        auto const center = size.width / 2.0f;
+        // P4 board row: MAP 1 + MAP 2 = STAGE GRADE (panels 260 px, gaps 36 px),
+        // scaled down on narrow screens. The stage grade pops in after the maps.
         auto const timeline = corum::ranked::placementStageMergeTimeline();
         corum::ranked::TransitionTrace::get().mark("stage-merge-node-build");
-        auto* left = makeGradeCard("MAP 1", map1Grade, map1Score, center - 78.0f, false);
-        auto* right = makeGradeCard("MAP 2", map2Grade, map2Score, center + 78.0f, false);
-        auto* finalGroup = makeGradeCard(
-            tr("stage-grade", "STAGE GRADE"),
-            result.stageGrade,
-            result.stageScore,
-            center,
-            true
-        );
-        auto* mergeSymbol = makeLabel(
-            "+",
-            0.48f,
-            {center, size.height / 2.0f + 4.0f},
-            kGold,
-            "black"
-        );
-        m_root->addChild(mergeSymbol, 6);
-
-        left->runAction(CCSequence::create(
-            CCDelayTime::create(timeline.sourceDelay),
-            CCEaseSineInOut::create(CCMoveTo::create(
-                timeline.sourceMove,
-                {center, size.height / 2.0f + 4.0f}
-            )),
-            CCFadeOut::create(timeline.sourceFade),
-            nullptr
-        ));
-        right->runAction(CCSequence::create(
-            CCDelayTime::create(timeline.sourceDelay),
-            CCEaseSineInOut::create(CCMoveTo::create(
-                timeline.sourceMove,
-                {center, size.height / 2.0f + 4.0f}
-            )),
-            CCFadeOut::create(timeline.sourceFade),
-            nullptr
-        ));
-        mergeSymbol->runAction(CCSequence::create(
-            CCDelayTime::create(timeline.sourceDelay + timeline.sourceMove),
-            CCFadeOut::create(timeline.sourceFade),
-            nullptr
-        ));
-
-        auto* mergeFlash = corum::ranked::ui::rankResourceSprite(
-            "fx-rank-shockwave-circle-white.png"
-        );
-        if (mergeFlash) {
-            corum::ranked::ui::fitRankSprite(mergeFlash, {104.0f, 104.0f});
-            mergeFlash->setPosition({center, size.height / 2.0f + 4.0f});
-            mergeFlash->setColor(kGold);
-            mergeFlash->setOpacity(0);
-            mergeFlash->setBlendFunc({GL_SRC_ALPHA, GL_ONE});
-            m_root->addChild(mergeFlash, 8);
-            mergeFlash->runAction(CCSequence::create(
-                CCDelayTime::create(timeline.sourceDelay + timeline.sourceMove),
-                CCSpawn::create(
-                    CCFadeTo::create(timeline.sourceFade * 0.55f, 205),
-                    CCEaseSineOut::create(CCScaleTo::create(timeline.sourceFade, 1.18f)),
-                    nullptr
-                ),
-                CCFadeOut::create(timeline.sourceFade),
-                nullptr
-            ));
+        auto const rowW = px(260.0f) * 2.0f + px(190.0f) + 4.0f * px(36.0f) + 2.0f * 18.0f;
+        auto const k = std::min(1.0f, (size.width - px(56.0f)) / rowW);
+        auto const rowY = size.height / 2.0f + 2.0f;
+        float rowX = (size.width - rowW * k) / 2.0f;
+        auto const mapPanel = [&](std::string const& caption, std::string const& grade, double score) {
+            auto const w = px(260.0f) * k, h = 112.0f * k;
+            auto* group = CCNodeRGBA::create(); group->setCascadeOpacityEnabled(true);
+            group->setPosition({rowX + w / 2.0f, rowY}); m_root->addChild(group, 5);
+            auto* fill = CCLayerColor::create({23, 25, 34, 255}, w, h); fill->setPosition({-w / 2.0f, -h / 2.0f}); group->addChild(fill, 1);
+            group->addChild(makeLabel(caption, fontScale(13.0f) * k, {0.0f, h / 2.0f - 12.0f * k}, corum::ranked::ui::TextMuted, "semibold"), 3);
+            if (auto* badge = corum::ranked::ui::PlacementGradeBadge::create(60.0f * k)) { badge->setGrade(grade, false); badge->setPosition({0.0f, 2.0f * k}); group->addChild(badge, 4); }
+            group->addChild(makeLabel(fmt::format("{} / 500", formatPlacementScore(score)), fontScale(13.0f) * k, {0.0f, -h / 2.0f + 11.0f * k}, corum::ranked::ui::TextMuted, "semibold"), 4);
+            rowX += w + px(36.0f) * k; return group;
+        };
+        auto const symbol = [&](char const* text, ccColor3B color) {
+            auto* label = makeLabel(text, fontScale(56.0f) * k, {rowX + 9.0f * k, rowY}, color, "black"); m_root->addChild(label, 6);
+            rowX += 18.0f * k + px(36.0f) * k; return label;
+        };
+        auto* left = mapPanel("MAP 1", map1Grade, map1Score);
+        symbol("+", corum::ranked::ui::TextMuted);
+        auto* right = mapPanel("MAP 2", map2Grade, map2Score);
+        auto* equals = symbol("=", corum::ranked::ui::Accent);
+        // STAGE GRADE block: a lime-tinted slanted band, the caption, the
+        // 190 px grade and the next pool line.
+        auto const blockW = px(190.0f) * k, blockCx = rowX + blockW / 2.0f;
+        auto* finalGroup = CCNodeRGBA::create(); finalGroup->setCascadeOpacityEnabled(true); finalGroup->setCascadeColorEnabled(true);
+        finalGroup->setPosition({blockCx, rowY}); m_root->addChild(finalGroup, 5);
+        auto* tint = CCLayerColor::create({200, 255, 46, 26}, blockW + 20.0f * k, 150.0f * k); tint->setPosition({-(blockW + 20.0f * k) / 2.0f, -75.0f * k}); tint->setSkewX(8.0f);
+        finalGroup->addChild(tint, 0);
+        finalGroup->addChild(makeLabel(tr("stage-grade", "STAGE GRADE"), fontScale(14.0f) * k, {0.0f, 62.0f * k}, corum::ranked::ui::TextMuted, "extrabold"), 3);
+        if (auto* badge = corum::ranked::ui::PlacementGradeBadge::create(95.0f * k)) { badge->setGrade(result.stageGrade, false); badge->setPosition({0.0f, 6.0f * k}); finalGroup->addChild(badge, 4); }
+        auto const lastStage = result.stageIndex >= view.placement.totalStages;
+        auto* nextLine = makeLabel(lastStage ? fmt::format(fmt::runtime(tr("placement-all-complete","ALL {} MAPS COMPLETE")), view.placement.totalStages * view.placement.mapsPerStage)
+                : fmt::format(fmt::runtime(tr("next-stage-pool", "NEXT STAGE · POOL {}")), result.nextPool),
+            fontScale(24.0f) * k, {0.0f, -58.0f * k}, corum::ranked::ui::Accent, "black");
+        corum::ranked::ui::fitMenuLabelWidth(nextLine, blockW + 40.0f * k, fontScale(24.0f) * k, 0.1f); finalGroup->addChild(nextLine, 4);
+        (void)left; (void)right;
+        equals->setOpacity(0);
+        equals->runAction(CCSequence::create(CCDelayTime::create(timeline.sourceDelay + timeline.sourceMove), CCFadeIn::create(timeline.sourceFade), nullptr));
+        if (auto* mergeFlash = corum::ranked::ui::rankResourceSprite("fx-rank-shockwave-circle-white.png")) {
+            corum::ranked::ui::fitRankSprite(mergeFlash, {104.0f * k, 104.0f * k});
+            mergeFlash->setPosition({blockCx, rowY + 6.0f * k}); mergeFlash->setColor(kGold); mergeFlash->setOpacity(0);
+            mergeFlash->setBlendFunc({GL_SRC_ALPHA, GL_ONE}); m_root->addChild(mergeFlash, 8);
+            mergeFlash->runAction(CCSequence::create(CCDelayTime::create(timeline.finalReveal),
+                CCSpawn::create(CCFadeTo::create(timeline.sourceFade * 0.55f, 205), CCEaseSineOut::create(CCScaleTo::create(timeline.sourceFade, 1.18f)), nullptr),
+                CCFadeOut::create(timeline.sourceFade), nullptr));
         }
-
         finalGroup->setVisible(false);
         finalGroup->setOpacity(0);
         finalGroup->setScale(0.84f);
@@ -4221,27 +4242,12 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const finalStage = result.stageIndex >= view.placement.totalStages;
         // Footer: the pool rule on the left, NEXT STAGE (and PLAY LATER) on the right.
         {
-            auto* rule = makeLabel(tr("stage-pool-rule", "A HIGHER STAGE GRADE STARTS THE NEXT STAGE IN A HARDER POOL"), fontScale(13.0f), {px(28.0f), 25.0f},
+            auto* rule = makeLabel(tr("stage-pool-rule", "A HIGHER STAGE GRADE STARTS THE NEXT STAGE IN A HARDER POOL"), fontScale(13.0f), {px(28.0f), px(10.0f) + px(45.0f)},
                 corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f});
-            corum::ranked::ui::fitMenuLabelWidth(rule, size.width - px(56.0f) - 240.0f, fontScale(13.0f), 0.09f); m_root->addChild(rule, 5);
+            corum::ranked::ui::fitMenuLabelWidth(rule, size.width - px(56.0f) - px(240.0f) - (finalStage ? 0.0f : px(194.0f)) - 12.0f, fontScale(13.0f), 0.09f); m_root->addChild(rule, 5);
         }
-        auto* movement = makeLabel(
-            finalStage
-                ? (fmt::format(fmt::runtime(tr("placement-all-complete","ALL {} MAPS COMPLETE")),view.placement.totalStages * view.placement.mapsPerStage))
-                : fmt::format("{}  POOL {}  ({:+d})", tr("next", "NEXT"), result.nextPool, result.poolDelta),
-            0.30f,
-            {center, 49.0f},
-            result.poolDelta > 0 ? kGreen : result.poolDelta < 0 ? kRed : corum::ranked::ui::TextMuted,
-            "black"
-        );
-        m_root->addChild(movement, 5);
-        auto* button = addButton(
-            finalStage ? tr("final-placement", "FINAL PLACEMENT") : tr("next-stage", "NEXT STAGE"),
-            {size.width - px(28.0f) - 62.0f, 25.0f},
-            menu_selector(CorumRankedLayer::onContinuePlacement),
-            false,
-            0.54f
-        );
+        auto* button = boardButton(finalStage ? tr("final-placement", "FINAL PLACEMENT") : tr("next-stage", "NEXT STAGE"), {px(240.0f), px(76.0f)},
+            {size.width - px(28.0f) - px(120.0f), px(10.0f) + px(45.0f)}, menu_selector(CorumRankedLayer::onContinuePlacement), 30.0f, true, "ranked-placement-next-stage"_spr);
         button->setEnabled(false);
         button->runAction(CCSequence::create(
             CCDelayTime::create(timeline.controlsUnlock),
@@ -4249,13 +4255,8 @@ class CorumRankedLayer final : public CCLayerColor {
             nullptr
         ));
         if (!finalStage) {
-            auto* later = addButton(
-                tr("play-later", "PLAY LATER"),
-                {size.width - px(28.0f) - 186.0f, 25.0f},
-                menu_selector(CorumRankedLayer::onPausePlacement),
-                false,
-                0.54f
-            );
+            auto* later = boardButton(tr("play-later", "PLAY LATER"), {px(180.0f), px(42.0f)}, {size.width - px(28.0f) - px(240.0f) - px(14.0f) - px(90.0f), px(10.0f) + px(45.0f)},
+                menu_selector(CorumRankedLayer::onPausePlacement), 16.0f, false, "ranked-placement-play-later"_spr);
             later->setEnabled(false);
             later->runAction(CCSequence::create(
                 CCDelayTime::create(timeline.controlsUnlock),
@@ -4630,7 +4631,8 @@ class CorumRankedLayer final : public CCLayerColor {
         auto* modeLabel = makeLabel(chipLabelText, fontScale(15.0f), {}, corum::ranked::ui::AccentInk, "black");
         auto const modeW = modeLabel->getScaledContentSize().width + px(24.0f);
         addChip(m_root, chipLabelText, {size.width / 2.0f - modeW / 2.0f, size.height / 2.0f - 22.0f}, corum::ranked::ui::AccentFill, corum::ranked::ui::AccentInk, 15.0f);
-        auto* banLine = makeLabel(match.mapBan ? tr("private-ban-phase", "PRIVATE BAN PHASE") : tr("no-ban-random-maps", "NO BAN  ·  MAPS DRAWN AT RANDOM"),
+        auto* banLine = makeLabel(match.mapBan ? fmt::format(fmt::runtime(tr("versus-ban-line", "MAP BAN · 1 OF {}")), match.candidateMaps.empty() ? std::size_t{5} : match.candidateMaps.size())
+                : tr("no-ban-random-maps", "NO BAN  ·  MAPS DRAWN AT RANDOM"),
             fontScale(13.0f), {size.width / 2.0f, size.height / 2.0f - 38.0f}, corum::ranked::ui::Text, "semibold");
         corum::ranked::ui::fitMenuLabelWidth(banLine, px(200.0f), fontScale(13.0f), 0.1f); m_root->addChild(banLine, 5);
         auto const left = std::max(0, 5 - static_cast<int>(std::floor(phaseSeconds())));
@@ -4699,18 +4701,23 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const lineY = size.height - kLobbyHeader - 9.0f;
         auto* lead = makeLabel(tr("ban-instruction", "BAN ONE MAP."), fontScale(18.0f), {px(28.0f), lineY}, corum::ranked::ui::Text, "extrabold", {0.0f, 0.5f});
         m_root->addChild(lead, 5);
-        auto* rest = makeLabel(tr("private-ban-notice", "YOUR BAN IS PRIVATE  |  REVEALED WHEN THE PHASE ENDS"), fontScale(15.0f),
+        auto* rest = makeLabel(tr("private-ban-notice", "A BAN LOCKS IN AS SOON AS YOU PRESS IT. THE OPPONENT'S CHOICE STAYS HIDDEN."), fontScale(15.0f),
             {lead->getPositionX() + lead->getScaledContentSize().width + 6.0f, lineY}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f});
-        corum::ranked::ui::fitMenuLabelWidth(rest, size.width - px(28.0f) - 90.0f - rest->getPositionX(), fontScale(15.0f), 0.1f); m_root->addChild(rest, 5);
-        if (m_selectedBan == kNoBanChoice) addChip(m_root, tr("no-ban", "NO BAN"), {size.width - px(28.0f) - 60.0f, lineY}, kGold, corum::ranked::ui::AccentInk);
-        else if (m_pendingBan == kNoBanChoice) addChip(m_root, tr("banning", "BANNING..."), {size.width - px(28.0f) - 60.0f, lineY}, kGold, corum::ranked::ui::AccentInk);
+        corum::ranked::ui::fitMenuLabelWidth(rest, size.width - px(28.0f) - rest->getPositionX(), fontScale(15.0f), 0.1f); m_root->addChild(rest, 5);
+        // M2 footer (84 px): NO BAN (.btn.ghost.sm) on the left, the rule line on the right.
+        auto const footY = px(18.0f) + px(33.0f);
+        if (m_selectedBan == kNoBanChoice) addChip(m_root, tr("no-ban", "NO BAN"), {px(28.0f), footY}, kGold, corum::ranked::ui::AccentInk, 16.0f);
+        else if (m_pendingBan == kNoBanChoice) addChip(m_root, tr("banning", "BANNING..."), {px(28.0f), footY}, kGold, corum::ranked::ui::AccentInk, 16.0f);
         else if (m_selectedBan.empty() && m_pendingBan.empty())
-            boardButton(tr("no-ban", "NO BAN"), {px(150.0f), px(34.0f)}, {size.width - px(28.0f) - px(75.0f), lineY}, menu_selector(CorumRankedLayer::onNoBan), 14.0f, false, "ranked-ban-none"_spr);
+            boardButton(tr("no-ban", "NO BAN"), {px(150.0f), px(42.0f)}, {px(28.0f) + px(75.0f), footY}, menu_selector(CorumRankedLayer::onNoBan), 16.0f, false, "ranked-ban-none"_spr);
+        auto* rule = makeLabel(tr("ban-footer-note", "BAN AND NO BAN APPLY AT ONCE · A BANNED CARD DIMS AND DROPS"), fontScale(13.0f),
+            {size.width - px(28.0f), footY}, corum::ranked::ui::TextMuted, "semibold", {1.0f, 0.5f});
+        corum::ranked::ui::fitMenuLabelWidth(rule, size.width - px(56.0f) - px(150.0f) - 16.0f, fontScale(13.0f), 0.1f); m_root->addChild(rule, 5);
 
         // Cards: five columns, 12 px gaps, between the line and an 18 px margin.
         auto const gap = px(12.0f), x0 = px(28.0f), width = size.width - 2.0f * x0;
         auto const cardW = (width - gap * 4.0f) / 5.0f;
-        auto const cardTop = lineY - 9.0f - px(16.0f), cardBottom = px(18.0f), cardH = cardTop - cardBottom;
+        auto const cardTop = lineY - 9.0f - px(16.0f), cardBottom = px(84.0f), cardH = cardTop - cardBottom;
         auto const startX = size.width / 2.0f - (cardW + gap) * static_cast<float>(count > 0 ? count - 1 : 0) / 2.0f;
         auto const animate = m_banMotionKey != match.matchId;
         m_banMotionKey = match.matchId;
@@ -4835,27 +4842,28 @@ class CorumRankedLayer final : public CCLayerColor {
         // three-column board (own card, map, opponent card).
         auto const prepareLayout = prepareState || match.state == "ROUND_ENTERING" || match.state == "DEATHMATCH_ENTERING";
         if (prepareLayout) {
-            // Board M3: the map panel fills the left; PLAYERS / RULES (300 px) on the right.
-            auto const areaTop = size.height - kLobbyHeader - px(8.0f), areaBottom = px(46.0f);
-            auto const infoW = px(300.0f), gapW = px(20.0f);
-            auto const mapScale = std::min((size.width - px(56.0f) - infoW - gapW) / 225.0f, (areaTop - areaBottom) / 210.0f);
-            auto const infoScale = std::min(infoW / 200.0f, (areaTop - areaBottom) / 210.0f);
-            auto const midY = (areaTop + areaBottom) / 2.0f;
-            auto const xs = std::array<float, 3>{px(28.0f) + 112.5f * mapScale, size.width - px(28.0f) - 100.0f * infoScale, size.width / 2.0f};
-            auto const scales = std::array<float, 3>{mapScale, infoScale, 1.0f};
-            for (int i = 0; i < 3; ++i) {
-                columns[i] = makeSoloColumn({xs[i], midY}, scales[i]);
-                m_root = columns[i]; m_menu = typeinfo_cast<CCMenu*>(columns[i]->getChildByID("ranked-solo-column-menu"_spr));
-                if (i == 0) addSoloMapColumn(match, clearSyncPending);
-                else if (i == 1) addPrepareInfoColumn(match, ownA, deathmatch);
-                m_root = savedRoot; m_menu = savedMenu;
+            // Board M3: the map panel (flex 1.3) on the left; the download,
+            // players and rules panels with the status button on the right.
+            for (int i = 0; i < 3; ++i) columns[i] = makeSoloColumn({0.0f, 0.0f}, 1.0f);
+            auto const top = size.height - kLobbyHeader - px(4.0f), bottom = px(22.0f);
+            auto const left = px(28.0f), right = size.width - px(28.0f), gap = px(20.0f);
+            auto const mapW = (right - left - gap) * 1.3f / 2.3f, infoX = left + mapW + gap, infoW = right - infoX;
+            m_root = columns[0]; m_menu = typeinfo_cast<CCMenu*>(columns[0]->getChildByID("ranked-solo-column-menu"_spr));
+            addPrepareMapPanel(match, left, mapW, top, bottom);
+            m_root = columns[1]; m_menu = typeinfo_cast<CCMenu*>(columns[1]->getChildByID("ranked-solo-column-menu"_spr));
+            auto const buttonTop = addPrepareInfoColumn(match, ownA, deathmatch, clearSyncPending, infoX, infoW, top);
+            m_root = columns[2]; m_menu = typeinfo_cast<CCMenu*>(columns[2]->getChildByID("ranked-solo-column-menu"_spr));
+            // Status button (.btn.lg.off): the live readiness line.
+            {
+                auto const buttonH = px(76.0f), buttonY = std::max(bottom + buttonH / 2.0f, buttonTop - px(12.0f) - buttonH / 2.0f);
+                auto* face = CCLayerColor::create({32, 35, 46, 255}, infoW, buttonH); face->setPosition({infoX, buttonY - buttonH / 2.0f}); face->setSkewX(8.0f);
+                m_root->addChild(face, 2); m_soloFooterPlate = face;
+                ccColor3B accent = kGold;
+                auto* label = makeLabel(soloFooterText(match, accent), fontScale(24.0f), {infoX + infoW / 2.0f, buttonY}, ccc3(126, 132, 150), "black");
+                corum::ranked::ui::fitMenuLabelWidth(label, infoW - 20.0f, fontScale(24.0f), 0.14f); m_root->addChild(label, 5);
+                m_prepareFooterLabel = label;
             }
-            ccColor3B accent = kGold;
-            auto const footer = soloFooterText(match, accent);
-            auto* footerPlate = makeTextPlate(footer, {225.0f * layout.scale, 22.0f}, {size.width / 2.0f, 18.0f}, accent, 0.27f,
-                ccc3(245, 248, 255), "black", &m_prepareFooterLabel);
-            m_soloFooterPlate = footerPlate;
-            m_root->addChild(footerPlate, 3);
+            m_root = savedRoot; m_menu = savedMenu;
             if (intro) startSoloIntro(match, columns, layout);
             return;
         }
@@ -4978,43 +4986,129 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
 
-    // M3 right column: PLAYERS (ready state of both) and RULES panels.
-    void addPrepareInfoColumn(MatchView const& match, bool ownA, bool deathmatch) {
-        auto const panel = [&](float top, float height, std::string const& caption) {
-            auto* fill = CCLayerColor::create({23, 25, 34, 255}, 200.0f, height); fill->setPosition({-100.0f, top - height}); m_root->addChild(fill, 1);
-            auto* rule = CCLayerColor::create({corum::ranked::ui::Accent.r, corum::ranked::ui::Accent.g, corum::ranked::ui::Accent.b, 255}, 200.0f, 1.0f);
-            rule->setPosition({-100.0f, top - 1.0f}); m_root->addChild(rule, 2);
-            auto* label = makeLabel(caption, 0.20f, {-90.0f, top - 11.0f}, kAccent, "semibold", {0.0f, 0.5f});
-            corum::ranked::ui::fitMenuLabelWidth(label, 120.0f, 0.20f, 0.14f); m_root->addChild(label, 5);
+    // M3 left panel: the 220 px thumbnail with the ROUND n MAP chip, the
+    // title with creator and ID, difficulty and length, and the round options.
+    void addPrepareMapPanel(MatchView const& match, float left, float width, float top, float bottom) {
+        auto* panel = CCLayerColor::create({23, 25, 34, 255}, width, top - bottom); panel->setPosition({left, bottom}); m_root->addChild(panel, 1);
+        auto const thumbH = px(220.0f);
+        auto* thumbBack = CCLayerColor::create({32, 35, 46, 255}, width, thumbH); thumbBack->setPosition({left, top - thumbH}); m_root->addChild(thumbBack, 2);
+        auto const thumb = addSoloThumbnail(m_root, {left + width / 2.0f, top - thumbH / 2.0f}, {width, thumbH}, match) != nullptr;
+        if (!thumb && match.currentMap) addMapDifficulty(*match.currentMap, {left + width / 2.0f, top - thumbH / 2.0f}, std::min(150.0f, width - 20.0f), 26.0f);
+        addChip(m_root, fmt::format(fmt::runtime(tr("round-map-chip", "{} MAP")), soloRoundTitle(match)), {left + px(14.0f), top - px(14.0f) - 7.0f},
+            corum::ranked::ui::AccentFill, corum::ranked::ui::AccentInk, 15.0f);
+        auto const pad = px(20.0f);
+        float y = top - thumbH - px(18.0f) - 9.0f;
+        if (match.currentMap) {
+            auto const& map = *match.currentMap;
+            auto* title = makeLabel(map.title, fontScale(34.0f), {left + pad, y}, corum::ranked::ui::Text, "black", {0.0f, 0.5f});
+            corum::ranked::ui::fitMenuLabelWidth(title, width * 0.55f, fontScale(34.0f), 0.2f); m_root->addChild(title, 5);
+            auto const byline = (map.creator.empty() ? std::string() : "by " + map.creator + " · ") + fmt::format("ID {}", map.levelId);
+            auto* by = makeLabel(byline, fontScale(13.0f), {left + pad + title->getScaledContentSize().width + 6.0f, y - 2.0f}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f});
+            corum::ranked::ui::fitMenuLabelWidth(by, std::max(30.0f, left + width - pad - by->getPositionX()), fontScale(13.0f), 0.09f); m_root->addChild(by, 5);
+            y -= px(10.0f) + 14.0f;
+            constexpr float badgeW = 110.0f;
+            addMapDifficulty(map, {left + pad + badgeW / 2.0f, y}, badgeW, 16.0f);
+            auto const lengthMetadata = corum::ranked::ui::displayedMapMetadata(map.levelId, map.metadata);
+            addChip(m_root, corum::ranked::mapLengthText(lengthMetadata), {left + pad + badgeW + 8.0f, y}, ccc3(32, 35, 46), corum::ranked::ui::TextMuted, 12.0f);
+            y -= px(10.0f) + 16.0f;
+        }
+        // Round options (.btn.ghost.xs): LDM, disable shake, Jukebox.
+        auto* level = findPlayableMap();
+        auto const onText = tr("state-on", "ON"), offText = tr("state-off", "OFF");
+        float x = left + pad;
+        auto const option = [&](std::string const& caption, SEL_MenuHandler selector, char const* id) {
+            auto const w = std::min(width - 2.0f * pad, makeLabel(caption, fontScale(14.0f), {}, corum::ranked::ui::Text, "extrabold")->getScaledContentSize().width + px(28.0f));
+            if (x + w > left + width - pad + 0.5f) { x = left + pad; y -= px(34.0f) + 4.0f; }
+            auto* item = boardButton(caption, {w, px(34.0f)}, {x + w / 2.0f, y}, selector, 14.0f, false, std::string(GEODE_MOD_ID) + "/" + id);
+            x += w + 5.0f; return item;
         };
-        panel(105.0f, 96.0f, tr("prepare-players", "PLAYERS"));
+        auto* ldm = option(fmt::format("{}: {}", tr("low-detail", "LDM"), level && level->m_lowDetailModeToggled ? onText : offText),
+            menu_selector(CorumRankedLayer::onLowDetail), "ranked-round-ldm");
+        auto* shake = option(fmt::format("{}: {}", tr("disable-shake", "DISABLE SHAKE"), level && level->m_disableShakeToggled ? onText : offText),
+            menu_selector(CorumRankedLayer::onDisableShake), "ranked-round-disable-shake");
+        // Maps without a Low Detail Mode have nothing to toggle.
+        auto const ldmAvailable = level && level->m_lowDetailMode;
+        ldm->setEnabled(ldmAvailable); shake->setEnabled(level != nullptr);
+        if (!ldmAvailable) corum::ranked::ui::grayButtonVisual(ldm->getNormalImage());
+        m_jukeboxButton = option("Jukebox", menu_selector(CorumRankedLayer::onJukebox), "ranked-jukebox-button");
+        auto const jukeboxLoaded = corum::ranked::ui::rankedJukeboxLoaded();
+        if (!jukeboxLoaded) corum::ranked::ui::grayButtonVisual(m_jukeboxButton->getNormalImage());
+        m_jukeboxButton->setEnabled(!jukeboxLoaded || findPlayableMap() != nullptr);
+    }
+
+    // M3 right column: download (map / audio), players and rules panels.
+    // Returns the bottom of the last panel.
+    float addPrepareInfoColumn(MatchView const& match, bool ownA, bool deathmatch, bool clearSyncPending, float x0, float width, float top) {
+        auto const pad = px(16.0f), gap = px(12.0f);
+        auto const panel = [&](float panelTop, float height) {
+            auto* fill = CCLayerColor::create({23, 25, 34, 255}, width, height); fill->setPosition({x0, panelTop - height}); m_root->addChild(fill, 1);
+            return panelTop - height;
+        };
+        auto const thinBar = [&](float y, float fill, ccColor3B color) -> CCLayerColor* {
+            auto* track = CCLayerColor::create({32, 35, 46, 255}, width - 2.0f * pad, px(6.0f)); track->setPosition({x0 + pad, y}); track->setSkewX(20.0f); m_root->addChild(track, 3);
+            auto* bar = CCLayerColor::create({color.r, color.g, color.b, 255}, (width - 2.0f * pad) * std::clamp(fill, 0.0f, 1.0f), px(6.0f));
+            bar->setPosition({x0 + pad, y}); bar->setSkewX(20.0f); m_root->addChild(bar, 4); return bar;
+        };
+        // Download panel: MAP with its chip and bar, AUDIO with its line and bar.
+        auto const& preparation = corum::ranked::RankedRoundPreparation::get().view();
+        auto const mapReady = clearSyncPending || (preparation.mapReady && findPlayableMap() != nullptr);
+        auto const failed = !preparation.error.empty() && preparation.error.find("WAITING") == std::string::npos && preparation.error.find("RETRYING") == std::string::npos;
+        float y = top - px(14.0f) - 6.0f;
+        auto const downloadBottom = panel(top, px(14.0f) * 2.0f + 50.0f);
+        m_root->addChild(makeLabel(tr("map", "MAP"), fontScale(16.0f), {x0 + pad, y}, corum::ranked::ui::Text, "extrabold", {0.0f, 0.5f}), 5);
+        {
+            auto const text = clearSyncPending ? tr("clear-recorded", "CLEAR RECORDED") : mapReady ? tr("map-ready", "MAP READY")
+                : failed ? tr("download-failed", "DOWNLOAD FAILED") : tr("downloading", "DOWNLOADING...");
+            auto* measure = makeLabel(text, fontScale(12.0f), {}, corum::ranked::ui::Text, "black");
+            addChip(m_root, text, {x0 + width - pad - measure->getScaledContentSize().width - 10.0f, y}, mapReady ? corum::ranked::ui::AccentFill : failed ? kRed : ccc3(32, 35, 46),
+                mapReady || failed ? corum::ranked::ui::AccentInk : corum::ranked::ui::TextMuted, 12.0f);
+        }
+        y -= 12.0f;
+        thinBar(y, mapReady ? 1.0f : 0.0f, corum::ranked::ui::Accent);
+        y -= 12.0f;
+        m_root->addChild(makeLabel(tr("audio", "AUDIO"), fontScale(16.0f), {x0 + pad, y}, corum::ranked::ui::Text, "extrabold", {0.0f, 0.5f}), 5);
+        m_prepareLoadStageLabel = makeLabel(preparationStageText(), fontScale(13.0f), {x0 + width - pad - 26.0f, y}, m_levelLookupError.empty() ? kAccent : kGold, "semibold", {1.0f, 0.5f});
+        corum::ranked::ui::fitMenuLabelWidth(m_prepareLoadStageLabel, width - 2.0f * pad - 60.0f, fontScale(13.0f), 0.09f); m_root->addChild(m_prepareLoadStageLabel, 5);
+        m_prepareLoadPercentLabel = makeLabel(fmt::format("{}%", static_cast<int>(std::round(m_prepareLoadVisual * 100.0f))), fontScale(13.0f),
+            {x0 + width - pad, y}, corum::ranked::ui::Text, "black", {1.0f, 0.5f});
+        m_root->addChild(m_prepareLoadPercentLabel, 5);
+        y -= 12.0f;
+        m_prepareLoadFill = thinBar(y, m_prepareLoadVisual, corum::ranked::ui::Accent);
+        m_prepareLoadWidth = width - 2.0f * pad;
+        // Players panel: PLAYER STATUS and both players' ready state.
+        auto playersTop = downloadBottom - gap;
+        auto const playersBottom = panel(playersTop, px(14.0f) * 2.0f + 50.0f);
+        y = playersTop - px(14.0f) - 5.0f;
+        m_root->addChild(makeLabel(tr("prepare-players", "PLAYERS"), fontScale(14.0f), {x0 + pad, y}, corum::ranked::ui::TextMuted, "extrabold", {0.0f, 0.5f}), 5);
         for (int row = 0; row < 2; ++row) {
+            y -= 18.0f;
             auto const own = row == 0;
             auto const sideA = own == ownA;
-            auto const y = 105.0f - 38.0f - 28.0f * static_cast<float>(row);
             auto const ready = sideA ? match.readyA : match.readyB;
             auto const accountId = sideA ? match.playerAAccountId : match.playerBAccountId;
             CCNode* icon = own ? static_cast<CCNode*>(corum::ranked::ui::PlayerIcon::createLocal()) : static_cast<CCNode*>(corum::ranked::ui::PlayerIcon::createRemote(accountId));
-            if (icon) { icon->setScale(0.42f); icon->setPosition({-80.0f, y}); m_root->addChild(icon, 5); }
-            auto* name = makeLabel(sideA ? match.playerAName : match.playerBName, 0.26f, {-66.0f, y}, own ? kAccent : corum::ranked::ui::Text, "black", {0.0f, 0.5f});
-            corum::ranked::ui::fitMenuLabelWidth(name, 96.0f, 0.26f, 0.16f); m_root->addChild(name, 5);
-            auto* chip = corum::ranked::ui::slab({52.0f, 13.0f}, {66.0f, y}, ready ? corum::ranked::ui::AccentFill : corum::ranked::ui::SurfaceSoft);
-            m_root->addChild(chip, 5);
-            auto* state = makeLabel(ready ? tr("prepare-ready", "READY") : tr("prepare-preparing", "PREPARING"), 0.17f, {66.0f, y},
-                ready ? corum::ranked::ui::AccentInk : corum::ranked::ui::TextMuted, "black");
-            corum::ranked::ui::fitMenuLabelWidth(state, 44.0f, 0.17f, 0.11f); m_root->addChild(state, 6);
+            if (icon) { icon->setScale(0.42f); icon->setPosition({x0 + pad + 7.0f, y}); m_root->addChild(icon, 5); }
+            auto* name = makeLabel(sideA ? match.playerAName : match.playerBName, fontScale(16.0f), {x0 + pad + 20.0f, y}, corum::ranked::ui::Text, "extrabold", {0.0f, 0.5f});
+            corum::ranked::ui::fitMenuLabelWidth(name, width - 2.0f * pad - 80.0f, fontScale(16.0f), 0.1f); m_root->addChild(name, 5);
+            auto const text = ready ? tr("prepare-ready", "READY") : tr("prepare-preparing", "PREPARING");
+            auto* measure = makeLabel(text, fontScale(12.0f), {}, corum::ranked::ui::Text, "black");
+            addChip(m_root, text, {x0 + width - pad - measure->getScaledContentSize().width - 10.0f, y}, ready ? corum::ranked::ui::AccentFill : ccc3(32, 35, 46),
+                ready ? corum::ranked::ui::AccentInk : corum::ranked::ui::TextMuted, 12.0f);
         }
-        panel(1.0f, 106.0f, tr("prepare-rules", "RULES"));
-        std::array<std::string, 2> rules = deathmatch
-            ? std::array<std::string, 2>{tr("rule-deathmatch-progress", "DEATH MATCH: BEST PROGRESS WINS"), tr("rule-deathmatch-attempts", "3 ATTEMPTS")}
-            : std::array<std::string, 2>{tr("rule-round-score", "SCORE MATCH · 3 CLEARS WIN THE ROUND"), tr("rule-round-draw", "A DRAW GOES TO A DEATH MATCH (BEST PROGRESS)")};
-        for (std::size_t index = 0; index < rules.size(); ++index) {
-            auto* bullet = CCLayerColor::create({kAccent.r, kAccent.g, kAccent.b, 255}, 3.0f, 3.0f);
-            auto const y = 1.0f - 34.0f - 24.0f * static_cast<float>(index);
-            bullet->setPosition({-90.0f, y - 1.5f}); m_root->addChild(bullet, 5);
-            auto* line = makeLabel(rules[index], 0.19f, {-82.0f, y}, corum::ranked::ui::Text, "semibold", {0.0f, 0.5f});
-            corum::ranked::ui::fitMenuLabelWidth(line, 170.0f, 0.19f, 0.11f); m_root->addChild(line, 5);
-        }
+        // Rules panel.
+        auto const rulesTop = playersBottom - gap;
+        auto const rulesBottom = panel(rulesTop, px(14.0f) * 2.0f + 36.0f);
+        y = rulesTop - px(14.0f) - 5.0f;
+        m_root->addChild(makeLabel(tr("prepare-rules", "RULES"), fontScale(14.0f), {x0 + pad, y}, corum::ranked::ui::TextMuted, "extrabold", {0.0f, 0.5f}), 5);
+        auto const first = deathmatch ? tr("rule-deathmatch-progress", "DEATH MATCH: BEST PROGRESS WINS") : tr("rule-round-score", "SCORE MATCH · 3 CLEARS WIN THE ROUND");
+        auto const second = deathmatch ? tr("rule-deathmatch-attempts", "3 ATTEMPTS") : tr("rule-round-draw", "A DRAW GOES TO A DEATH MATCH (BEST PROGRESS)");
+        y -= 14.0f;
+        auto* line = makeLabel(first, fontScale(15.0f), {x0 + pad, y}, corum::ranked::ui::Text, "semibold", {0.0f, 0.5f});
+        corum::ranked::ui::fitMenuLabelWidth(line, width - 2.0f * pad, fontScale(15.0f), 0.09f); m_root->addChild(line, 5);
+        y -= 12.0f;
+        auto* note = makeLabel(second, fontScale(13.0f), {x0 + pad, y}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f});
+        corum::ranked::ui::fitMenuLabelWidth(note, width - 2.0f * pad, fontScale(13.0f), 0.09f); m_root->addChild(note, 5);
+        return rulesBottom;
     }
 
     void startSoloIntro(MatchView const& match, std::array<CCLayerColor*, 3> const& columns, SoloLayout const& layout) {
@@ -5276,90 +5370,6 @@ class CorumRankedLayer final : public CCLayerColor {
 
     // Centre column: map identity, difficulty band (+thumbnail), readiness rows,
     // load bar and the round options. Local coordinates (column centre = 0,0).
-    void addSoloMapColumn(MatchView const& match, bool clearSyncPending) {
-        // Board .panel: a flat dark fill with a lime top rule.
-        auto* panelFill = CCLayerColor::create({23, 25, 34, 255}, 225.0f, 210.0f); panelFill->setPosition({-112.5f, -105.0f}); m_root->addChild(panelFill, 1);
-        auto* panelRule = CCLayerColor::create({corum::ranked::ui::Accent.r, corum::ranked::ui::Accent.g, corum::ranked::ui::Accent.b, 255}, 225.0f, 1.0f);
-        panelRule->setPosition({-112.5f, 104.0f}); m_root->addChild(panelRule, 2);
-        auto* caption = makeLabel(fmt::format("{}  ·  MAP", soloRoundTitle(match)), 0.21f, {-100.0f, 92.0f}, kAccent, "semibold");
-        caption->setAnchorPoint({0, 0.5f}); corum::ranked::ui::fitMenuLabelWidth(caption, 130.0f, 0.21f, 0.15f); m_root->addChild(caption, 5);
-        if (match.currentMap) {
-            auto const& map = *match.currentMap;
-            auto* id = makeLabel(fmt::format("GD #{}", map.levelId), 0.19f, {100.0f, 92.0f}, corum::ranked::ui::TextMuted, "semibold");
-            id->setAnchorPoint({1, 0.5f}); m_root->addChild(id, 5);
-            auto* title = makeLabel(map.title, 0.47f, {-100.0f, 75.0f}, corum::ranked::ui::Text, "black");
-            title->setAnchorPoint({0, 0.5f}); corum::ranked::ui::fitMenuLabelWidth(title, 200.0f, 0.47f, 0.24f); m_root->addChild(title, 5);
-            if (!map.creator.empty()) {
-                auto* creator = makeLabel("by " + map.creator, 0.22f, {-100.0f, 58.0f}, corum::ranked::ui::TextMuted, "semibold");
-                creator->setAnchorPoint({0, 0.5f}); corum::ranked::ui::fitMenuLabelWidth(creator, 200.0f, 0.22f, 0.15f); m_root->addChild(creator, 5);
-            }
-            auto const diffColor = difficultyColor(map.difficulty);
-            { auto* band = CCLayerColor::create({32, 35, 46, 255}, 205.0f, 42.0f); band->setPosition({-102.5f, 6.0f}); m_root->addChild(band, 2);
-              auto* edge = CCLayerColor::create({diffColor.r, diffColor.g, diffColor.b, 255}, 3.0f, 42.0f); edge->setPosition({-102.5f, 6.0f}); m_root->addChild(edge, 3); }
-            auto const thumb = corum::ranked::SurvivalThumbnailProvider::supported() && map.levelId > 0;
-            auto const badgeX = thumb ? -34.0f : 0.0f, badgeWidth = thumb ? 120.0f : 150.0f;
-            addMapDifficulty(map, {badgeX, 34.0f}, badgeWidth, 16);
-            auto const lengthMetadata = corum::ranked::ui::displayedMapMetadata(map.levelId, map.metadata);
-            auto* length = makeLabel(corum::ranked::mapLengthText(lengthMetadata), 0.24f, {badgeX, 18.0f}, corum::ranked::ui::Text, "semibold");
-            corum::ranked::ui::fitMenuLabelWidth(length, badgeWidth, 0.24f, 0.16f); m_root->addChild(length, 6);
-            if (thumb) {
-                m_root->addChild(makeNeonPanel({62.0f, 36.0f}, {66.0f, 27.0f}, kSteel, {15, 16, 21}, 248), 3);
-                addSoloThumbnail(m_root, {66.0f, 27.0f}, {60.0f, 34.0f}, match);
-            }
-        }
-        addPreparationStatusRows({-52.0f, -8.0f}, {52.0f, -8.0f}, 100.0f, clearSyncPending);
-        // Live round: own minus opponent score on a -200..+200 bar.
-        auto const preparing = match.state == "ROUND_PREPARE" || match.state == "ROUND_ENTERING";
-        if (!preparing && match.deathmatchSequence <= 0 && match.state.starts_with("ROUND")) {
-            auto const ownA = soloOwnA(match);
-            auto const diff = (ownA ? match.scoreA - match.scoreB : match.scoreB - match.scoreA);
-            constexpr float half = 84.0f;
-            auto const reach = static_cast<float>(std::clamp(diff, -200.0, 200.0) / 200.0) * half;
-            auto* caption = makeLabel(fmt::format("{}  {}{}", tr("score-diff", "SCORE DIFF"), diff >= 0 ? "+" : "", formatScore(diff, false)), 0.17f,
-                {0.0f, -59.0f}, diff >= 0 ? kAccent : kRed, "black");
-            m_root->addChild(caption, 6);
-            auto* track = CCLayerColor::create({32, 35, 46, 255}, half * 2.0f, 5.0f); track->setPosition({-half, -68.0f}); m_root->addChild(track, 5);
-            auto* fill = CCLayerColor::create(diff >= 0 ? ccc4(kAccent.r, kAccent.g, kAccent.b, 255) : ccc4(kRed.r, kRed.g, kRed.b, 255), std::abs(reach), 5.0f);
-            fill->setPosition({reach >= 0 ? 0.0f : reach, -68.0f}); m_root->addChild(fill, 6);
-            auto* tick = CCLayerColor::create({244, 245, 247, 255}, 1.0f, 9.0f); tick->setPosition({-0.5f, -70.0f}); m_root->addChild(tick, 7);
-        }
-        constexpr float barWidth = 168.0f;
-        auto* back = CCLayerColor::create({16, 17, 22, 245}); back->setContentSize({barWidth, 7.0f});
-        back->setPosition({-100.0f, -36.0f}); m_root->addChild(back, 4);
-        m_prepareLoadFill = CCLayerColor::create({kAccent.r, kAccent.g, kAccent.b, 245});
-        m_prepareLoadFill->setContentSize({barWidth * m_prepareLoadVisual, 7.0f}); m_prepareLoadFill->setPosition(back->getPosition());
-        m_prepareLoadWidth = barWidth; m_root->addChild(m_prepareLoadFill, 5);
-        m_prepareLoadPercentLabel = makeLabel(fmt::format("{}%", static_cast<int>(std::round(m_prepareLoadVisual * 100.0f))), 0.23f,
-            {100.0f, -32.5f}, ccc3(235, 242, 255), "black");
-        m_prepareLoadPercentLabel->setAnchorPoint({1, 0.5f}); m_root->addChild(m_prepareLoadPercentLabel, 6);
-        m_prepareLoadStageLabel = makeLabel(preparationStageText(), 0.18f, {-100.0f, -50.0f}, m_levelLookupError.empty() ? kAccent : kGold, "semibold");
-        m_prepareLoadStageLabel->setAnchorPoint({0, 0.5f}); corum::ranked::ui::fitMenuLabelWidth(m_prepareLoadStageLabel, 200.0f, 0.18f, 0.12f);
-        m_root->addChild(m_prepareLoadStageLabel, 6);
-        // Three equal option buttons across the column.
-        auto* level = findPlayableMap();
-        auto option = [&](std::string const& caption, float x, SEL_MenuHandler selector, bool on) {
-            auto* face = corum::ranked::ui::surface({64.0f, 22.0f}, {}, on ? kAccent : kSteel, corum::ranked::ui::SurfaceRaised, 255, true);
-            auto* label = makeLabel(caption, 0.2f, {32.0f, 11.0f}, corum::ranked::ui::Text, "extrabold");
-            corum::ranked::ui::fitMenuLabelWidth(label, 56.0f, 0.2f, 0.12f); face->addChild(label, 5);
-            auto* item = CCMenuItemSpriteExtra::create(face, this, selector); item->setPosition({x, -84.0f}); m_menu->addChild(item);
-            return item;
-        };
-        auto* ldm = option(fmt::format("{}: {}", tr("low-detail", "LDM"), level && level->m_lowDetailModeToggled ? "ON" : "OFF"), -70.0f,
-            menu_selector(CorumRankedLayer::onLowDetail), level && level->m_lowDetailModeToggled);
-        auto* shake = option(fmt::format("{}: {}", tr("disable-shake", "DISABLE SHAKE"), level && level->m_disableShakeToggled ? "ON" : "OFF"), 0.0f,
-            menu_selector(CorumRankedLayer::onDisableShake), level && level->m_disableShakeToggled);
-        ldm->setID("ranked-round-ldm"_spr); shake->setID("ranked-round-disable-shake"_spr);
-        // Maps without a Low Detail Mode have nothing to toggle.
-        auto const ldmAvailable = level && level->m_lowDetailMode;
-        ldm->setEnabled(ldmAvailable); shake->setEnabled(level != nullptr);
-        if (!ldmAvailable) corum::ranked::ui::grayButtonVisual(ldm->getNormalImage());
-        m_jukeboxButton = option("Jukebox", 70.0f, menu_selector(CorumRankedLayer::onJukebox), false);
-        m_jukeboxButton->setID("ranked-jukebox-button"_spr);
-        auto const jukeboxLoaded = corum::ranked::ui::rankedJukeboxLoaded();
-        if (!jukeboxLoaded) corum::ranked::ui::grayButtonVisual(m_jukeboxButton->getNormalImage());
-        m_jukeboxButton->setEnabled(!jukeboxLoaded || findPlayableMap() != nullptr);
-    }
-
     std::vector<corum::ranked::ui::SoloIntroCard> soloIntroCards(MatchView const& match, int& revealSlot, bool& shift) const {
         using corum::ranked::ui::SoloIntroCard;
         auto const ownA = soloOwnA(match);
@@ -6110,10 +6120,17 @@ class CorumRankedLayer final : public CCLayerColor {
             animatePromotionTrigger(panelX, panelBottom + 44.0f, ownA ? match.ratingEventA : match.ratingEventB, before, delta);
         }
 
-        // Footer: REMATCH (primary), HISTORY, LOBBY.
-        addButton(tr("queue-again", "QUEUE AGAIN"), {size.width / 2.0f - 70.0f, 22.0f}, menu_selector(CorumRankedLayer::onQueueAgain), false, 0.56f);
-        addButton(tr("history", "HISTORY"), {size.width / 2.0f + 62.0f, 22.0f}, menu_selector(CorumRankedLayer::onHistory), false, 0.46f, true);
-        addButton(tr("to-lobby", "LOBBY"), {size.width / 2.0f + 148.0f, 22.0f}, menu_selector(CorumRankedLayer::onResultClose), false, 0.46f, true);
+        // M6 footer (84 px, padding 34 px, gap 12 px): REMATCH (lime, flex 2),
+        // MATCH HISTORY and LOBBY (ghosts, flex 1), 56 px tall.
+        {
+            auto const left = px(34.0f), gap = px(12.0f), unit = (size.width - 2.0f * left - 2.0f * gap) / 4.0f, footY = px(42.0f);
+            boardButton(tr("queue-again", "QUEUE AGAIN"), {unit * 2.0f, px(56.0f)}, {left + unit, footY}, menu_selector(CorumRankedLayer::onQueueAgain), 22.0f, true,
+                "ranked-result-queue-again"_spr);
+            boardButton(tr("match-history", "MATCH HISTORY"), {unit, px(56.0f)}, {left + unit * 2.0f + gap + unit / 2.0f, footY}, menu_selector(CorumRankedLayer::onHistory), 18.0f, false,
+                "ranked-result-history"_spr);
+            boardButton(tr("to-lobby", "LOBBY"), {unit, px(56.0f)}, {left + unit * 3.0f + gap * 2.0f + unit / 2.0f, footY}, menu_selector(CorumRankedLayer::onResultClose), 18.0f, false,
+                "ranked-result-lobby"_spr);
+        }
 
         // A result can be rendered again after visiting History or after a
         // presentation refresh. Play a tier transition only once per match;

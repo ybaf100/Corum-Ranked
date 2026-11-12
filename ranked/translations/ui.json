@@ -1388,8 +1388,8 @@
     "ko": "PREPARING MAP..."
   },
   "private-ban-notice": {
-    "en": "YOUR BAN IS PRIVATE  |  REVEALED WHEN THE PHASE ENDS",
-    "ko": "내 밴은 비공개이며 단계 종료 후 공개됩니다"
+    "en": "A BAN LOCKS IN AS SOON AS YOU PRESS IT. THE OPPONENT'S CHOICE STAYS HIDDEN.",
+    "ko": "밴을 누르면 바로 확정됩니다. 상대의 선택은 공개되지 않습니다."
   },
   "private-ban-phase": {
     "en": "PRIVATE BAN PHASE",
@@ -3717,7 +3717,7 @@
   },
   "placement-quick": {
     "en": "QUICK",
-    "ko": "단기 배치"
+    "ko": "빠른 배치"
   },
   "placement-recommended": {
     "en": "RECOMMENDED",
@@ -4086,5 +4086,33 @@
   "tier-guide-demotion-detail": {
     "en": "Shown near a tier's lower bound; it clears once you recover the required LP.",
     "ko": "티어 하한 근처에서 표시되며, 기준 LP 이상 회복하면 해제됩니다."
+  },
+  "demotion-warning-detail": {
+    "en": "Losing the next match may demote you.",
+    "ko": "다음 경기에서 패배하면 강등될 수 있습니다."
+  },
+  "versus-ban-line": {
+    "en": "MAP BAN · 1 OF {}",
+    "ko": "맵 밴 · {}개 중 1개"
+  },
+  "ban-footer-note": {
+    "en": "BAN AND NO BAN APPLY AT ONCE · A BANNED MAP FADES AND DROPS",
+    "ko": "밴 · 밴 안 함 모두 누르는 즉시 처리 · 밴한 맵은 아래로 내려가며 투명해집니다"
+  },
+  "round-map-chip": {
+    "en": "{} MAP",
+    "ko": "{} 맵"
+  },
+  "state-on": {
+    "en": "ON",
+    "ko": "사용"
+  },
+  "state-off": {
+    "en": "OFF",
+    "ko": "사용 안 함"
+  },
+  "next-stage-pool": {
+    "en": "NEXT STAGE · POOL {}",
+    "ko": "다음 STAGE · POOL {}"
   }
 }

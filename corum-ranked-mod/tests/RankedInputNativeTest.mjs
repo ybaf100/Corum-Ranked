@@ -117,7 +117,7 @@ struct CorumRankedLayer : CCLayerColor {
     void* m_lobbySurvival=nullptr;void* m_lobbySolo=nullptr;void* m_lobbyPanel=nullptr;void* m_lobbyToolbar=nullptr;
     void*m_queueContents=nullptr;void*m_queueMenu=nullptr;void*m_queuePlayers=nullptr,*m_queueWait=nullptr,*m_queueMinimum=nullptr,*m_queueHint=nullptr;void*m_queueHeading=nullptr;
     void*m_queueRingCyan=nullptr,*m_queueRingGold=nullptr,*m_queueSweep=nullptr,*m_queueCenter=nullptr,*m_queueOpponentMark=nullptr,*m_queueOpponentLabel=nullptr,*m_queueOpponentBox=nullptr;void*m_queueRadar=nullptr,*m_queueRangeLabel=nullptr;
-    struct{void clear(){}}m_queueSlots;void*m_queueFillBar=nullptr;void*m_queueLeave=nullptr,*m_queueFill=nullptr;bool m_queueShown=false,m_queueAnimating=false;
+    struct{void clear(){}}m_queueSlots;void*m_queueFillBar=nullptr;void*m_queueLeave=nullptr,*m_queueFill=nullptr,*m_queueFreePlay=nullptr;bool m_queueShown=false,m_queueAnimating=false;
     void setLobbyNodeInput(void*,bool){}
     Menu* m_menu=nullptr; Root* m_root=nullptr; void* m_rankTransitionLayer=nullptr;
     void* m_resultScoreLayer=nullptr;bool m_resultScorePending=false;

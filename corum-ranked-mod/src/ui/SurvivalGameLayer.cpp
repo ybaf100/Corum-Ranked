@@ -102,10 +102,12 @@ class SurvivalGameLayer final : public CCLayerColor {
     bool init() override {
         if(!CCLayerColor::initWithColor({0,0,0,255}))return false;setID("survival-game-coordinator"_spr);setKeypadEnabled(true);
         auto const size=CCDirector::sharedDirector()->getWinSize();setContentSize(size);
-        m_heading=ui::menuLabel("SURVIVAL",.60f,{size.width/2,size.height-29},ui::Accent,ui::FontWeight::Black);addChild(m_heading);
-        m_boardClock=ui::menuLabel("",.28f,{size.width-12,size.height-22},ui::Accent,ui::FontWeight::ExtraBold);
+        // S3 board header (.hdr): the leaning title on the left with the map
+        // line after it; the clock stays on the right.
+        m_heading=ui::menuLabel("SURVIVAL",.375f,{14,size.height-18},ui::Text,ui::FontWeight::Black);m_heading->setAnchorPoint({0,.5f});ui::leanLabel(m_heading);addChild(m_heading);
+        m_boardClock=ui::menuLabel("",.28f,{size.width-14,size.height-18},ui::Accent,ui::FontWeight::ExtraBold);
         m_boardClock->setAnchorPoint({1,.5f});m_boardClock->setID("survival-board-clock"_spr);addChild(m_boardClock,10);
-        m_map=ui::menuLabel("",.27f,{size.width/2,size.height-48},ui::TextMuted,ui::FontWeight::SemiBold);addChild(m_map);
+        m_map=ui::menuLabel("",.20f,{14,size.height-18},ui::TextMuted,ui::FontWeight::SemiBold);m_map->setAnchorPoint({0,.5f});addChild(m_map);
         m_status=ui::menuLabel("",.28f,{size.width/2,80},ui::TextMuted,ui::FontWeight::SemiBold);addChild(m_status);
         // Anchored at the top centre so the difficulty vote can shrink the board
         // upwards; with the full window size the child coordinates are unchanged.
@@ -631,8 +633,8 @@ public:
         auto const boardEntryWait=nextRound && !elimination && !intro && liveBoard && view.state!="ROUND_RESULT"?runtime.selectedPanelWaitMs():std::nullopt;
         auto const boardClock=boardEntryWait && *boardEntryWait>0?fmt::format(fmt::runtime(text("survival-entry-wait","ALL READY · ENTERING IN {}s")),(*boardEntryWait+999)/1000):i18n::text(clock,clock);
         m_boardClock->setString(boardClock.c_str());m_boardClock->setVisible(!result && !elimination && !boardClock.empty());
-        auto const headingWidth=std::max(80.f,getContentSize().width-24-(m_boardClock->isVisible()?2*144.f:0.f));
-        m_heading->setPosition({getContentSize().width/2,getContentSize().height-29});
+        auto const headingWidth=std::max(80.f,getContentSize().width-28-(m_boardClock->isVisible()?150.f:0.f));
+        m_heading->setPosition({14,getContentSize().height-18});
         ui::fitMenuLabelWidth(m_boardClock,boardEntryWait?200.f:140.f,.28f,.16f);
         auto const preparationWindow=nextRound && !elimination && !intro && view.map.levelId>0 && view.state!="ROUND_RESULT";
         if(preparationWindow)m_selection->advancePreparation(view,runtime.countdownMs());
@@ -669,10 +671,12 @@ public:
         if(!elimination)m_heading->setString(result?fmt::format("SURVIVAL · {}",i18n::isKorean()?fmt::format(fmt::runtime(i18n::text("player-rank","{}")),view.result["rank"].asInt().unwrapOr(0)):survivalOrdinal(static_cast<int>(view.result["rank"].asInt().unwrapOr(0)))).c_str():
             (intro?fmt::format("SURVIVAL · {} {}",view.playerCount,corum::ranked::i18n::literal("inline.players")):
             fmt::format("SURVIVAL · {}",view.phase=="TIEBREAK"?"DEATH MATCH":view.phase=="FINAL"?"FINAL":("ROUND "+std::to_string(view.roundNumber)))).c_str());
-        ui::fitFullMenuLabel(m_heading,headingWidth,26,.60f);
+        ui::fitSingleLineMenuLabel(m_heading,headingWidth*.5f,20,.375f);
         auto const group=view.group=="RED_BRONZE"?std::string("RED-BRONZE"):view.group;
         // The intro roster must not reveal the server's preselected map.
         m_map->setString((!intro && view.map.levelId>0?fmt::format("{} · GD #{}",group,view.map.levelId):group).c_str());
+        m_map->setPosition({14+m_heading->getScaledContentSize().width+10,getContentSize().height-18});
+        ui::fitSingleLineMenuLabel(m_map,std::max(40.f,headingWidth-m_heading->getScaledContentSize().width-10),12,.20f);
         std::string status;
         if(view.state=="CANCELLED")status=text("survival-cancelled","MATCH CANCELLED");
         else if(result)status="";
