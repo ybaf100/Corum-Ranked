@@ -55,6 +55,7 @@ for (const debug of [false, true]) test(`production audio transitions, bounded f
         'void RankedAudioManager::restoreMenuMusic()',
         'void RankedAudioManager::onApplicationPause()',
         'void RankedAudioManager::onApplicationResume()',
+        'void RankedAudioManager::tickDownloads()',
         'void RankedAudioManager::tick()',
     ];
     const configSource = read('src/RankedRuntime.hpp');

@@ -39,11 +39,12 @@ for (const debug of [false, true]) test(`production song downloads: Library, New
         'void RankedAudioManager::finishDownloadSuccess(',
         'void RankedAudioManager::finishDownloadFailure(',
         'void RankedAudioManager::synchronizeSongCaches()',
+        'void RankedAudioManager::tickDownloads()',
     ];
     // Execute the production download portion of tick; playback has its own
     // FMOD fixture. Clock, HTTP and GD downloads are controlled boundaries.
     const tick = method(source, 'void RankedAudioManager::tick()');
-    const downloadTick = tick.slice(0, tick.indexOf('    if (resourcesReady()')) + '\n}';
+    const downloadTick = tick.slice(0, tick.indexOf('    tickDownloads();')) + '    tickDownloads();\n}';
     const helpers = source.slice(source.indexOf('constexpr auto kSongInfoTimeout'), source.indexOf('enum class PreparedStreamState'));
     const configSource = read('src/RankedRuntime.hpp');
     const config = configSource.slice(configSource.indexOf('struct RankedAudioResourceView {'),

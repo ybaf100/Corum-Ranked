@@ -2395,6 +2395,14 @@
     "en": "Replay file damaged",
     "ko": "리플레이 파일 손상"
   },
+  "download-overlay-update": {
+    "en": "UPDATE {}%",
+    "ko": "업데이트 다운로드 {}%"
+  },
+  "download-overlay-resources": {
+    "en": "RESOURCES {}%",
+    "ko": "리소스 다운로드 {}%"
+  },
   "replay-view": {
     "en": "VIEW REPLAY",
     "ko": "리플레이 보기"

@@ -1491,13 +1491,11 @@ void RankedAudioManager::restoreMenuMusic() {
     if (auto* game = GameManager::sharedState()) game->playMenuMusic();
 }
 
-void RankedAudioManager::tick() {
-    refreshVolume();
+// Advances the resource download queue only (no playback). The Ranked scene
+// calls it through tick(); free play outside Ranked calls it directly so the
+// queue keeps moving while the player is elsewhere.
+void RankedAudioManager::tickDownloads() {
     auto const now = std::chrono::steady_clock::now();
-    updateOwnedFades(now);
-    reapRetainedSounds();
-    updateStreamHealth();
-
     if (m_activeDownloadSongId > 0 &&
         m_downloadStartedAt != std::chrono::steady_clock::time_point{} &&
         now - m_downloadStartedAt >= kDownloadGuardTimeout) {
@@ -1516,6 +1514,15 @@ void RankedAudioManager::tick() {
         m_failedSongIds.clear();
         prewarmReadySounds();
     }
+}
+
+void RankedAudioManager::tick() {
+    refreshVolume();
+    auto const now = std::chrono::steady_clock::now();
+    updateOwnedFades(now);
+    reapRetainedSounds();
+    updateStreamHealth();
+    tickDownloads();
 
     // Warm future Round/R3/Result channels during the visible Ranked scene;
     // the gameplay handoff stops them and the covered scene does not tick.

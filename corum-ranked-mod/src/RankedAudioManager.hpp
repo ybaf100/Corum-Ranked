@@ -52,6 +52,7 @@ public:
 
     void configure(RankedClientPresentationView const& config);
     void tick();
+    void tickDownloads();
 
     [[nodiscard]] bool enabled() const;
     [[nodiscard]] bool resourcesReady() const;
