@@ -46,4 +46,7 @@ test('replay keys are consumed only by an owned replay scene and otherwise reach
     assert.match(method, /action==ReplayShortcut::None\|\|!m_fields->replayOwned\|\|!m_fields->ready\|\|m_isPaused/);
     assert.match(method, /if\(!held\.insert\(key\)\.second\)return true;/);
     assert.match(source, /if\(m_fields->replayOwned&&m_isPaused\)\{m_fields->replayHeldKeys\.clear\(\);/);
+    // Desktop builds name each button's shortcut on the button itself.
+    const hud = source.slice(source.indexOf('void addReplayHud(){'), source.indexOf('m_fields->replaySlider=Slider::create'));
+    assert.match(hud, /#if defined\(GEODE_IS_DESKTOP\)[\s\S]*\{"SPACE","R","UP \/ DOWN","LEFT","RIGHT",""\}[\s\S]*face->addChild\(key,5\)[\s\S]*#else/);
 });

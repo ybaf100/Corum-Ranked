@@ -3,7 +3,7 @@
 #include <array>
 namespace corum::ranked {
 struct CatalogTranslation {char const* key;char const* english;char const* korean;};
-inline constexpr std::array<CatalogTranslation, 1128> kTranslations {{
+inline constexpr std::array<CatalogTranslation, 1127> kTranslations {{
     CatalogTranslation{"A logged-in Geometry Dash account is required.", "A logged-in Geometry Dash account is required.", "로그인된 Geometry Dash 계정이 필요합니다."},
     CatalogTranslation{"A mod update is required before entering Ranked.", "A mod update is required before entering Ranked.", "랭크에 입장하려면 모드를 업데이트하세요."},
     CatalogTranslation{"AUDIO_CACHE_INVALID", "Audio file is missing or empty · retry required", "음원 파일이 없거나 비어 있음 · 재시도 필요"},
@@ -803,7 +803,6 @@ inline constexpr std::array<CatalogTranslation, 1128> kTranslations {{
     CatalogTranslation{"replay-incompatible-hook", "Replay incompatible: hook unavailable", "리플레이 호환 불가: 후크 사용 불가"},
     CatalogTranslation{"replay-incompatible-setting", "Replay incompatible: unsupported CBF setting", "리플레이 호환 불가: 지원하지 않는 CBF 설정"},
     CatalogTranslation{"replay-incompatible-version", "Replay incompatible: version mismatch", "리플레이 호환 불가: 버전 불일치"},
-    CatalogTranslation{"replay-keys", "SPACE PLAY/PAUSE · LEFT/RIGHT 10s · R RESTART · UP/DOWN SPEED", "SPACE 재생/정지 · LEFT/RIGHT 10초 이동 · R 처음부터 · UP/DOWN 속도"},
     CatalogTranslation{"replay-native-unavailable", "Official result has no matching native replay", "공식 기록에 해당하는 실제 리플레이 없음"},
     CatalogTranslation{"replay-physics-unsupported", "Replay capture unavailable for this physics environment", "현재 물리 환경에서는 리플레이를 기록할 수 없습니다"},
     CatalogTranslation{"replay-preparation-failed", "Replay preparation failed", "리플레이 녹화 준비 실패"},

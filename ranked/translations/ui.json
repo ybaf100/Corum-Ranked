@@ -2391,10 +2391,6 @@
     "en": "VIEW REPLAY",
     "ko": "리플레이 보기"
   },
-  "replay-keys": {
-    "en": "SPACE PLAY/PAUSE · LEFT/RIGHT 10s · R RESTART · UP/DOWN SPEED",
-    "ko": "SPACE 재생/정지 · LEFT/RIGHT 10초 이동 · R 처음부터 · UP/DOWN 속도"
-  },
   "replay-seeking": {
     "en": "Moving to replay position...",
     "ko": "리플레이 위치로 이동 중..."

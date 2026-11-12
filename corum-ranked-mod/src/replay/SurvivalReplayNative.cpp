@@ -221,13 +221,17 @@ public:
         std::array<char const*,6> captions{"PLAY / PAUSE","RESTART","SPEED","-10s","+10s","BACK"};
         auto width=std::min(460.f,size.width-12),cell=width/6;
         for(int i=0;i<6;++i){auto* face=corum::ranked::ui::hudSurface({cell-3,23},{},corum::ranked::ui::HudCyan,corum::ranked::ui::HudSurface,235,true);
+#if defined(GEODE_IS_DESKTOP)
+          // Desktop: each button also names its keyboard shortcut.
+          std::array<char const*,6> keys{"SPACE","R","UP / DOWN","LEFT","RIGHT",""};
+          auto const keyed=*keys[i]!='\0';
+          auto* text=corum::ranked::ui::menuLabel(captions[i],.18f,{(cell-3)/2,keyed?14.5f:11.5f},corum::ranked::ui::Text);corum::ranked::ui::fitFullMenuLabel(text,cell-8,keyed?11:18,.18f);face->addChild(text,5);
+          if(keyed){auto* key=corum::ranked::ui::menuLabel(keys[i],.13f,{(cell-3)/2,5.5f},corum::ranked::ui::TextMuted);corum::ranked::ui::fitFullMenuLabel(key,cell-8,8,.13f);face->addChild(key,5);}
+#else
           auto* text=corum::ranked::ui::menuLabel(captions[i],.18f,{(cell-3)/2,11.5f},corum::ranked::ui::Text);corum::ranked::ui::fitFullMenuLabel(text,cell-8,18,.18f);face->addChild(text,5);
+#endif
           auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(CorumSurvivalReplayLayer::onReplayControl));item->setTag(i+1);item->setPosition({(size.width-width)/2+cell*(i+.5f),16});menu->addChild(item);
         }
-#if defined(GEODE_IS_DESKTOP)
-        auto* keys=corum::ranked::ui::menuLabel(corum::ranked::i18n::text("replay-keys","SPACE PLAY/PAUSE · LEFT/RIGHT 10s · R RESTART · UP/DOWN SPEED"),.15f,{size.width/2,size.height-19},corum::ranked::ui::TextMuted);
-        corum::ranked::ui::fitMenuLabelWidth(keys,size.width-24,.15f,.1f);addChild(keys,1500);
-#endif
         m_fields->replaySlider=Slider::create(this,menu_selector(CorumSurvivalReplayLayer::onReplaySeek),.65f);m_fields->replaySlider->setPosition({size.width/2,43});addChild(m_fields->replaySlider,1500);
         // Seek cover: the world is being re-simulated from a verified reset, so
         // intermediate frames are hidden behind a progress screen. Controls stay above it.
