@@ -32,6 +32,20 @@ class ProductionReleaseTest(unittest.TestCase):
     def test_both_public_channels_and_readiness_must_match(self):
         self.assertTrue(self.verify()["ready"])
 
+    def test_waits_for_the_config_of_a_just_restarted_server(self):
+        loading = copy.deepcopy(self.ready)
+        loading["config"]["ready"] = False
+        with patch.object(production.clients, "wait_for_clients", return_value=self.packages), \
+             patch.object(production.time, "sleep") as sleep, \
+             patch.object(production, "read_json", side_effect=[self.health, loading, loading, self.ready, self.config]):
+            self.assertTrue(production.verify(VERSION, BASE)["ready"])
+        self.assertEqual(sleep.call_count, 2)
+
+    def test_config_that_never_loads_still_fails(self):
+        self.ready["config"]["ready"] = False
+        with patch.object(production, "CONFIG_READY_WAIT_SECONDS", 0), self.assertRaisesRegex(ValueError, "config is not ready"):
+            self.verify()
+
     def test_operator_queue_off_is_preserved(self):
         self.ready["rankedReady"] = False
         self.ready["config"]["queueEnabled"] = False

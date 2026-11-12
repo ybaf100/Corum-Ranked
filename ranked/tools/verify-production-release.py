@@ -3,11 +3,13 @@ import argparse
 import importlib.util
 import json
 import os
+import time
 from pathlib import Path
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[2]
 API = "https://api.52-74-37-130.sslip.io"
+CONFIG_READY_WAIT_SECONDS = 180
 spec = importlib.util.spec_from_file_location("published_clients", Path(__file__).with_name("verify-published-clients.py"))
 clients = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(clients)
@@ -33,7 +35,13 @@ def verify(version, base, expected_sha=None, server_sha=None, client_sha=None, d
         raise ValueError("Singapore health failed")
     if server_sha is not None and health.get("sourceSha") != server_sha:
         raise ValueError("Active server source SHA differs from the verified clients")
+    # A just-restarted server loads the Ranked config from Apps Script in the
+    # background; wait for that load instead of failing on the first read.
     ready = read_json("/ready")
+    deadline = time.monotonic() + CONFIG_READY_WAIT_SECONDS
+    while ready.get("config", {}).get("ready") is not True and time.monotonic() < deadline:
+        time.sleep(5)
+        ready = read_json("/ready")
     if not all(ready.get(key) is True for key in ("ready", "databaseConnected", "databaseReady", "schemaReady")):
         raise ValueError("Singapore database/schema readiness failed")
     if ready.get("config", {}).get("ready") is not True:
