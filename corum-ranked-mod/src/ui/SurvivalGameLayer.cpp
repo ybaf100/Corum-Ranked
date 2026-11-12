@@ -274,10 +274,10 @@ class SurvivalGameLayer final : public CCLayerColor {
                 auto* iconMenu=CCMenu::create();iconMenu->setPosition(CCPointZero);avatarSlot->addChild(iconMenu,8);
                 auto* iconFace=CCNode::create();iconFace->setContentSize({card.avatarSize,card.avatarSize});
                 auto* icon=value.id==view.ownId?ui::PlayerIcon::createLocal():value.bot?ui::PlayerIcon::createBot(index):ui::PlayerIcon::createRemote(value.accountId);
-                if(icon){icon->setScale(std::min(.65f,card.avatarSize/48.0f));icon->setPosition({card.avatarSize/2-(compact||reduced?0:10),card.avatarSize/2});iconFace->addChild(icon,5);}
+                if(icon){icon->setScale(std::min(.65f,card.avatarSize/48.0f));icon->setPosition({card.avatarSize/2,card.avatarSize/2});iconFace->addChild(icon,5);}
                 auto* iconButton=CCMenuItemSpriteExtra::create(iconFace,this,menu_selector(SurvivalGameLayer::onPlayerInfo));
                 iconButton->setTag(m_nextInfoTag++);iconButton->setPosition(CCPointZero);iconMenu->addChild(iconButton);
-                auto* record=compact?nullptr:ui::menuLabel("",.23f,{card.width/2,card.recordY},ui::TextMuted,ui::FontWeight::ExtraBold);if(record)root->addChild(record,5);
+                auto* record=compact?nullptr:ui::menuLabel("",.23f,{reduced?card.width/2:card.titleX,card.recordY},ui::TextMuted,ui::FontWeight::ExtraBold);if(record)root->addChild(record,5);
                 found=m_tiles.emplace(value.id,Tile{root,nickname,record,destination,avatarSlot}).first;
                 auto& tile=found->second;tile.infoTag=iconButton->getTag();tile.face=icon;
                 // Round result: the 1st place card is gold from the start.
@@ -335,7 +335,7 @@ class SurvivalGameLayer final : public CCLayerColor {
             }else tile.eliminatedBackground->setVisible(value.eliminated || (!result && value.rank>0 && !value.passing));
             if(tile.record && tile.recordText!=record){tile.recordText=record;tile.record->setString(record.c_str());
                 if(reduced)ui::fitSingleLineMenuLabel(tile.record,card.width-10,card.recordHeight,.21f);
-                else ui::fitFullMenuLabel(tile.record,card.width-10,card.recordHeight,.21f);}
+                else ui::fitFullMenuLabel(tile.record,card.titleWidth,card.recordHeight,.21f);}
             if(tile.record)tile.record->setColor(ccc3(color.r,color.g,color.b));
         }
     }

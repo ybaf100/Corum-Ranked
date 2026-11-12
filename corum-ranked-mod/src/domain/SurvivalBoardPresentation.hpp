@@ -73,10 +73,14 @@ inline SurvivalCardLayout survivalCardLayout(float cellWidth,float cellHeight,bo
         return {width,height,height-3-textHeight/2,height-3-textHeight/2,3+textHeight/2,textHeight,textHeight,avatar,
             avatar+8+textWidth/2,4+avatar/2,textWidth};
     }
+    // S3 board row: the icon on the left, the name over the progress line on
+    // the right (the rank leads the name).
     float const width=cellWidth-8,height=cellHeight-4;
     float const textHeight=std::clamp(height*.23f,7.0f,12.0f);
-    return {width,height,height-4-textHeight/2,height/2,4+textHeight/2,
-        textHeight,textHeight,std::max(6.0f,height-2*textHeight-12),width/2,width/2,width-12};
+    float const avatar=std::clamp(height-14.0f,6.0f,26.0f),avatarX=6+avatar/2;
+    float const textLeft=avatarX+avatar/2+8,textWidth=std::max(8.0f,width-textLeft-6);
+    return {width,height,height/2+textHeight/2+1,height/2,height/2-textHeight/2-1,
+        textHeight,textHeight,avatar,textLeft+textWidth/2,avatarX,textWidth};
 }
 // Explicit server elimination always outranks the live podium. Unknown rank
 // gets no medal; final standings provide their own authoritative ranks.

@@ -256,7 +256,7 @@ int main(){RankedRuntime r;
 });
 
 
-test('dense board card rows stay inside their borders with a separate avatar slot',()=>{
+test('board card rows keep the icon left of the name and progress line, inside their borders',()=>{
  run(`#include "domain/SurvivalBoardPresentation.hpp"
 #include <cassert>
 using namespace corum::ranked;
@@ -265,8 +265,10 @@ int main(){
   auto c=survivalCardLayout(width,height);
   assert(c.titleY+c.titleHeight/2<=c.height-4+.001f);
   assert(c.recordY-c.recordHeight/2>=4-.001f);
-  assert(c.avatarY+c.avatarSize/2<c.titleY-c.titleHeight/2);
-  assert(c.avatarY-c.avatarSize/2>c.recordY+c.recordHeight/2);
+  assert(c.titleY-c.titleHeight/2>=c.recordY+c.recordHeight/2-.001f);
+  assert(c.avatarX-c.avatarSize/2>=0&&c.avatarX+c.avatarSize/2<c.titleX-c.titleWidth/2);
+  assert(c.avatarY-c.avatarSize/2>=0&&c.avatarY+c.avatarSize/2<=c.height+.001f);
+  assert(c.titleX+c.titleWidth/2<=c.width+.001f&&c.titleWidth>0);
  }
 }`);
 });
