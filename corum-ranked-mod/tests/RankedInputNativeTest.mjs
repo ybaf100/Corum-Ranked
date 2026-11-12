@@ -57,6 +57,32 @@ int main() {
 `);
 });
 
+test('cancelling a menu from its own button callback releases the delivered CCTouch exactly once', () => {
+    // Lobby panel switches cancel the menu whose ccTouchEnded is running. The
+    // dispatcher then removeObject()s that touch, which in cocos2d 2.2 releases
+    // unconditionally; the double asserts on the second release that crashed iOS.
+    execute(`
+#include "${join(root, 'src/ui/RankedInput.hpp')}"
+using namespace cocos2d;
+using namespace corum::ranked::ui;
+int main() {
+    auto& d = CCDirector::sharedDirector()->dispatcher;
+    CCMenu menu; CCMenuItem item; menu.item = &item; item.parent = &menu;
+    item.callback = [&] { assert(d.m_bLocked); cancelMenuTouch(&menu); };
+    menu.onEnter();
+    for (int id = 1; id <= 3; ++id) { d.began(id); d.ended(id); }
+    assert(item.activations == 3 && d.leakedTouches == 0);
+    auto* handler = static_cast<CCTargetedTouchHandler*>(d.findHandler(&menu));
+    assert(handler && handler->claimed.count() == 0);
+    // Outside dispatch a stale claim is dropped immediately and still balanced.
+    d.began(7); cancelMenuTouch(&menu); d.ended(7);
+    assert(item.activations == 3 && d.leakedTouches == 0 && handler->claimed.count() == 0);
+    d.began(8); d.cancelled(8); assert(d.leakedTouches == 0);
+    menu.onExit(); assert(d.handlers.empty());
+}
+`);
+});
+
 test('actual Pause menu repair routes touch before a swallowing input delegate and preserves modals', () => {
     execute(`
 #include "${join(root, 'src/ui/RankedInput.hpp')}"

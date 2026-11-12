@@ -52,8 +52,11 @@ inline CCNode* survivalCollectionBadge(int nativeCode,std::string_view grade,flo
     auto* card=surface({side,side},{},SurfaceSoft,Surface,242,true);
     auto const area=faceArea>0?std::min(side,faceArea):side;
     if(eliminated){
+        // A round badge reserves its caption rows (area=side-22); keep the
+        // cross legible instead of fitting it into a near-zero box.
+        auto const box=std::max(area-16,side*.42f);
         auto* cross=menuLabel("X",.82f,{side/2,side/2},Red,FontWeight::Black);
-        fitFullMenuLabel(cross,area-16,area-16,.82f);card->addChild(cross,5);topEdge(card,Red,std::max(2.f,side*.035f));return card;
+        fitFullMenuLabel(cross,box,box,.82f);card->addChild(cross,5);topEdge(card,Red,std::max(2.f,side*.035f));return card;
     }
     auto* face=GJDifficultySprite::create(nativeCode,GJDifficultyName::Short);
     if(face){

@@ -196,15 +196,36 @@ inline CCLabelBMFont* label(
     );
 }
 
+// Widest visible glyph in label space: the span cocos compares with m_fWidth.
+inline float widestLabelGlyph(CCLabelBMFont* text) {
+    float widest = 0;
+    if (auto* children = text ? text->getChildren() : nullptr)
+        for (auto* child : CCArrayExt<CCNode*>(children))
+            if (child && child->isVisible())
+                widest = std::max(widest, child->getContentSize().width * std::abs(child->getScaleX()));
+    return widest;
+}
+
 // Cocos wraps decoded UTF-8 glyphs. Keep the original text intact, including
 // long names without spaces, and fit the complete block into its reserved box.
+//
+// cocos2d 2.2's wrap without spaces never advances past a glyph that is wider
+// than the wrap width: it keeps appending line breaks before that glyph until
+// the buffer allocation aborts (the eliminated Survival badge's "X" got a
+// 2pt box). Measure the unwrapped glyphs first, keep the wrap width above the
+// widest one, and shrink the label instead when the box is narrower.
 inline void fitFullLabel(CCLabelBMFont* text, float width, float height, float scale) {
     if (!text || width <= 0 || height <= 0) return;
     text->setAlignment(kCCTextAlignmentCenter);
+    text->setLineBreakWithoutSpace(false);
+    text->setWidth(-1);
+    auto const glyph = widestLabelGlyph(text) + 2.0f;
     text->setLineBreakWithoutSpace(true);
     for (int pass = 0; pass < 20; ++pass) {
         setLabelScale(text, scale);
-        text->setWidth(width / text->getScale());
+        if (text->getScale() <= 0) return;
+        if (glyph * text->getScale() > width) text->setScale(width / glyph);
+        text->setWidth(std::max(width / text->getScale(), glyph));
         auto const displayedHeight = text->getContentSize().height * text->getScale();
         if (displayedHeight <= height) return;
         scale *= std::max(0.25f, std::sqrt(height / displayedHeight) * 0.95f);

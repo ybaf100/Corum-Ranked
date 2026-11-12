@@ -17,9 +17,14 @@ test('Extreme totals exclude weekly/gauntlet duplicates and complete UTF-8 title
 #include <string>
 ${domain}
 struct Size{float width,height;};constexpr int kCCTextAlignmentCenter=1;
-struct CCLabelBMFont{std::string original;float scale=1,width=1;bool wrap=false;void setAlignment(int){}void setLineBreakWithoutSpace(bool v){wrap=v;}void setWidth(float v){width=v;}float getScale()const{return scale;}
+// cocos2d 2.2 wraps without spaces by looping forever on a glyph wider than
+// the wrap width; model that as an assertion on every relayout.
+struct CCLabelBMFont{std::string original;float scale=1,width=1;bool wrap=false;void setAlignment(int){}
+ void relayout()const{assert(!(wrap&&width>0&&width<20.0f)&&"glyph wider than the wrap width loops forever");}
+ void setLineBreakWithoutSpace(bool v){wrap=v;relayout();}void setWidth(float v){width=v;relayout();}float getScale()const{return scale;}void setScale(float v){scale=v;}
  Size getContentSize()const{int count=0;for(unsigned char c:original)if((c&0xC0)!=0x80)++count;int perLine=std::max(1,static_cast<int>(width/20));return {std::min(width,count*20.0f),40.0f*std::ceil(static_cast<float>(count)/perLine)};}};
 void setLabelScale(CCLabelBMFont* v,float scale){v->scale=scale/2;} // actual 128px Corum font factor
+float widestLabelGlyph(CCLabelBMFont*){return 20.0f;}
 ${fit}
 int main(){using corum::ranked::extremeDemonCount;
  using corum::ranked::matchRecordText;
@@ -38,6 +43,9 @@ int main(){using corum::ranked::extremeDemonCount;
  for(auto value:{"","0,0,0,0,3","0,0,0,0,-1,0,0,0,0,0,0,0","0,0,0,0,x,0,0,0,0,0,0,0","0,0,0,0,1,0,0,0,0,0,0,0,5"})assert(!extremeDemonCount(value));
  for(auto const& title:{std::string("A long level title that must remain complete"),std::string(150,'W'),std::string("긴맵제목을생략하지않고전체표시")})
  for(auto bounds:{Size{85,26},Size{310,27}}){CCLabelBMFont text;text.original=title;fitFullLabel(&text,bounds.width,bounds.height,.31f);assert(text.original==title&&text.wrap);assert(text.getContentSize().height*text.scale<=bounds.height);assert(text.getContentSize().width*text.scale<=bounds.width+.001f);}
+ // The eliminated Survival round badge once asked for a 2pt box around "X".
+ for(auto bounds:{Size{2,2},Size{6,40},Size{18,18}}){CCLabelBMFont text;text.original="X";text.width=8;fitFullLabel(&text,bounds.width,bounds.height,.82f);
+  assert(text.wrap&&text.width>=20.0f);assert(text.getContentSize().width*text.scale<=bounds.width+.001f);}
 }
 `;
   const dir=mkdtempSync(join(tmpdir(),'corum-player-info-'));

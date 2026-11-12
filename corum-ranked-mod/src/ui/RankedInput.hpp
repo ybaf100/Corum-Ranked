@@ -10,6 +10,16 @@ namespace corum::ranked::ui {
 // Clearing m_pSelectedItem alone leaves CCMenu in TrackingTouch. Cancel both
 // the native state and this menu's claimed touches before replacing its items
 // or suspending it, so a late finger-up cannot activate a new/freed item.
+//
+// Inside touch dispatch (normally a button callback running from this very
+// menu's ccTouchEnded), cocos2d 2.2 removes the delivered touch from the
+// claim set right after the callback returns, and CCSet::removeObject
+// releases even when the object is no longer in the set. Dropping that claim
+// here as well released the CCTouch twice: the freed touch corrupted the heap
+// and a later touch crashed inside CCTouchDispatcher::touches. While the
+// dispatcher is locked, each claim's reference is handed to that pending
+// release instead; a claim held by a different finger then leaks one small
+// CCTouch rather than freeing memory that is still in use.
 inline void cancelMenuTouch(cocos2d::CCMenu* menu) {
     if (!menu) return;
     if (menu->m_eState == cocos2d::kCCMenuStateTrackingTouch && menu->m_pSelectedItem) {
@@ -17,10 +27,17 @@ inline void cancelMenuTouch(cocos2d::CCMenu* menu) {
     }
     menu->m_pSelectedItem = nullptr;
     menu->m_eState = cocos2d::kCCMenuStateWaiting;
-    auto* handler = cocos2d::CCDirector::sharedDirector()->getTouchDispatcher()->findHandler(menu);
-    if (auto* targeted = geode::cast::typeinfo_cast<cocos2d::CCTargetedTouchHandler*>(handler)) {
-        if (auto* touches = targeted->getClaimedTouches()) touches->removeAllObjects();
+    auto* dispatcher = cocos2d::CCDirector::sharedDirector()->getTouchDispatcher();
+    auto* handler = dispatcher->findHandler(menu);
+    auto* targeted = geode::cast::typeinfo_cast<cocos2d::CCTargetedTouchHandler*>(handler);
+    auto* touches = targeted ? targeted->getClaimedTouches() : nullptr;
+    if (!touches) return;
+    if (dispatcher->m_bLocked) {
+        for (auto it = touches->begin(); it != touches->end(); ++it) {
+            if (*it) (*it)->retain();
+        }
     }
+    touches->removeAllObjects();
 }
 
 // A swallowing gameplay delegate must never precede its own Pause menu. Scope

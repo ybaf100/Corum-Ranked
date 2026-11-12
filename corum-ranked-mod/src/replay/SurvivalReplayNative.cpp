@@ -5,6 +5,7 @@
 #include "SurvivalReplayEnvironment.hpp"
 #include "SurvivalReplayInputBoundary.hpp"
 #include "SurvivalReplaySeekSpeed.hpp"
+#include "SurvivalReplayShortcuts.hpp"
 #include "../SurvivalRuntime.hpp"
 #include "../SurvivalSceneBridge.hpp"
 #include "../spectator/SpectatorPlayerCapture.hpp"
@@ -16,6 +17,9 @@
 #include <Geode/binding/FMODAudioEngine.hpp>
 #include <Geode/modify/PlayLayer.hpp>
 #include <Geode/modify/GJBaseGameLayer.hpp>
+#include <Geode/modify/UILayer.hpp>
+#include <Geode/binding/UILayer.hpp>
+#include <set>
 #include <Geode/binding/Slider.hpp>
 #include <Geode/binding/GJGameLevel.hpp>
 #include <Geode/binding/PlayerButtonCommand.hpp>
@@ -71,7 +75,7 @@ matjson::Value replayPose(PlayLayer* layer){
 class $modify(CorumSurvivalReplayLayer,PlayLayer){
 public:
  struct ReplayCamera {CCPoint origin,second,diff;float zoom=1,angle=0;struct Layer{CCPoint pos;float x=1,y=1,angle=0;};std::array<Layer,3> layers;};
- struct Fields {Json trace=Json::array();std::array<unsigned,2> playerUpdates{};bool preInput=false;std::optional<ReplayCamera> nativeCamera;bool ready=false,replayOwned=false,liveWorldOwned=false,replayAdvancing=false,internalReset=false,desyncReported=false,retiring=false;CCLabelBMFont* replayText=nullptr;CCLabelBMFont* captureError=nullptr;std::string captureErrorText,captureAttempt,initialAttempt;Slider* replaySlider=nullptr;float replayHudWait=0;corum::ranked::SpectatorAudioClockPolicy replayAudio;bool replayMarkersAdded=false;CCNode* replayDesyncMarker=nullptr;corum::ranked::ui::SeekProgressOverlay seekCover;float appliedMusicPitch=1;unsigned lastRenderFrame=0;
+ struct Fields {std::set<int> replayHeldKeys;Json trace=Json::array();std::array<unsigned,2> playerUpdates{};bool preInput=false;std::optional<ReplayCamera> nativeCamera;bool ready=false,replayOwned=false,liveWorldOwned=false,replayAdvancing=false,internalReset=false,desyncReported=false,retiring=false;CCLabelBMFont* replayText=nullptr;CCLabelBMFont* captureError=nullptr;std::string captureErrorText,captureAttempt,initialAttempt;Slider* replaySlider=nullptr;float replayHudWait=0;corum::ranked::SpectatorAudioClockPolicy replayAudio;bool replayMarkersAdded=false;CCNode* replayDesyncMarker=nullptr;corum::ranked::ui::SeekProgressOverlay seekCover;float appliedMusicPitch=1;unsigned lastRenderFrame=0;
 #if defined(CORUM_RANKED_DEBUG_SPECTATE)
  double captureUs=0,captureMaxUs=0;unsigned captureFrames=0;
 #endif
@@ -188,6 +192,27 @@ public:
           case 6:onQuit();break;
         }
     }
+    // Desktop keys mirror the replay buttons. Both edges of a mapped key stay
+    // here so GD never receives half a press; OS key repeat does not re-fire.
+    bool replayShortcut(int key,bool down){
+        using corum::ranked::replay::ReplayShortcut;
+        auto const action=corum::ranked::replay::replayShortcut(key);
+        if(action==ReplayShortcut::None||!m_fields->replayOwned||!m_fields->ready||m_isPaused||m_fields->retiring)return false;
+        auto* replay=worldPlayback();if(!replay)return false;
+        auto& held=m_fields->replayHeldKeys;
+        if(!down){held.erase(key);return true;}
+        if(!held.insert(key).second)return true;
+        switch(action){
+          case ReplayShortcut::TogglePause:replay->pause(!replay->paused());break;
+          case ReplayShortcut::Restart:replay->seek(0);break;
+          case ReplayShortcut::Back10:replay->seek(std::max(0.,replay->time()-10));break;
+          case ReplayShortcut::Forward10:replay->seek(std::min(replay->duration(),replay->time()+10));break;
+          case ReplayShortcut::Faster:replay->speed(corum::ranked::replay::replaySpeedStep(replay->speed(),1));break;
+          case ReplayShortcut::Slower:replay->speed(corum::ranked::replay::replaySpeedStep(replay->speed(),-1));break;
+          case ReplayShortcut::None:break;
+        }
+        return true;
+    }
     void onReplaySeek(CCObject*){if(auto* replay=worldPlayback();replay&&m_fields->replaySlider)replay->seek(m_fields->replaySlider->getValue()*replay->duration());}
     void addReplayHud(){
         auto size=CCDirector::sharedDirector()->getWinSize();
@@ -199,6 +224,10 @@ public:
           auto* text=corum::ranked::ui::menuLabel(captions[i],.18f,{(cell-3)/2,11.5f},corum::ranked::ui::Text);corum::ranked::ui::fitFullMenuLabel(text,cell-8,18,.18f);face->addChild(text,5);
           auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(CorumSurvivalReplayLayer::onReplayControl));item->setTag(i+1);item->setPosition({(size.width-width)/2+cell*(i+.5f),16});menu->addChild(item);
         }
+#if defined(GEODE_IS_DESKTOP)
+        auto* keys=corum::ranked::ui::menuLabel(corum::ranked::i18n::text("replay-keys","SPACE PLAY/PAUSE · LEFT/RIGHT 10s · R RESTART · UP/DOWN SPEED"),.15f,{size.width/2,size.height-19},corum::ranked::ui::TextMuted);
+        corum::ranked::ui::fitMenuLabelWidth(keys,size.width-24,.15f,.1f);addChild(keys,1500);
+#endif
         m_fields->replaySlider=Slider::create(this,menu_selector(CorumSurvivalReplayLayer::onReplaySeek),.65f);m_fields->replaySlider->setPosition({size.width/2,43});addChild(m_fields->replaySlider,1500);
         // Seek cover: the world is being re-simulated from a verified reset, so
         // intermediate frames are hidden behind a progress screen. Controls stay above it.
@@ -236,7 +265,7 @@ public:
     }
     void pumpReplay(float dt){
         auto* replay=worldPlayback();if(!replay)return;
-        if(m_fields->replayOwned&&m_isPaused){FMODAudioEngine::sharedEngine()->pauseMusic(0);return;}
+        if(m_fields->replayOwned&&m_isPaused){m_fields->replayHeldKeys.clear();FMODAudioEngine::sharedEngine()->pauseMusic(0);return;}
         if(m_fields->liveWorldOwned){
           auto frame=corum::ranked::SpectatorLiveRuntime::survival().presentationFrame();if(!frame||!frame->pose||!frame->pose->progress)return;
           replay->followRemote(frame->context.attemptId+":"+std::to_string(frame->context.generation)+":"+std::to_string(frame->context.epoch),frame->publisherElapsedMs/1000.,*frame->pose->progress);
@@ -423,6 +452,18 @@ public:
             }
         }
     }
+};
+
+// Keyboard reaches the replay world through its UILayer (jump, restart and
+// platformer keys). Replay-owned keys drive the controls instead.
+class $modify(CorumSurvivalReplayKeys,UILayer){
+    bool replayKey(cocos2d::enumKeyCodes key,bool down){
+        auto* play=PlayLayer::get();
+        if(!play||!m_gameLayer||static_cast<GJBaseGameLayer*>(play)!=m_gameLayer)return false;
+        return static_cast<CorumSurvivalReplayLayer*>(play)->replayShortcut(static_cast<int>(key),down);
+    }
+    void keyDown(cocos2d::enumKeyCodes key,double timestamp){if(!replayKey(key,true))UILayer::keyDown(key,timestamp);}
+    void keyUp(cocos2d::enumKeyCodes key,double timestamp){if(!replayKey(key,false))UILayer::keyUp(key,timestamp);}
 };
 
 namespace corum::ranked {
