@@ -3,7 +3,7 @@
 #include <array>
 namespace corum::ranked {
 struct CatalogTranslation {char const* key;char const* english;char const* korean;};
-inline constexpr std::array<CatalogTranslation, 1127> kTranslations {{
+inline constexpr std::array<CatalogTranslation, 1129> kTranslations {{
     CatalogTranslation{"A logged-in Geometry Dash account is required.", "A logged-in Geometry Dash account is required.", "로그인된 Geometry Dash 계정이 필요합니다."},
     CatalogTranslation{"A mod update is required before entering Ranked.", "A mod update is required before entering Ranked.", "랭크에 입장하려면 모드를 업데이트하세요."},
     CatalogTranslation{"AUDIO_CACHE_INVALID", "Audio file is missing or empty · retry required", "음원 파일이 없거나 비어 있음 · 재시도 필요"},
@@ -31,6 +31,7 @@ inline constexpr std::array<CatalogTranslation, 1127> kTranslations {{
     CatalogTranslation{"Final start window - active attempts remain valid.", "Final start window - active attempts remain valid.", "마지막 시작 시간입니다. 진행 중인 시도는 유효합니다."},
     CatalogTranslation{"Finalizing skipped Placement...", "Finalizing skipped Placement...", "배치 결과를 확정하는 중..."},
     CatalogTranslation{"Finish or recover the current game before joining Survival", "Finish or recover the current game before joining Survival", "진행 중인 경기를 종료하거나 다시 입장하세요."},
+    CatalogTranslation{"Geometry Dash account verification failed.", "Geometry Dash account verification failed.", "GD 계정 확인에 실패했습니다."},
     CatalogTranslation{"Invalid debug password", "Invalid debug password", "디버그 비밀번호를 확인하세요."},
     CatalogTranslation{"Join the Survival queue before filling bots", "Join the Survival queue before filling bots", "서바이벌 매칭에 입장하세요."},
     CatalogTranslation{"Joining the Ranked queue...", "Joining the Ranked queue...", "매칭 대기에 참가하는 중..."},
@@ -84,6 +85,7 @@ inline constexpr std::array<CatalogTranslation, 1127> kTranslations {{
     CatalogTranslation{"The server returned an incomplete match assignment.", "The server returned an incomplete match assignment.", "서버의 경기 정보가 불완전합니다."},
     CatalogTranslation{"This client does not understand the current CBF policy.", "This client does not understand the current CBF policy.", "현재 CBF 설정을 처리할 수 없습니다. 모드를 업데이트하세요."},
     CatalogTranslation{"Too many Survival requests", "Too many Survival requests", "잠시 후 다시 시도하세요."},
+    CatalogTranslation{"Verifying your Geometry Dash account...", "Verifying your Geometry Dash account...", "GD 계정을 확인하는 중..."},
     CatalogTranslation{"WAITING FOR PLAYERS", "WAITING FOR PLAYERS", "참가자 입장 대기"},
     CatalogTranslation{"Your queue batch is not at the front yet", "Your queue batch is not at the front yet", "매칭 대기 중입니다. 잠시 후 다시 시도하세요."},
     CatalogTranslation{"achievement-grade-basis", "Set by the AP you claimed (4,965 AP in all)", "수령한 AP 합계로 정해집니다 (전체 4,965 AP)"},

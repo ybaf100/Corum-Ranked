@@ -58,6 +58,7 @@ private:
     void fail(std::string const& reason);
     void sendNext();
     std::vector<DebugLogChunk> m_chunks;
+    std::string m_argonToken;
     std::size_t m_next = 0;
     int m_files = 0, m_accountId = 0;
     std::string m_username;

@@ -55,6 +55,12 @@ export class CreateSessionDto {
   @Matches(/^[1-9]\d{0,19}$/)
   public gdAccountId!: string;
 
+  /** Argon authtoken proving ownership of gdAccountId (never a GJP/password). */
+  @IsOptional()
+  @IsString()
+  @Length(16, 4096)
+  public argonToken?: string;
+
   @IsString()
   @Length(1, 32)
   public gdUsername!: string;

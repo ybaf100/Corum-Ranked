@@ -26,7 +26,8 @@ describe("authoritative bot driver regression",()=>{
     const simulate=(best:number)=>{
       let m=playing();const r=survivalCurrentRound(m),context={roundKey:r.key,mapGeneration:r.mapGeneration,levelId:r.map!.levelId,participantId:"p0",attemptId:"human"};
       m=reduceSurvivalMatch(m,{type:"ATTEMPT_START",...context},10000);
-      m=reduceSurvivalMatch(m,{type:"PROGRESS",...context,progress:best},10000);
+      // Human progress is accepted once the time actually played makes it plausible (Long map).
+      m=reduceSurvivalMatch(m,{type:"PROGRESS",...context,progress:best},40000);
       return survivalCurrentRound(driveSurvivalBots(m,42,{},189500).match).players.slice(1).reduce((a,p)=>a+p.highestProgress,0)/15;
     };
     expect(simulate(80)-simulate(20)).toBeGreaterThan(8);

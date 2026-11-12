@@ -202,6 +202,8 @@ describe("server-authoritative solo Stage Placement", () => {
       mapGrade: "D",
       gradeChanged: false,
     });
+    // A real run takes time: results faster than any legitimate run are voided.
+    clock.advanceSeconds(45);
     const firstEnd = await placement.endAttempt(runId, session, {
       levelId: firstLevel,
       attemptId: first.attemptId,
@@ -325,6 +327,7 @@ describe("server-authoritative solo Stage Placement", () => {
           progressPercent: 100,
         });
         expect(progress.gradeChanged).toBe(true);
+        clock.advanceSeconds(50);
         await recovered.endAttempt(runId, session, {
           levelId,
           attemptId: started.attemptId,

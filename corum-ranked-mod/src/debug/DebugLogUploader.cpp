@@ -41,6 +41,7 @@ std::vector<DebugLogChunk> debugLogChunks(int fileIndex, std::string const& file
 
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
 #include "../RankedRuntime.hpp"
+#include "../RankedArgon.hpp"
 #include "../ui/RankedTranslations.hpp"
 #include <Geode/Geode.hpp>
 #include <Geode/binding/GJAccountManager.hpp>
@@ -115,7 +116,16 @@ void DebugLogUploader::start(std::vector<DebugLogFile> const& files) {
     m_files = static_cast<int>(count);
     m_uploadId = utils::random::generateUUID();m_next = 0;m_busy = true;
     log::info("[DebugLogs] upload={} files={} chunks={}", m_uploadId, count, m_chunks.size());
-    sendNext();
+    m_argonToken.clear();
+    if (!RankedRuntime::get().spectatorLiveSessionToken().empty()) { sendNext(); return; }
+    // Without a Ranked session the server needs the same GD account proof
+    // (Argon) as session creation; a public account ID/name is not enough.
+    RankedArgon::get().request([this](ArgonOutcome const& outcome) {
+        if (!m_busy) return;
+        if (outcome.token.empty()) return fail("GD account verification failed: " + outcome.error);
+        m_argonToken = outcome.token;
+        sendNext();
+    });
 }
 
 void DebugLogUploader::sendNext() {
@@ -135,6 +145,7 @@ void DebugLogUploader::sendNext() {
         url += "/menu";
         body["gdAccountId"] = fmt::format("{}", m_accountId);body["gdUsername"] = m_username;
         body["clientVersion"] = Mod::get()->getVersion().toVString();body["clientBuildChannel"] = "debug";
+        body["argonToken"] = m_argonToken;
     }
     http.timeout(std::chrono::seconds(20));http.bodyJSON(body);
     request.spawn(http.post(url), [this](web::WebResponse response) {

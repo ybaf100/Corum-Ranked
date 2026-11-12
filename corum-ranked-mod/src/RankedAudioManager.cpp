@@ -23,6 +23,8 @@ namespace corum::ranked {
 namespace {
 constexpr auto kSongInfoTimeout = std::chrono::seconds(20);
 constexpr auto kSongFileTimeout = std::chrono::seconds(90);
+// GD songs are a few MB; anything this large is not a song and must not fill memory or disk.
+constexpr std::uintmax_t kMaxSongBytes = 50ull * 1024 * 1024;
 constexpr auto kDownloadGuardTimeout = std::chrono::seconds(105);
 constexpr int kMusicLibraryFirstSongId = 10000000;
 constexpr auto kLibraryDownloadQuietTimeout = std::chrono::seconds(2);
@@ -87,7 +89,10 @@ std::optional<std::string> songDownloadUrl(std::string const& response) {
     for (std::size_t i = 0; i + 1 < fields.size(); i += 2) {
         if (fields[i] != "10") continue;
         auto decoded = urlDecode(fields[i + 1]);
-        if (decoded.starts_with("https://") || decoded.starts_with("http://")) return decoded;
+        if (decoded.starts_with("https://")) return decoded;
+        // Never fetch audio in clear text: a network attacker could swap the file.
+        // GD's song hosts (Newgrounds, the music library CDN) all serve HTTPS.
+        if (decoded.starts_with("http://")) return "https://" + decoded.substr(7);
         return std::nullopt;
     }
     return std::nullopt;
@@ -458,6 +463,15 @@ void RankedAudioManager::downloadSongFile(int songId, std::string url) {
     request.timeout(kSongFileTimeout);
     request.followRedirects(true);
     request.onProgress([this, generation, songId](web::WebProgress const& progress) {
+        if (progress.downloadTotal() > kMaxSongBytes || progress.downloaded() > kMaxSongBytes) {
+            // Progress may be reported off the main thread; stop the transfer there.
+            geode::queueInMainThread([this, generation, songId] {
+                if (generation != m_downloadGeneration || songId != m_activeDownloadSongId) return;
+                m_songFileRequest.cancel();
+                finishDownloadFailure(songId, "audio exceeds the size limit");
+            });
+            return;
+        }
         if (generation != m_downloadGeneration || songId != m_activeDownloadSongId) return;
         if (auto value = progress.downloadProgress()) {
             m_activeDownloadProgress = clampProgress(static_cast<int>(std::lround(*value)));
@@ -486,7 +500,7 @@ void RankedAudioManager::downloadSongFile(int songId, std::string url) {
                 return;
             }
             auto write = response.into(target);
-            if (write.isErr() || !usableFile(target)) {
+            if (write.isErr() || std::filesystem::file_size(target, ec) > kMaxSongBytes || ec || !usableFile(target)) {
                 std::filesystem::remove(target, ec);
                 finishDownloadFailure(songId, "failed to save downloaded audio");
                 return;

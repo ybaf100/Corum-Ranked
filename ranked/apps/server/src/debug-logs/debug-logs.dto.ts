@@ -19,4 +19,5 @@ export class DebugLogMenuChunkDto extends DebugLogChunkDto {
   @IsString() @Length(1, 32) public gdUsername!: string;
   @IsString() @Length(1, 64) public clientVersion!: string;
   @Equals("debug") public clientBuildChannel!: "debug";
+  @IsOptional() @IsString() @Length(16, 4096) public argonToken?: string;
 }

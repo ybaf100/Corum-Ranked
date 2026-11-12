@@ -1,4 +1,5 @@
-import { Body, ConflictException, Controller, HttpCode, Inject, Logger, NotFoundException, Post, UseGuards } from "@nestjs/common";
+import { Body, ConflictException, Controller, HttpCode, Inject, Logger, NotFoundException, Optional, Post, UseGuards } from "@nestjs/common";
+import { ArgonService } from "../session/argon.service.js";
 import { CurrentSession } from "../session/current-session.decorator.js";
 import { SessionGuard } from "../session/session.guard.js";
 import type { RankedSessionContext } from "../session/session.types.js";
@@ -19,7 +20,8 @@ export class DebugLogsController {
   private readonly logger = new Logger(DebugLogsController.name);
   public constructor(@Inject(DATABASE) private readonly db: DatabasePort,
     @Inject(SERVER_CLOCK) private readonly clock: ServerClock,
-    @Inject(SERVER_ENVIRONMENT) private readonly environment: ServerEnvironment) {}
+    @Inject(SERVER_ENVIRONMENT) private readonly environment: ServerEnvironment,
+    @Optional() @Inject(ArgonService) private readonly argon?: ArgonService) {}
 
   @Post()
   @HttpCode(200)
@@ -35,9 +37,14 @@ export class DebugLogsController {
   @Post("menu")
   @HttpCode(200)
   public async menuChunk(@Body() body: DebugLogMenuChunkDto) {
+    // Public account IDs/names alone no longer name an uploader: the same
+    // Argon ownership proof as session creation is required.
+    const identity = await this.argon?.verify(body.gdAccountId, body.gdUsername, body.argonToken);
     const player = (await this.db.query<{ id: string }>(
-      "SELECT id::text AS id FROM ranked_players WHERE gd_account_id = $1 AND lower(gd_username) = lower($2)",
-      [body.gdAccountId, body.gdUsername],
+      identity?.verified
+        ? "SELECT id::text AS id FROM ranked_players WHERE gd_account_id = $1"
+        : "SELECT id::text AS id FROM ranked_players WHERE gd_account_id = $1 AND lower(gd_username) = lower($2)",
+      identity?.verified ? [body.gdAccountId] : [body.gdAccountId, body.gdUsername],
     )).rows[0];
     if (!player) throw new NotFoundException("RANKED_PLAYER_REQUIRED");
     return this.store({ playerId: player.id, clientVersion: body.clientVersion }, body);

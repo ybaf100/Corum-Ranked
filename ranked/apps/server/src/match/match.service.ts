@@ -10,6 +10,9 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import {
+  IMPLAUSIBLE_ATTEMPT_TIMING,
+  attemptTimingPlausible,
+  maximumPlausibleProgress,
   advanceRoundClock,
   applyDeathmatchWinner,
   applyRoundResult,
@@ -1497,7 +1500,9 @@ export class MatchService {
           round.round_number,
           authorization.side,
           body.attemptId,
-          body.cleared,
+          // The domain may have voided an implausible clear; never echo the claim.
+          decision.state.attempts[authorization.side].find((candidate) => candidate.id === body.attemptId)?.cleared ??
+            false,
         );
       }
       const endedAttempt = decision.state.attempts[authorization.side].find(
@@ -1568,7 +1573,9 @@ export class MatchService {
         round.round_number,
         authorization.side,
         body.attemptId,
-        body.progressPercent,
+        // Live display never runs ahead of the time actually played.
+        Math.min(body.progressPercent, maximumPlausibleProgress(
+          now.getTime() - activeAttempt.serverAcceptedStartAtMs, state.map.metadata?.durationSeconds)),
         now.getTime(),
       );
       const progressA = this.runtimeState.progress(match.id, round.round_number, "A");
@@ -2953,22 +2960,33 @@ export class MatchService {
       };
     }
     const map = deathmatchMap;
-    // Death Match has no Qualifying threshold. Persist the raw authoritative
-    // percentage in the compatibility awarded_score column.
-    const awardedScore = body.cleared ? 100 : body.progressPercent;
+    // Death Match has no Qualifying threshold, so any progress counts: a
+    // result faster than any legitimate run is recorded but voided.
+    const plausible = attemptTimingPlausible(
+      now.getTime() - new Date(attempt.server_accepted_start_at).getTime(),
+      map.metadata?.durationSeconds,
+      body.progressPercent,
+      body.cleared,
+    );
+    const cleared = plausible && body.cleared;
+    // Persist the raw authoritative percentage in the compatibility awarded_score column.
+    const awardedScore = !plausible ? 0 : cleared ? 100 : body.progressPercent;
     await transaction.query(
       `UPDATE ranked_deathmatch_attempts
        SET ended_at = $2, progress_percent = $3, cleared = $4,
-           awarded_score = $5, client_end_event_id = $6, native_death = $7
+           awarded_score = $5, client_end_event_id = $6, native_death = $7,
+           valid = valid AND $8, invalid_reason = CASE WHEN $8 THEN invalid_reason ELSE $9 END
        WHERE id = $1`,
       [
         attempt.id,
         now.toISOString(),
         body.progressPercent,
-        body.cleared,
+        cleared,
         awardedScore,
         body.clientEventId,
-        body.nativeDeath === true && !body.cleared,
+        body.nativeDeath === true && !cleared,
+        plausible,
+        IMPLAUSIBLE_ATTEMPT_TIMING,
       ],
     );
     this.runtimeState.endAttempt(
@@ -2976,9 +2994,9 @@ export class MatchService {
       deathmatchRuntimeSlot(Number(deathmatch.sequence)),
       playerId === match.player_a_id ? "A" : "B",
       attempt.id,
-      body.cleared,
+      cleared,
     );
-    if (attempt.valid && body.cleared) {
+    if (attempt.valid && cleared) {
       const totals = await transaction.query<{
         score_a: number;
         score_b: number;
@@ -3057,7 +3075,8 @@ export class MatchService {
       deathmatchRuntimeSlot(Number(deathmatch.sequence)),
       side,
       body.attemptId,
-      body.progressPercent,
+      Math.min(body.progressPercent, maximumPlausibleProgress(
+        now.getTime() - new Date(active.rows[0].server_accepted_start_at).getTime(), map.metadata?.durationSeconds)),
       now.getTime(),
     );
     return {

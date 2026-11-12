@@ -77,8 +77,12 @@ template<class... T> std::string format(std::string pattern,T const&... values){
     (append(values),...);return pattern;
 }}
 namespace geode::log {template<class... T> void info(T...){} template<class... T> void warn(T...){} }
+namespace geode {inline std::vector<std::function<void()>> mainQueue;
+template<class F> void queueInMainThread(F f){mainQueue.push_back(std::move(f));}
+inline void drainMain(){auto work=std::move(mainQueue);mainQueue.clear();for(auto& fn:work)fn();}}
 namespace geode::utils::web {
-struct WebProgress {float value=0;std::optional<float> downloadProgress()const{return value;}};
+struct WebProgress {float value=0;std::size_t total=0,current=0;std::optional<float> downloadProgress()const{return value;}
+    std::size_t downloadTotal()const{return total;}std::size_t downloaded()const{return current;}};
 struct Result {bool error=false;std::string value;bool isErr()const{return error;}std::string unwrap()const{return value;}};
 struct WebResponse {
     int status=200;std::string body;bool bodyError=false,writeError=false;
@@ -252,6 +256,17 @@ int main(int argc,char** argv){assert(argc==2);std::filesystem::path root=argv[1
         old->callback({200,filePhase?audioBytes():"10~|~https://stale.example/song.mp3"});
         assert(!std::filesystem::exists(f.audio.cachedSongPath(23456))&&f.audio.m_activeDownloadSongId==10000012);
         assert(f.audio.m_activeDownloadProgress==0);f.complete(10000012);f.step();assert(f.audio.resourcesReady());}
+    // Clear-text song URLs are upgraded to HTTPS before any request is made.
+    {Fixture f(root,{45679});f.audio.downloadAll();
+        web::jobs[0]->callback({200,"10~|~http%3A%2F%2Faudio.example%2Fsong.mp3"});
+        assert(web::jobs.size()==2&&web::jobs[1]->request.url=="https://audio.example/song.mp3");}
+    // An oversized transfer is stopped on the main thread and fails without caching.
+    {Fixture f(root,{45680});f.audio.downloadAll();
+        web::jobs[0]->callback({200,"10~|~https://audio.example/huge.mp3"});
+        auto job=web::jobs[1];job->request.progress({1.f,std::size_t{200}*1024*1024,std::size_t{1024}});
+        assert(!job->cancelled&&f.audio.m_activeDownloadSongId==45680);geode::drainMain();
+        assert(job->cancelled&&f.audio.m_activeDownloadSongId==0&&f.audio.downloadView().failed==1);
+        assert(!std::filesystem::exists(f.audio.cachedSongPath(45680)));}
     // Invalid NG responses still fail the resource gate without caching HTML.
     for(std::string response:{"-1","10~|~CUSTOMURL","10~|~javascript:bad"}){
         Fixture f(root,{34567});f.audio.downloadAll();web::jobs[0]->callback({200,response});

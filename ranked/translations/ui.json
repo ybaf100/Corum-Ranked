@@ -43,6 +43,14 @@
     "en": "Creating a server session...",
     "ko": "서버 세션을 준비하는 중..."
   },
+  "Verifying your Geometry Dash account...": {
+    "en": "Verifying your Geometry Dash account...",
+    "ko": "GD 계정을 확인하는 중..."
+  },
+  "Geometry Dash account verification failed.": {
+    "en": "Geometry Dash account verification failed.",
+    "ko": "GD 계정 확인에 실패했습니다."
+  },
   "Current map revealed. Preparing downloads...": {
     "en": "Current map revealed. Preparing downloads...",
     "ko": "현재 맵이 공개되었습니다. 다운로드를 준비하는 중..."

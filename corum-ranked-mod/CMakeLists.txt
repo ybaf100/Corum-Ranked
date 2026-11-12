@@ -65,4 +65,10 @@ if (NOT DEFINED ENV{GEODE_SDK})
 endif()
 
 add_subdirectory($ENV{GEODE_SDK} ${CMAKE_CURRENT_BINARY_DIR}/geode)
+
+# GD account ownership proof for Ranked sessions (no GJP/password leaves the
+# game). Pinned release; see https://github.com/GlobedGD/argon.
+CPMAddPackage("gh:GlobedGD/argon@1.5.1")
+target_link_libraries(${PROJECT_NAME} argon)
+
 setup_geode_mod(${PROJECT_NAME})

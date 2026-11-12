@@ -15,6 +15,8 @@ import {
   finalizePlacementScore,
   mapPresentationFields,
   scoreAttempt,
+  attemptTimingPlausible,
+  IMPLAUSIBLE_ATTEMPT_TIMING,
   placementGradeForMapScore,
   selectPlacementReferenceMaps,
   selectPlacementStageMaps,
@@ -131,6 +133,7 @@ interface PlacementAttemptRow {
   awarded_score: number;
   valid: boolean;
   ended_at: Date | string | null;
+  server_accepted_start_at?: Date | string;
 }
 
 interface ProfileRow {
@@ -574,21 +577,32 @@ export class PlacementService {
       if (!active || active.ended_at || !active.valid) {
         throw new NotFoundException("Active Placement attempt not found");
       }
-      const awardedScore = scoreAttempt(body.progressPercent, body.cleared, Number(map.qualifying_percent));
+      // A scoring result faster than any legitimate run is recorded but voided.
+      const mapSnapshot = asArray(run.map_snapshots).map(asObject).find((entry) =>
+        Number(entry.stageIndex) === Number(map.stage_index) && Number(entry.mapIndex) === Number(map.map_index));
+      const durationSeconds = Number(asObject(mapSnapshot?.metadata).durationSeconds) || null;
+      const scoring = body.cleared || body.progressPercent >= Number(map.qualifying_percent);
+      const plausible = !scoring || !active.server_accepted_start_at || attemptTimingPlausible(
+        now.getTime() - new Date(active.server_accepted_start_at).getTime(), durationSeconds, body.progressPercent, body.cleared);
+      const cleared = plausible && body.cleared;
+      const awardedScore = plausible ? scoreAttempt(body.progressPercent, body.cleared, Number(map.qualifying_percent)) : 0;
       await transaction.query(
         `UPDATE ranked_placement_attempts
          SET ended_at = $1, client_ended_at = $2, progress_percent = $3::numeric,
              latest_progress_percent = GREATEST(latest_progress_percent, FLOOR($3::numeric)::integer),
-             cleared = $4, awarded_score = $5, client_end_event_id = $6
+             cleared = $4, awarded_score = $5, client_end_event_id = $6,
+             valid = valid AND $8, invalid_reason = CASE WHEN $8 THEN invalid_reason ELSE $9 END
          WHERE id = $7`,
         [
           now.toISOString(),
           body.clientEndedAt ?? null,
           body.progressPercent,
-          body.cleared,
+          cleared,
           awardedScore,
           body.clientEventId,
           active.id,
+          plausible,
+          IMPLAUSIBLE_ATTEMPT_TIMING,
         ],
       );
       const beforeGrade = map.map_grade;

@@ -1,6 +1,7 @@
 #include "domain/SpectatorHandoffPolicy.hpp"
 #include "domain/LobbyPopulation.hpp"
 #include "RankedRuntime.hpp"
+#include "RankedArgon.hpp"
 #include "RankedAudioManager.hpp"
 #include "ui/RankedModUpdateManager.hpp"
 #include "ui/RankAssetPackManager.hpp"
@@ -994,6 +995,32 @@ void RankedRuntime::createSession(bool takeOver) {
         setStage(RuntimeStage::Error, "A logged-in Geometry Dash account is required.");
         return;
     }
+    // The server admits only a proven GD account (Argon). After the first
+    // verification Argon answers from its stored token immediately.
+    m_controlBusy = true;
+    m_view.accountActiveElsewhere = false;
+    setStage(RuntimeStage::Loading, "Verifying your Geometry Dash account...");
+    auto const generation = m_sessionGeneration;
+    RankedArgon::get().request([this, generation, takeOver](ArgonOutcome const& outcome) {
+        if (generation != m_sessionGeneration || !m_rankedOpen) return;
+        m_controlBusy = false;
+        if (outcome.token.empty()) {
+            setStage(RuntimeStage::Error, "Geometry Dash account verification failed.", outcome.error);
+            return;
+        }
+        postSession(takeOver, outcome.token);
+    });
+}
+
+void RankedRuntime::postSession(bool takeOver, std::string argonToken) {
+    if (m_controlBusy) return;
+    auto* account = GJAccountManager::get();
+    auto const accountId = account ? account->m_accountID : 0;
+    auto const username = account ? std::string(account->m_username) : std::string();
+    if (accountId <= 0 || username.empty()) {
+        setStage(RuntimeStage::Error, "A logged-in Geometry Dash account is required.");
+        return;
+    }
 
     matjson::Value body;
     if (m_clientInstanceId.empty()) {
@@ -1007,6 +1034,7 @@ void RankedRuntime::createSession(bool takeOver) {
     body["clientBuildChannel"] = rankedBuildChannel();
     body["installedMods"] = installedModsJson();
     body["takeOver"] = takeOver;
+    body["argonToken"] = std::move(argonToken);
     auto request = baseRequest({});
     // Admission no longer waits for CSMP; keep the existing cold-server allowance.
     request.timeout(std::chrono::seconds(70));
@@ -1018,17 +1046,26 @@ void RankedRuntime::createSession(bool takeOver) {
     auto const sentAt = std::chrono::steady_clock::now();
     m_controlRequest.spawn(
         request.post(endpoint("/api/ranked/session")),
-        [this, sessionGeneration, sentAt](web::WebResponse response) {
+        [this, sessionGeneration, sentAt, takeOver](web::WebResponse response) {
             if (sessionGeneration != m_sessionGeneration || !m_rankedOpen) return;
             m_controlBusy = false;
             if (!successful(response)) {
                 if (handleRequiredUpdate(response)) return;
                 auto const error = response.json().unwrapOr(matjson::Value());
+                if (response.code() == 401 && error["code"].asString().unwrapOr("") == "ARGON_TOKEN_INVALID" && !m_argonRetried) {
+                    // A stale or revoked token: drop it and verify once more.
+                    m_argonRetried = true;
+                    RankedArgon::get().invalidate();
+                    createSession(takeOver);
+                    return;
+                }
+                m_argonRetried = false;
                 m_view.accountActiveElsewhere = response.code() == 409 &&
                     error["code"].asString().unwrapOr("") == "RANKED_ACCOUNT_ACTIVE";
                 setStage(RuntimeStage::Error, "Could not create a Ranked session.", responseError(response));
                 return;
             }
+            m_argonRetried = false;
             auto const root = response.json().unwrapOr(matjson::Value());
             m_sessionToken = root["sessionToken"].asString().unwrapOr("");
             if (m_sessionToken.empty()) {

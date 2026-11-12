@@ -1,5 +1,6 @@
 import { RankedDomainError } from "./errors.js";
 import { compareRoundScores, scoreAttempt } from "./scoring.js";
+import { attemptTimingPlausible, IMPLAUSIBLE_ATTEMPT_TIMING } from "./attempt-plausibility.js";
 import {
   otherSide,
   type PlayerSide,
@@ -487,6 +488,26 @@ export const endRoundAttempt = (
     throw new RankedDomainError("INVALID_ATTEMPT", "Attempt cannot end before it starts", {
       attemptId,
     });
+  }
+
+  // A scoring result faster than any legitimate run is recorded but voided.
+  const scoring = cleared || progressPercent >= next.map.qualifyingPercent;
+  if (scoring && !attemptTimingPlausible(serverAcceptedAtMs - attempt.serverAcceptedStartAtMs,
+    next.map.metadata?.durationSeconds, progressPercent, cleared)) {
+    attempt.endEventId = clientEventId;
+    attempt.endedAtMs = serverAcceptedAtMs;
+    attempt.progressPercent = progressPercent;
+    attempt.cleared = false;
+    attempt.awardedScore = 0;
+    attempt.valid = false;
+    attempt.invalidReason = IMPLAUSIBLE_ATTEMPT_TIMING;
+    next.stateVersion += 1;
+    return {
+      state: advanceRoundClock(next, serverAcceptedAtMs),
+      accepted: true,
+      duplicate: false,
+      reason: IMPLAUSIBLE_ATTEMPT_TIMING,
+    };
   }
 
   const awardedScore = scoreAttempt(progressPercent, cleared, next.map.qualifyingPercent);

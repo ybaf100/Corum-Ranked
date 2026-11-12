@@ -669,6 +669,7 @@ private:
     void recordDeath(DeathFeedEvent event, std::string const& contextKey);
     bool handleRequiredUpdate(geode::utils::web::WebResponse const& response);
     void createSession(bool takeOver = false);
+    void postSession(bool takeOver, std::string argonToken);
     void fetchActivePlacement();
     void invalidatePollRequest();
     void invalidateAttemptRequest();
@@ -717,6 +718,8 @@ private:
     std::chrono::steady_clock::time_point m_nextSurvivalProfileAt {}, m_nextModeConfigAt {};
     std::string m_sessionToken;
     std::string m_clientInstanceId;
+    // One automatic re-verification after the server refuses an Argon token.
+    bool m_argonRetried = false;
     bool m_rankedOpen = false, m_sessionRejected = false, m_sessionHeartbeatBusy = false;
     bool m_lobbyPopulationVisible=false;
     void observeLobbyPopulation(matjson::Value const& value);

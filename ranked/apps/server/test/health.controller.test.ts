@@ -29,5 +29,9 @@ describe("HealthController", () => {
       databaseReady: true,
       config: { ready: false, queueEnabled: false },
     });
+    // Internal diagnostics never leave the server.
+    expect(response).not.toHaveProperty("missingSchema");
+    expect(JSON.stringify(response)).not.toContain("config unavailable");
+    expect(Object.keys((response as { config: object }).config).sort()).toEqual(["queueEnabled", "ready"]);
   });
 });

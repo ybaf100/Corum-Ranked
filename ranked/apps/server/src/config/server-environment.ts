@@ -24,7 +24,34 @@ export interface ServerEnvironment {
   readonly debugLogWebhookUrl: string | null;
   readonly debugBot: DebugBotEnvironment | null;
   readonly debugSpectate: { readonly password: string } | null;
+  /** GD account ownership proof. Parsed deployments default to "required";
+   * "off" is an explicit emergency switch (e.g. an Argon outage). */
+  readonly argon?: ArgonEnvironment;
 }
+
+export interface ArgonEnvironment {
+  readonly mode: "required" | "off";
+  readonly baseUrl: string;
+}
+
+const DEFAULT_ARGON_URL = "https://argon.globed.dev";
+
+export const loadArgonEnvironment = (environment: NodeJS.ProcessEnv): ArgonEnvironment => {
+  const modeText = environment.RANKED_ARGON_MODE?.trim().toLowerCase() || "required";
+  if (modeText !== "required" && modeText !== "off") {
+    throw new RankedDomainError("INVALID_CONFIG", "RANKED_ARGON_MODE must be required or off");
+  }
+  const urlText = environment.RANKED_ARGON_URL?.trim() || DEFAULT_ARGON_URL;
+  let url: URL;
+  try { url = new URL(urlText); } catch {
+    throw new RankedDomainError("INVALID_CONFIG", "RANKED_ARGON_URL must be an absolute URL");
+  }
+  const local = url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  if ((url.protocol !== "https:" && !local) || url.username || url.password || url.search || url.hash) {
+    throw new RankedDomainError("INVALID_CONFIG", "RANKED_ARGON_URL must be an HTTPS origin");
+  }
+  return { mode: modeText, baseUrl: url.origin };
+};
 
 export interface DebugBotDifficultyEnvironment {
   readonly mmrOffset: number;
@@ -318,5 +345,6 @@ export const loadServerEnvironment = (
     debugSpectate: environment.ENABLE_DEBUG_SPECTATE?.trim().toLowerCase() === "true"
       ? { password: requireValue(environment, "DEBUG_SPECTATE_PASSWORD") }
       : null,
+    argon: loadArgonEnvironment(environment),
   };
 };

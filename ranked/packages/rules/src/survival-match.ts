@@ -2,6 +2,7 @@ import { observeSurvivalAchievementCheckpoint, observeSurvivalAchievementRecover
 import {survivalRoundBadges,type SurvivalRoundBadge} from "./survival-round-badges.js";
 import { survivalOnlineTargets,survivalOnlineRewardRank } from "./survival-online.js";
 import { RankedDomainError } from "./errors.js";
+import { gdLengthLowerBoundSeconds, maximumPlausibleProgress } from "./attempt-plausibility.js";
 import { normalizeEliminationEffect } from "./elimination-effects.js";
 import { survivalPlacementLp, survivalTierForLp, type SurvivalConfig } from "./survival.js";
 import { survivalDifficultyForAverage, survivalMapAllowed, validateSurvivalEngineConfig,
@@ -244,11 +245,18 @@ function startAttempt(match: SurvivalMatch, round: SurvivalRound, player: Surviv
   player.attempts.push({id,sequence:player.attempts.length+1,startedAt:now,endedAt:null,highestProgress:0});
 }
 function recordAttempt(match: SurvivalMatch, round: SurvivalRound, player: SurvivalRoundPlayer,
-  id: string, progress: number, ended: boolean, now: number, currentProgress=progress): void {
+  id: string, progress: number, ended: boolean, now: number, currentProgress=progress, trusted=false): void {
   if (match.state !== "PLAYING" || !Number.isFinite(progress) || progress < 0 || progress > 100 || !Number.isFinite(currentProgress) || currentProgress<0 || currentProgress>100) conflict("Invalid or late progress");
   const attempt = player.attempts.find(a => a.id === id);
   if (!attempt) conflict("Unknown Survival attempt");
   if (attempt.endedAt !== null) return;
+  // Human progress can never outrun the time actually played: cap it at the
+  // most a legitimate run can have reached (a clear needs a plausible time).
+  if (!trusted && match.players.find(p => p.participantId === player.participantId)?.kind === "HUMAN") {
+    const cap = maximumPlausibleProgress(now - attempt.startedAt, gdLengthLowerBoundSeconds(round.map?.length));
+    progress = Math.min(progress, cap);
+    currentProgress = Math.min(currentProgress, cap);
+  }
   attempt.currentProgress = currentProgress;
   attempt.highestProgress = Math.max(attempt.highestProgress, progress);
   player.highestProgress = Math.max(player.highestProgress, attempt.highestProgress);
@@ -592,7 +600,7 @@ export function reduceSurvivalMatch(before: SurvivalMatch, command: SurvivalComm
           const open = player.attempts.find(a=>a.endedAt===null);
           if (!open && player.attempts.some(a=>a.endedAt!==null && a.highestProgress===100)) conflict("Round is already cleared");
           if (!open) startAttempt(match,round,player,command.attemptId,now);
-          recordAttempt(match,round,player,open?.id??command.attemptId,100,true,now);
+          recordAttempt(match,round,player,open?.id??command.attemptId,100,true,now,100,true);
           break;
         }
       }
