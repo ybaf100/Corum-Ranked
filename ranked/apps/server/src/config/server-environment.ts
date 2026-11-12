@@ -36,7 +36,7 @@ export interface ArgonEnvironment {
 
 const DEFAULT_ARGON_URL = "https://argon.globed.dev";
 const PRODUCTION_R2_ORIGIN = "https://pub-11442f32945446a49b9da0a5e69f2451.r2.dev";
-export const PRODUCTION_DOWNLOAD_CDN_ORIGIN = "https://cdn.hwanhee1.com";
+export const PRODUCTION_DOWNLOAD_CDN_ORIGIN = "https://cd9n.hwanhee1.com";
 
 export const loadArgonEnvironment = (environment: NodeJS.ProcessEnv): ArgonEnvironment => {
   const modeText = environment.RANKED_ARGON_MODE?.trim().toLowerCase() || "required";
