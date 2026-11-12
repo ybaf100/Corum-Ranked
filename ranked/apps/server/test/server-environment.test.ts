@@ -34,6 +34,9 @@ describe("server environment", () => {
       .toBe("https://downloads.example.org");
     expect(loadServerEnvironment(validEnvironment())).not.toHaveProperty("rankedDownloadBaseUrl");
     expect(loadServerEnvironment(validEnvironment())).not.toHaveProperty("rankedDownloadCdnBaseUrl");
+    const production = {...validEnvironment(),RANKED_DOWNLOAD_BASE_URL:"https://pub-11442f32945446a49b9da0a5e69f2451.r2.dev"};
+    expect(loadServerEnvironment(production).rankedDownloadCdnBaseUrl).toBe("https://cdn.hwanhee1.com");
+    expect(loadServerEnvironment({...production,RANKED_DOWNLOAD_CDN_BASE_URL:"off"})).not.toHaveProperty("rankedDownloadCdnBaseUrl");
     expect(loadServerEnvironment({...validEnvironment(),RANKED_DOWNLOAD_CDN_BASE_URL:" https://cdn.example.org/ "}).rankedDownloadCdnBaseUrl).toBe("https://cdn.example.org");
   });
   it.each(["http://downloads.example.org","https://user:password@example.org","https://downloads.example.org/path",

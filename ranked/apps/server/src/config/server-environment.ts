@@ -35,6 +35,8 @@ export interface ArgonEnvironment {
 }
 
 const DEFAULT_ARGON_URL = "https://argon.globed.dev";
+const PRODUCTION_R2_ORIGIN = "https://pub-11442f32945446a49b9da0a5e69f2451.r2.dev";
+export const PRODUCTION_DOWNLOAD_CDN_ORIGIN = "https://cdn.hwanhee1.com";
 
 export const loadArgonEnvironment = (environment: NodeJS.ProcessEnv): ArgonEnvironment => {
   const modeText = environment.RANKED_ARGON_MODE?.trim().toLowerCase() || "required";
@@ -323,7 +325,12 @@ export const loadServerEnvironment = (
   }
 
   const rankedDownloadBaseUrl = normalizeRankedDownloadBaseUrl(environment.RANKED_DOWNLOAD_BASE_URL);
-  const rankedDownloadCdnBaseUrl = normalizeRankedDownloadBaseUrl(environment.RANKED_DOWNLOAD_CDN_BASE_URL,"RANKED_DOWNLOAD_CDN_BASE_URL");
+  // The production bucket is served through its Cloudflare custom domain; the
+  // immutable objects and their hashes are the same. "off" serves r2.dev directly.
+  const cdnSetting = environment.RANKED_DOWNLOAD_CDN_BASE_URL?.trim();
+  const rankedDownloadCdnBaseUrl = cdnSetting?.toLowerCase() === "off" ? undefined
+    : normalizeRankedDownloadBaseUrl(cdnSetting || (rankedDownloadBaseUrl === PRODUCTION_R2_ORIGIN ? PRODUCTION_DOWNLOAD_CDN_ORIGIN : undefined),
+      "RANKED_DOWNLOAD_CDN_BASE_URL");
   const survivalGdRelay=loadSurvivalGdRelayEnvironment(environment);
   return {
     rankedModUpdates: parseRankedModUpdates(environment.RANKED_MOD_UPDATES_JSON),

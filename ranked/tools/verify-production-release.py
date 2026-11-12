@@ -21,7 +21,7 @@ def read_json(path):
         return json.load(response)
 
 
-def verify(version, base, expected_sha=None, server_sha=None, client_sha=None):
+def verify(version, base, expected_sha=None, server_sha=None, client_sha=None, download_base=None):
     # expected_sha pins both the server and the published clients to one
     # source. A server-only release keeps the clients of an earlier source:
     # then only server_sha is pinned and the clients are verified by bytes.
@@ -48,7 +48,8 @@ def verify(version, base, expected_sha=None, server_sha=None, client_sha=None):
         update = config.get("modUpdates", {}).get(channel, {})
         if any(update.get(key) != package[key] for key in ("version", "sizeBytes", "sha256")):
             raise ValueError(f"{channel}: live API does not match verified public bytes")
-        expected = f"{base.rstrip('/')}/ranked/{channel}-{version}/Corum-Ranked-{version}-{channel}.geode"
+        # Players are sent to the bucket's custom domain when one is configured.
+        expected = f"{(download_base or base).rstrip('/')}/ranked/{channel}-{version}/Corum-Ranked-{version}-{channel}.geode"
         if update.get("downloadUrl") != expected:
             raise ValueError(f"{channel}: unexpected live download URL")
     result = {"api": API, "version": version, "health": True, "ready": True,
@@ -67,4 +68,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
     version = json.loads((ROOT / "corum-ranked-mod/mod.json").read_text())["version"]
     verify(version, os.environ.get("RANKED_DOWNLOAD_BASE_URL") or
-           "https://pub-11442f32945446a49b9da0a5e69f2451.r2.dev", args.expected_sha, args.server_sha, args.client_sha)
+           "https://pub-11442f32945446a49b9da0a5e69f2451.r2.dev", args.expected_sha, args.server_sha, args.client_sha,
+           None if os.environ.get("RANKED_DOWNLOAD_CDN_BASE_URL", "off") == "off" else os.environ["RANKED_DOWNLOAD_CDN_BASE_URL"])

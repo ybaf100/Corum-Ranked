@@ -114,10 +114,21 @@ jobs:
         if: inputs.mode == 'deploy'
         env:
           RANKED_DOWNLOAD_BASE_URL: ${{ vars.RANKED_DOWNLOAD_BASE_URL || 'https://pub-11442f32945446a49b9da0a5e69f2451.r2.dev' }}
+          RANKED_DOWNLOAD_CDN_BASE_URL: ${{ vars.RANKED_DOWNLOAD_CDN_BASE_URL || 'https://cdn.hwanhee1.com' }}
         run: |
           python3 -m unittest discover -s ranked/tools/tests -p 'test_published_clients.py'
           version="$(python3 -c 'import json; print(json.load(open("corum-ranked-mod/mod.json"))["version"])')"
+          # Players download through the bucket's custom domain. Before any
+          # activation, the same verified bytes must come back through it.
+          verify_cdn() {
+            if [[ "$RANKED_DOWNLOAD_CDN_BASE_URL" == "off" ]]; then return 0; fi
+            if ! python3 ranked/tools/verify-published-clients.py --base "$RANKED_DOWNLOAD_CDN_BASE_URL" --version "$version" --wait-seconds 120 "$@"; then
+              echo "::error::$RANKED_DOWNLOAD_CDN_BASE_URL does not serve the verified $version client package."
+              exit 1
+            fi
+          }
           if python3 ranked/tools/verify-published-clients.py --base "$RANKED_DOWNLOAD_BASE_URL" --version "$version" --wait-seconds 0 --expected-sha "$GITHUB_SHA"; then
+            verify_cdn --expected-sha "$GITHUB_SHA"
             echo "client_sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -129,6 +140,7 @@ jobs:
             echo "::error::No intact public $version client package. Publish the client (bump the version) before deploying."
             exit 1
           fi
+          verify_cdn
           echo "client_sha=" >> "$GITHUB_OUTPUT"
 
       - name: Reject superseded source immediately before activation
@@ -182,6 +194,7 @@ jobs:
         if: steps.activation.outputs.activated == 'true'
         env:
           RANKED_DOWNLOAD_BASE_URL: ${{ vars.RANKED_DOWNLOAD_BASE_URL || 'https://pub-11442f32945446a49b9da0a5e69f2451.r2.dev' }}
+          RANKED_DOWNLOAD_CDN_BASE_URL: ${{ vars.RANKED_DOWNLOAD_CDN_BASE_URL || 'https://cdn.hwanhee1.com' }}
           CLIENT_SHA: ${{ steps.clients.outputs.client_sha }}
         run: python3 ranked/tools/verify-production-release.py --server-sha "$GITHUB_SHA" --client-sha "$CLIENT_SHA"
 
