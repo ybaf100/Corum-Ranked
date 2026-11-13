@@ -3695,7 +3695,7 @@ class CorumRankedLayer final : public CCLayerColor {
         std::vector<CCPoint> points(static_cast<std::size_t>(segments));
         for (int i = 0; i < segments; ++i) {
             auto const a = 6.28318530718f * static_cast<float>(i) / segments;
-            points[static_cast<std::size_t>(i)] = {std::cos(a) * radius, std::sin(a) * radius};
+            points[static_cast<std::size_t>(i)] = CCPoint{std::cos(a) * radius, std::sin(a) * radius};
         }
         m_queueRadar->drawPolygon(points.data(), static_cast<unsigned>(points.size()), {0, 0, 0, 0}, width, color, BorderAlignment::Center);
     }
@@ -3740,12 +3740,12 @@ class CorumRankedLayer final : public CCLayerColor {
             for (int i = 1; i <= steps; ++i) {
                 auto const start = m_queueSweepAngle - span * static_cast<float>(i) / steps;
                 CCPoint points[arc + 3];
-                points[0] = {std::cos(start) * hub * 0.9f, std::sin(start) * hub * 0.9f};
+                points[0] = CCPoint{std::cos(start) * hub * 0.9f, std::sin(start) * hub * 0.9f};
                 for (int j = 0; j <= arc; ++j) {
                     auto const a = start + (m_queueSweepAngle - start) * static_cast<float>(j) / arc;
-                    points[j + 1] = {std::cos(a) * search, std::sin(a) * search};
+                    points[j + 1] = CCPoint{std::cos(a) * search, std::sin(a) * search};
                 }
-                points[arc + 2] = {std::cos(m_queueSweepAngle) * hub * 0.9f, std::sin(m_queueSweepAngle) * hub * 0.9f};
+                points[arc + 2] = CCPoint{std::cos(m_queueSweepAngle) * hub * 0.9f, std::sin(m_queueSweepAngle) * hub * 0.9f};
                 m_queueRadar->drawPolygon(points, arc + 3, {0.78f, 1.0f, 0.18f, layer}, 0, {0, 0, 0, 0});
             }
         }

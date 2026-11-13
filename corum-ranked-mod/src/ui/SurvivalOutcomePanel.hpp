@@ -133,7 +133,7 @@ class SurvivalOutcomePanel final:public cocos2d::CCLayerColor {
     // Personal result: the lime header is revealed by a diagonal wipe from the
     // left (a sheared stencil sliding right), driven by m_elapsed so a rebuild
     // of the same stage does not replay it.
-    CCNode* m_headerWipe=nullptr;float m_headerWipeFrom=0,m_headerWipeTo=0;
+    CCNode* m_headerWipe=nullptr;CCNode* m_headerClip=nullptr;float m_headerWipeFrom=0,m_headerWipeTo=0;
     void onAction(CCObject* object){if(auto* item=typeinfo_cast<CCMenuItemSpriteExtra*>(object);item && item->isEnabled()){
         auto const& current=SurvivalRuntime::get().view();if(!m_identity.starts_with(current.id+":"+current.ownId+":"))return;
         auto tag=item->getTag();if(tag>=100){if(static_cast<std::size_t>(tag-100)<m_profiles.size())openSurvivalProfile(this,m_profiles[tag-100]);}
@@ -171,7 +171,7 @@ public:
         for(auto const& p:view.result["standings"].asArray().unwrapOr(std::vector<matjson::Value>{}))
             buildKey+=":"+p["participantId"].asString().unwrapOr("")+":"+p["tierAfter"].asString().unwrapOr("")+":"+(p["lpAfter"].isNumber()?std::to_string(p["lpAfter"].asInt().unwrapOr(0)):"pending")+":"+std::to_string(p["delta"].asInt().unwrapOr(0));
         auto const size=CCDirector::sharedDirector()->getWinSize();
-        if(m_key!=buildKey){auto const elapsed=m_identity==key?m_elapsed:0.;m_identity=key;m_key=buildKey;removeAllChildrenWithCleanup(true);m_profiles=survivalRoster(view);m_stages.clear();m_badges.clear();m_elapsed=elapsed;m_watch=nullptr;m_freeChoice=m_resultChoice=m_close=nullptr;m_detail=m_watchText=nullptr;m_halo=nullptr;m_headerWipe=nullptr;
+        if(m_key!=buildKey){auto const elapsed=m_identity==key?m_elapsed:0.;m_identity=key;m_key=buildKey;removeAllChildrenWithCleanup(true);m_profiles=survivalRoster(view);m_stages.clear();m_badges.clear();m_elapsed=elapsed;m_watch=nullptr;m_freeChoice=m_resultChoice=m_close=nullptr;m_detail=m_watchText=nullptr;m_halo=nullptr;m_headerWipe=nullptr;m_headerClip=nullptr;
             m_menu=CCMenu::create();m_menu->setPosition(CCPointZero);addChild(m_menu,20);
             auto const own=std::find_if(m_profiles.begin(),m_profiles.end(),[&](auto const& row){return row.id==view.ownId;});
             if(choice){
@@ -271,7 +271,7 @@ public:
                 // S6 board: the lime band (bottom edge rising to the right) with
                 // the place, the round table on the left and the hatched LP
                 // panel on the right.
-                CCNode* header=this;
+                CCNode* headerLayer=this;
                 {   // The bottom edge runs from the left corner up 20 points to the right
                     // as one straight line: a single band sheared along Y (it used to be
                     // 2 pt strips of growing width, which read as a staircase). The
@@ -289,15 +289,15 @@ public:
                     m_headerWipeTo=-wipeH*lean-4;m_headerWipeFrom=m_headerWipeTo-wipeW;
                     stencil->setPosition({m_headerWipeFrom,size.height-wipeH});
                     auto* clip=CCClippingNode::create(stencil);clip->setID("survival-result-header-wipe"_spr);addChild(clip,1);
-                    m_headerWipe=stencil;header=clip;
+                    m_headerWipe=stencil;m_headerClip=clip;headerLayer=clip;
                     clip->addChild(band,1);
                 }
-                auto* eyebrow=menuLabel(fmt::format("SURVIVAL · {}",i18n::text("survival-personal-result","PERSONAL RESULT")),css(15),{14,size.height-8-5},AccentInk,FontWeight::Black);eyebrow->setAnchorPoint({0,.5f});header->addChild(eyebrow,5);
+                auto* eyebrow=menuLabel(fmt::format("SURVIVAL · {}",i18n::text("survival-personal-result","PERSONAL RESULT")),css(15),{14,size.height-8-5},AccentInk,FontWeight::Black);eyebrow->setAnchorPoint({0,.5f});headerLayer->addChild(eyebrow,5);
                 auto const placeText=own!=m_profiles.end() && own->rank>0?survivalOrdinal(own->rank):i18n::text("survival-result-wait","PENDING");
-                auto* placeLabel=menuLabel(placeText,css(84),{14,size.height-8-12-21},AccentInk,FontWeight::Black);placeLabel->setAnchorPoint({0,.5f});fitMenuLabelWidth(placeLabel,200,css(84),.5f);header->addChild(placeLabel,5);
+                auto* placeLabel=menuLabel(placeText,css(84),{14,size.height-8-12-21},AccentInk,FontWeight::Black);placeLabel->setAnchorPoint({0,.5f});fitMenuLabelWidth(placeLabel,200,css(84),.5f);headerLayer->addChild(placeLabel,5);
                 auto const field=std::max(view.matchPlayerCount,static_cast<int>(m_profiles.size()));
                 auto* ofField=menuLabel(fmt::format(fmt::runtime(i18n::text("survival-of-field","OF {}")),field),css(28),{14+placeLabel->getScaledContentSize().width+8,size.height-8-12-27},AccentInk,FontWeight::Black);
-                ofField->setAnchorPoint({0,.5f});fitMenuLabelWidth(ofField,size.width*.4f,css(28),.2f);header->addChild(ofField,5);
+                ofField->setAnchorPoint({0,.5f});fitMenuLabelWidth(ofField,size.width*.4f,css(28),.2f);headerLayer->addChild(ofField,5);
                 if(own!=m_profiles.end()){
                     // The own icon on the band opens the profile (as before).
                     auto* face=CCNode::create();face->setContentSize({40,40});if(auto* icon=survivalAvatar(*own,view.ownId,30)){icon->setPosition({20,20});face->addChild(icon,5);}
@@ -382,8 +382,9 @@ public:
                 }
                 // Header chip: the round badges earned in this match.
                 if(m_badgeCount>0){auto* text=menuLabel(fmt::format(fmt::runtime(i18n::text("survival-badges-earned","ROUND BADGES +{}")),m_badgeCount),css(15),{0,0},Accent,FontWeight::Black);
-                    auto const chipW=text->getScaledContentSize().width+12;auto* chip=CCLayerColor::create({Ink.r,Ink.g,Ink.b,255},chipW,13);chip->setPosition({size.width-14-40-8-chipW,size.height-8-5-6.5f});chip->setSkewX(8);header->addChild(chip,5);
-                    text->setPosition({chip->getPositionX()+chipW/2,size.height-8-5});header->addChild(text,6);}
+                    auto const chipW=text->getScaledContentSize().width+12;auto* chip=CCLayerColor::create({Ink.r,Ink.g,Ink.b,255},chipW,13);chip->setPosition({size.width-14-40-8-chipW,size.height-8-5-6.5f});chip->setSkewX(8);
+                    auto* into=m_headerClip?m_headerClip:static_cast<CCNode*>(this);into->addChild(chip,5);
+                    text->setPosition({chip->getPositionX()+chipW/2,size.height-8-5});into->addChild(text,6);}
             }
             if(ceremony)button(i18n::text("survival-continue-result","CONTINUE · MY RESULT"),{size.width/2,23},150,20,true,27,20)->setEnabled(settled);
             else if(!choice && stage!=SurvivalFlowStage::ScoreAnimation){
