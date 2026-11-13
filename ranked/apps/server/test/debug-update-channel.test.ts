@@ -8,17 +8,17 @@ import {ValidationPipe} from '@nestjs/common';
 describe('Debug update channel authorization',()=>{
  const rig=()=>new DebugUpdateChannelController({debugBot:{password:'test-only-password'},debugSpectate:null} as unknown as ServerEnvironment);
  it('requires the configured secret and never returns it or creates a game session',()=>{
-  const gate=rig();expect(()=>gate.verify({password:'wrong'},{ip:'test'})).toThrow('Incorrect password');
-  const result=gate.verify({password:'test-only-password'},{ip:'test'});expect(result).toEqual({authorized:true,channel:'debug'});expect(JSON.stringify(result)).not.toContain('test-only-password');
+  const gate=rig();expect(()=>gate.verify({password:'wrong'},{socket:{remoteAddress:'203.0.113.1'}})).toThrow('Incorrect password');
+  const result=gate.verify({password:'test-only-password'},{socket:{remoteAddress:'203.0.113.1'}});expect(result).toEqual({authorized:true,channel:'debug'});expect(JSON.stringify(result)).not.toContain('test-only-password');
  });
  it('rejects invalid input and missing Debug configuration',()=>{
-  for(const body of [null,{},'text',{password:''},{password:'x'.repeat(129)}])expect(()=>rig().verify(body,{ip:'test'})).toThrow('Invalid password');
-  const gate=new DebugUpdateChannelController({debugBot:null,debugSpectate:null} as unknown as ServerEnvironment);expect(()=>gate.verify({password:'test'},{ip:'test'})).toThrow('unavailable');
+  for(const body of [null,{},'text',{password:''},{password:'x'.repeat(129)}])expect(()=>rig().verify(body,{socket:{remoteAddress:'203.0.113.1'}})).toThrow('Invalid password');
+  const gate=new DebugUpdateChannelController({debugBot:null,debugSpectate:null} as unknown as ServerEnvironment);expect(()=>gate.verify({password:'test'},{socket:{remoteAddress:'203.0.113.1'}})).toThrow('unavailable');
  });
  it('bounds attempts per address and expires inactive buckets without timers or database calls',()=>{
   const now=vi.spyOn(Date,'now').mockReturnValue(1000);const gate=rig();
-  try{for(let i=0;i<5;i++)expect(()=>gate.verify({password:'bad'},{ip:'test'})).toThrow('Incorrect');expect(()=>gate.verify({password:'test-only-password'},{ip:'test'})).toThrow('Try again');
-   expect(gate.verify({password:'test-only-password'},{ip:'other'}).authorized).toBe(true);now.mockReturnValue(61001);expect(gate.verify({password:'test-only-password'},{ip:'test'}).authorized).toBe(true);
+  try{for(let i=0;i<5;i++)expect(()=>gate.verify({password:'bad'},{socket:{remoteAddress:'203.0.113.1'}})).toThrow('Incorrect');expect(()=>gate.verify({password:'test-only-password'},{socket:{remoteAddress:'203.0.113.1'}})).toThrow('Try again');
+   expect(gate.verify({password:'test-only-password'},{socket:{remoteAddress:'203.0.113.2'}}).authorized).toBe(true);now.mockReturnValue(61001);expect(gate.verify({password:'test-only-password'},{socket:{remoteAddress:'203.0.113.1'}}).authorized).toBe(true);
   }finally{now.mockRestore();}
  });
  it('accepts a pre-session HTTP request with the production validation policy and rejects wrong passwords',async()=>{

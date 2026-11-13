@@ -169,7 +169,15 @@ jobs:
           # contacting the restricted host activation entry point.
           gzip -dc "/tmp/corum-ranked-${GITHUB_SHA}.tar.gz" | docker load > /dev/null
           test "$(docker image inspect "corum-ranked:${GITHUB_SHA}" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = "$GITHUB_SHA"
-          active="$(curl --fail --silent --show-error --max-time 20 https://api.52-74-37-130.sslip.io/health | python3 -c 'import json,sys; print(json.load(sys.stdin).get("sourceSha", ""))')"
+          # Clients reach the server only through Cloudflare at api.hwanhee1.com;
+          # never require a client version whose API host is not serving yet.
+          edge_headers="$(mktemp)"
+          if ! edge="$(curl --fail --silent --show-error --max-time 20 --dump-header "$edge_headers" https://api.hwanhee1.com/health)" \
+             || ! grep -qi '^cf-ray:' "$edge_headers"; then
+            echo "::error::https://api.hwanhee1.com does not serve the API through Cloudflare yet (DNS proxied record and ranked/deploy/lightsail-cloudflare-edge.sh). Production unchanged."
+            exit 1
+          fi
+          active="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("sourceSha", ""))' "$edge")"
           if [[ "$active" == "$GITHUB_SHA" ]]; then
             echo 'activated=true' >> "$GITHUB_OUTPUT"
             echo 'Same source is already active; verify without restarting it.'

@@ -120,7 +120,7 @@ class DebugAudioVolumePopup final : public Popup {
         http.followRedirects(false); http.timeout(std::chrono::seconds(20));
         m_busy=true; controls(); status(i18n::text("admin-working","Applying changes..."));
         auto const weak=WeakRef<DebugAudioVolumePopup>(this);
-        m_request.spawn(http.post("https://api.52-74-37-130.sslip.io/api/ranked/debug/admin"),[weak,selected,save](web::WebResponse response) {
+        m_request.spawn(http.post("https://api.hwanhee1.com/api/ranked/debug/admin"),[weak,selected,save](web::WebResponse response) {
             auto keep=weak.lock(); if (!keep || keep->m_closed || !keep->isRunning() || keep->m_session!=RankedRuntime::get().spectatorLiveSessionToken()) return;
             keep->m_busy=false; keep->controls();
             auto const root=response.json().unwrapOr(matjson::Value());
@@ -223,7 +223,7 @@ class DebugSurvivalModePopup final : public Popup {
         body["action"]=count?"SET_SURVIVAL_MODE":"GET_SURVIVAL_MODE";if(count)body["matchPlayerCount"]=count;
         web::WebRequest http;http.header("Authorization","Bearer "+m_session);http.bodyJSON(body);http.followRedirects(false);http.timeout(std::chrono::seconds(20));
         m_busy=true;controls();status(i18n::text("admin-working","Applying changes..."));
-        m_request.spawn(http.post("https://api.52-74-37-130.sslip.io/api/ranked/debug/admin"),[weak=WeakRef(this)](web::WebResponse response){
+        m_request.spawn(http.post("https://api.hwanhee1.com/api/ranked/debug/admin"),[weak=WeakRef(this)](web::WebResponse response){
             auto keep=weak.lock();if(!keep || keep->m_closed || !keep->isRunning() || !keep->authorized())return;
             keep->m_busy=false;auto const root=response.json().unwrapOr(matjson::Value());
             auto const count=root["matchPlayerCount"].asInt().unwrapOr(0);
@@ -335,7 +335,7 @@ class DebugSeasonPopup final : public Popup {
         }
         web::WebRequest http;http.header("Authorization","Bearer "+m_session);http.bodyJSON(body);http.followRedirects(false);http.timeout(std::chrono::seconds(20));
         m_busy=true;controls();status(i18n::text("admin-working","Applying changes..."));
-        m_request.spawn(http.post("https://api.52-74-37-130.sslip.io/api/ranked/debug/admin"),[weak=WeakRef(this),save](web::WebResponse response){
+        m_request.spawn(http.post("https://api.hwanhee1.com/api/ranked/debug/admin"),[weak=WeakRef(this),save](web::WebResponse response){
             auto keep=weak.lock();if(!keep || keep->m_closed || !keep->isRunning() || !keep->authorized())return;
             keep->m_busy=false;auto const root=response.json().unwrapOr(matjson::Value());
             if(response.code()<200 || response.code()>=300){keep->controls();keep->status(root["message"].asString().unwrapOr("Admin request failed."));return;}
@@ -506,7 +506,7 @@ class DebugAdminPopup final : public Popup {
         http.followRedirects(false); http.timeout(std::chrono::seconds(20));
         m_busy=true; enabled(false); status(i18n::text("admin-working","Applying changes..."));
         auto const weak=WeakRef<DebugAdminPopup>(this);
-        m_request.spawn(http.post("https://api.52-74-37-130.sslip.io/api/ranked/debug/admin"),[weak](web::WebResponse response) {
+        m_request.spawn(http.post("https://api.hwanhee1.com/api/ranked/debug/admin"),[weak](web::WebResponse response) {
             auto keep=weak.lock(); if (!keep || keep->m_closed || !keep->isRunning()) return;
             keep->m_busy=false; keep->enabled(true);
             if (keep->m_session!=RankedRuntime::get().spectatorLiveSessionToken()) return;

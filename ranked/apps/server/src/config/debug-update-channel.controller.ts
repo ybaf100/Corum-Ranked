@@ -1,6 +1,7 @@
 import {BadRequestException,Body,Controller,ForbiddenException,Header,HttpException,Inject,Post,Req} from '@nestjs/common';
 import {timingSafeEqual} from 'node:crypto';
 import {SERVER_ENVIRONMENT,type ServerEnvironment} from './server-environment.js';
+import {clientAddress,type ClientAddressSource} from '../common/client-ip.js';
 /** Update admission has no game session yet. Verify the configured Debug secret
  * without starting a match, reading Neon, or returning/logging credentials. */
 @Controller('api/ranked/updates/channel')
@@ -8,8 +9,8 @@ export class DebugUpdateChannelController{
  private readonly attempts=new Map<string,{count:number;until:number}>();
  constructor(@Inject(SERVER_ENVIRONMENT)private readonly environment:ServerEnvironment){}
  @Post('debug') @Header('Cache-Control','no-store')
- verify(@Body()body:unknown,@Req()request:{ip?:string}){
-  const now=Date.now(),key=request.ip??'unknown';
+ verify(@Body()body:unknown,@Req()request:ClientAddressSource){
+  const now=Date.now(),key=clientAddress(request);
   for(const [ip,entry]of this.attempts)if(entry.until<=now)this.attempts.delete(ip);
   let entry=this.attempts.get(key);
   if(!entry){if(this.attempts.size>=1024)throw new HttpException('Try again later',429);entry={count:0,until:now+60_000};this.attempts.set(key,entry);}

@@ -139,7 +139,7 @@ void DebugLogUploader::sendNext() {
     body["part"] = chunk.part;body["totalParts"] = chunk.totalParts;body["totalFiles"] = m_files;body["content"] = chunk.content;
     web::WebRequest http;
     auto const& token = RankedRuntime::get().spectatorLiveSessionToken();
-    std::string url = "https://api.52-74-37-130.sslip.io/api/ranked/debug/logs";
+    std::string url = "https://api.hwanhee1.com/api/ranked/debug/logs";
     if (!token.empty()) http.header("Authorization", "Bearer " + token);
     else {
         url += "/menu";

@@ -40,7 +40,7 @@ class RankedUpdateChannelPopup final:public Popup {
         matjson::Value body=matjson::Value::object();body["password"]=std::string(m_password->getString());m_password->setString("");setBusy(true);
         m_status->setColor(TextMuted);m_status->setString(i18n::text("loading","Loading...").c_str());
         auto request=web::WebRequest().timeout(std::chrono::seconds(8)).followRedirects(false);request.bodyJSON(body);
-        m_request.spawn(request.post("https://api.52-74-37-130.sslip.io/api/ranked/updates/channel/debug"),[weak=WeakRef(this)](web::WebResponse response){
+        m_request.spawn(request.post("https://api.hwanhee1.com/api/ranked/updates/channel/debug"),[weak=WeakRef(this)](web::WebResponse response){
             auto owner=weak.lock();if(!owner||owner->m_closed||!owner->getParent())return;
             owner->setBusy(false);auto const value=response.json().unwrapOr(matjson::Value());
             if(response.code()>=200&&response.code()<300&&value["authorized"].asBool().unwrapOr(false)&&value["channel"].asString().unwrapOr("")=="debug")owner->choose("debug");

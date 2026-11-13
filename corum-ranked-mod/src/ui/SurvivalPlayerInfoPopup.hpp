@@ -58,8 +58,8 @@ class SurvivalPlayerInfoPopup final:public Popup,public UserInfoDelegate {
         m_forumBusy=true;++m_forumReads;m_nextForumRead=now+std::chrono::seconds(1);
         auto request=web::WebRequest().timeout(std::chrono::seconds(8)).followRedirects(false);request.header("Authorization","Bearer "+m_session);
         // Participant IDs are server UUIDs or Debug's fixed human/bot identifiers.
-        auto const path=m_leaderboard&&!m_historySurvival?"https://api.52-74-37-130.sslip.io/api/ranked/leaderboard/player-info/"+std::to_string(m_player.accountId):
-            "https://api.52-74-37-130.sslip.io/api/ranked/survival/matches/"+m_matchId+"/player-info/"+m_player.id;
+        auto const path=m_leaderboard&&!m_historySurvival?"https://api.hwanhee1.com/api/ranked/leaderboard/player-info/"+std::to_string(m_player.accountId):
+            "https://api.hwanhee1.com/api/ranked/survival/matches/"+m_matchId+"/player-info/"+m_player.id;
         m_forumRequest.spawn(request.get(path),[weak=WeakRef(this)](web::WebResponse response){
             auto owner=weak.lock();if(!owner || !owner->current() || !owner->getParent())return;
             owner->m_forumBusy=false;

@@ -79,7 +79,7 @@ class BadgeCollection final:public Popup {
         m_status->setString(i18n::text("loading","Loading...").c_str());
         clearCards();
         web::WebRequest request;request.header("Authorization","Bearer "+session);request.followRedirects(false);request.timeout(std::chrono::seconds(15));
-        m_request.spawn(request.get("https://api.52-74-37-130.sslip.io/api/ranked/survival/badges"),[weak=WeakRef(this),generation,session](web::WebResponse response){
+        m_request.spawn(request.get("https://api.hwanhee1.com/api/ranked/survival/badges"),[weak=WeakRef(this),generation,session](web::WebResponse response){
             auto p=weak.lock();if(!p||p->m_closed||p->m_generation!=generation||session!=RankedRuntime::get().spectatorLiveSessionToken())return;p->m_busy=false;
             auto json=response.json();bool const valid=response.code()==200&&json.isOk()&&survivalBadgeCollectionValid(json.unwrap());
             if(!valid){

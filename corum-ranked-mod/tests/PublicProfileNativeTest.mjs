@@ -134,7 +134,7 @@ int main(){using namespace corum::ranked::ui;
  p=create();p->onDebug(nullptr);assert(p->m_password->visible&&p->m_confirm->visible);auto before=geode::async::jobs.size();p->onConfirm(nullptr);assert(geode::async::jobs.size()==before);
  for(auto bad: {matjson::parse(R"({"authorized":false,"channel":"debug"})").unwrap(),matjson::parse(R"({"authorized":true,"channel":"release"})").unwrap(),matjson::Value()}){
   p->m_password->value="fixture-password";p->onConfirm(nullptr);assert(p->m_password->value.empty()&&p->m_busy&&!p->m_release->enabled&&!p->m_password->enabled);
-  assert(geode::async::jobs.back().op.path=="https://api.52-74-37-130.sslip.io/api/ranked/updates/channel/debug");assert(geode::async::jobs.back().op.body["password"].asString().unwrap()=="fixture-password");
+  assert(geode::async::jobs.back().op.path=="https://api.hwanhee1.com/api/ranked/updates/channel/debug");assert(geode::async::jobs.back().op.body["password"].asString().unwrap()=="fixture-password");
   before=geode::async::jobs.size();p->onRelease(nullptr);p->onConfirm(nullptr);assert(geode::async::jobs.size()==before&&chosen.size()==1);
   geode::async::jobs.back().callback({200,bad});assert(!p->m_busy&&!p->m_closed&&!p->m_status->value.empty()&&chosen.size()==1);
  }

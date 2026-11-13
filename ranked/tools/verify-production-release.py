@@ -8,7 +8,7 @@ from pathlib import Path
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[2]
-API = "https://api.52-74-37-130.sslip.io"
+API = "https://api.hwanhee1.com"
 CONFIG_READY_WAIT_SECONDS = 180
 spec = importlib.util.spec_from_file_location("published_clients", Path(__file__).with_name("verify-published-clients.py"))
 clients = importlib.util.module_from_spec(spec)

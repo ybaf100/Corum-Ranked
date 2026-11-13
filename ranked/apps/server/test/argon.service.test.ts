@@ -54,6 +54,23 @@ describe("Argon GD account ownership", () => {
     });
   });
 
+  it("answers a refused token locally instead of asking Argon again", async () => {
+    const fetchRemote = vi.fn(async () => reply(200, { valid: false, valid_weak: false, cause: "expired" }));
+    const argon = new ArgonService(environment(), fetchRemote as unknown as typeof fetch);
+    for (let i = 0; i < 5; i++) {
+      expect(await failure(argon.verify("7001", "Name", TOKEN))).toMatchObject({ status: 401, body: { code: "ARGON_TOKEN_INVALID", cause: "expired" } });
+    }
+    expect(fetchRemote).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not remember an outage as a refusal", async () => {
+    const fetchRemote = vi.fn(async () => reply(503, "down"));
+    const argon = new ArgonService(environment(), fetchRemote as unknown as typeof fetch);
+    await failure(argon.verify("7001", "Name", TOKEN));
+    fetchRemote.mockImplementation(async () => reply(200, { valid: true, valid_weak: true, username: "Name" }));
+    await expect(argon.verify("7001", "Name", TOKEN)).resolves.toMatchObject({ verified: true });
+  });
+
   it("fails closed with 503 when Argon is unreachable or rate limited", async () => {
     for (const fetchRemote of [vi.fn(async () => reply(429, "slow down")), vi.fn(async () => { throw new Error("offline"); })]) {
       const argon = new ArgonService(environment(), fetchRemote as unknown as typeof fetch);
