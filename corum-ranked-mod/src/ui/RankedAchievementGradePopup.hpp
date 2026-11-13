@@ -2,23 +2,44 @@
 #include "../domain/SurvivalEliminationEffects.hpp"
 #include "RankedPopupLayout.hpp"
 #include "RankedTranslations.hpp"
+#include "RankBadgeAssets.hpp"
 #include "RankedVisuals.hpp"
+#include <cctype>
 #include <Geode/ui/Popup.hpp>
 #include <string>
 
 namespace corum::ranked::ui {
 using namespace geode::prelude;
 
-// Diamond emblem in a tier colour (colour layers, so lobby fades reach it).
-inline CCNode* achievementGradeEmblem(float size, ccColor3B tone, ccColor3B panel) {
-    auto* root = CCNode::create();
-    root->setContentSize({size, size});
-    root->setAnchorPoint({0.5f, 0.5f});
+// Grade emblem: the grade tier's rank core (RED..GOLD), or the unranked core
+// for no grade / a grade not reached yet. The core artwork is already drawn as
+// a square turned 45 degrees, so it is placed unrotated to stay a diamond.
+// Without the downloaded rank assets it falls back to layered colour diamonds.
+inline CCNode* achievementGradeEmblem(float size, std::string_view tier, ccColor3B tone, ccColor3B panel) {
+    // Neutral, zero-sized RGBA root: lobby fades cascade into the sprite
+    // without tinting it (same contract as the rank badge assemblies).
+    auto* root = CCLayerColor::create({255, 255, 255, 255});
+    root->setContentSize(CCSizeZero);
+    root->setCascadeColorEnabled(true);
+    root->setCascadeOpacityEnabled(true);
+    auto const known = tier == "RED" || tier == "AQUA" || tier == "BRONZE" || tier == "SILVER" || tier == "GOLD";
+    auto name = std::string(known ? tier : "UNRANKED");
+    for (auto& c : name) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (auto* core = rankResourceSprite("rank-" + name + "-core.png")) {
+        // Opaque diamond extent on the 1024 px canvas: ~350 px for the tier
+        // cores, ~500 px for the unranked core with its dark backing diamond.
+        auto const extent = (known ? 360.0f : 500.0f) / 1024.0f * core->getContentSize().width;
+        core->setScale(extent > 0.0f ? size / extent : 1.0f);
+        core->setRotation(0.0f);
+        core->setPosition(CCPointZero);
+        root->addChild(core, 1);
+        return root;
+    }
     auto diamond = [&](float side, ccColor3B color, int z) {
         auto* layer = CCLayerColor::create({color.r, color.g, color.b, 255}, side, side);
         layer->ignoreAnchorPointForPosition(false);
         layer->setAnchorPoint({0.5f, 0.5f});
-        layer->setPosition({size / 2, size / 2});
+        layer->setPosition(CCPointZero);
         layer->setRotation(45);
         root->addChild(layer, z);
     };
@@ -69,7 +90,7 @@ class RankedAchievementGradePopup final : public Popup {
             auto const y = height - 66 - 30.f * static_cast<float>(i);
             auto* row = surface({302, 26}, {165, y}, current ? rowTone : ccColor3B{42, 36, 64}, current ? achievementGradePanel(name) : ccColor3B{18, 12, 36}, reached ? 255 : 170, true);
             panel->addChild(row, 3);
-            auto* emblem = achievementGradeEmblem(18, reached ? rowTone : ccColor3B{90, 84, 112}, current ? achievementGradePanel(name) : ccColor3B{18, 12, 36});
+            auto* emblem = achievementGradeEmblem(18, reached ? name : std::string_view{}, reached ? rowTone : ccColor3B{90, 84, 112}, current ? achievementGradePanel(name) : ccColor3B{18, 12, 36});
             emblem->setPosition({16, 13}); row->addChild(emblem, 5);
             auto* label = menuLabel(std::string(name), .26f, {32, 13}, reached ? rowTone : TextMuted, FontWeight::Black);
             label->setAnchorPoint({0, 0.5f}); fitSingleLineMenuLabel(label, 70, 16, .26f); row->addChild(label, 5);

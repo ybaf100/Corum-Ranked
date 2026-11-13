@@ -47,7 +47,7 @@ struct RankedRuntime{RuntimeView v;int fetches=0;static RankedRuntime&get(){stat
 namespace corum::ranked{struct SurvivalThumbnailProvider{int prewarms=0;static SurvivalThumbnailProvider&get(){static SurvivalThumbnailProvider p;return p;}void prewarm(){++prewarms;}};}
 struct Owner:CCNode{
  struct Hover{void press(CCMenuItemSpriteExtra*){}};Hover*m_lobbyHover=nullptr;
- enum class Page{Live,History};Page m_page=Page::Live;bool m_uiFadingOut=false,m_modeNoticeOpen=false;unsigned m_modeNoticeGeneration=0;
+ enum class Page{Live,History};Page m_page=Page::Live;bool m_uiFadingOut=false,m_modeNoticeOpen=false;unsigned m_modeNoticeGeneration=0;bool m_modalActive=false;bool modalAbove(){return false;}template<class T>void suspendMenusUnderModal(T*){}void syncModalInput(){}
  corum::ranked::ModeLobbyTransition m_modeTransition;std::optional<WeakRef<corum::ranked::ui::RankedModeDisabledPopup>>m_modeNotice;
  CCLayerColor a,b,c;CCLayerColor*m_lobbySurvival=&a,*m_lobbySolo=&b,*m_lobbyPanel=&c;
  CCMenu menu,toolbar,settings;CCMenu*m_menu=&menu,*m_lobbyToolbar=&toolbar,*m_settingsMenu=&settings;std::string m_localMessage;int animations=0,renders=0;

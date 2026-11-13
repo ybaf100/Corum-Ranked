@@ -89,6 +89,7 @@
 #include <iomanip>
 #include <limits>
 #include <optional>
+#include <utility>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -525,6 +526,9 @@ class CorumRankedLayer final : public CCLayerColor {
     std::optional<WeakRef<corum::ranked::ui::RankedSessionConflictPopup>> m_sessionConflict;
     std::optional<WeakRef<corum::ranked::ui::RankedModeDisabledPopup>> m_modeNotice;
     bool m_modeNoticeOpen = false;
+    // Lobby menus switched off while a popup (FLAlertLayer) covers the lobby.
+    std::vector<Ref<CCMenu>> m_modalSuspended;
+    bool m_modalActive = false;
     unsigned m_modeNoticeGeneration = 0;
     bool m_accountConflictShown = false;
     CCMenuItemSpriteExtra* m_jukeboxButton = nullptr;
@@ -815,6 +819,7 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     void refresh(float) {
+        syncModalInput();
         auto& runtime = RankedRuntime::get();
         syncLobbyPopulation();
         runtime.tick();
@@ -836,6 +841,7 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const uiKey = presentationKey();
         if (prepareUiTransition(uiKey)) {
             render();
+            if (m_modalActive) suspendMenusUnderModal(this);
             applyFadeInIfNeeded();
         }
         updateDynamicUi();
@@ -2435,7 +2441,44 @@ class CorumRankedLayer final : public CCLayerColor {
         for (auto* child : CCArrayExt<CCNode*>(node->getChildren())) setLobbyNodeInput(child,enabled);
     }
 
+    // A popup over the lobby must own every touch. GD raises the touch
+    // dispatcher's force priority while an FLAlertLayer is open, so a lobby
+    // menu that is (re)registered meanwhile - a rebuild, or input being
+    // re-enabled - lands above the popup and its buttons answer taps through
+    // it. While any popup is up, every lobby menu stays switched off; they are
+    // switched back on once the last popup closes.
+    bool modalAbove() {
+        auto covers = [this](CCNode* parent) {
+            if (!parent) return false;
+            for (auto* child : CCArrayExt<CCNode*>(parent->getChildren()))
+                if (child != this && child->isVisible() && typeinfo_cast<FLAlertLayer*>(child)) return true;
+            return false;
+        };
+        return covers(getParent()) || covers(this);
+    }
+
+    void suspendMenusUnderModal(CCNode* node) {
+        if (!node || typeinfo_cast<FLAlertLayer*>(node)) return;
+        if (auto* menu = typeinfo_cast<CCMenu*>(node); menu && menu->isTouchEnabled()) {
+            corum::ranked::ui::cancelMenuTouch(menu);
+            menu->setTouchEnabled(false);
+            m_modalSuspended.emplace_back(menu);
+        }
+        for (auto* child : CCArrayExt<CCNode*>(node->getChildren())) suspendMenusUnderModal(child);
+    }
+
+    void syncModalInput() {
+        if (modalAbove()) { m_modalActive = true; suspendMenusUnderModal(this); return; }
+        if (!m_modalActive) return;
+        m_modalActive = false;
+        auto suspended = std::exchange(m_modalSuspended, {});
+        for (auto& menu : suspended) if (menu->getParent() && menu->isRunning()) menu->setTouchEnabled(true);
+        // Re-apply the lobby's own gating (transitions, queue page) on top.
+        syncLobbyInput();
+    }
+
     void syncLobbyInput() {
+        if (m_modalActive || modalAbove()) { m_modalActive = true; suspendMenusUnderModal(this); return; }
         auto const ready = !m_modeTransition.moving() && !m_uiFadingOut && !m_modeNoticeOpen;
         auto const selected = m_modeTransition.selected();
         setLobbyNodeInput(m_lobbySurvival,ready && !selected);
@@ -3631,11 +3674,26 @@ class CorumRankedLayer final : public CCLayerColor {
         }
     }
 
-    void drawQueueCircle(float radius, ccColor4F color, float width, int segments = 60) {
-        for (int i = 0; i < segments; ++i) {
-            auto const a = 6.28318530718f * static_cast<float>(i) / segments, b = 6.28318530718f * static_cast<float>(i + 1) / segments;
-            m_queueRadar->drawSegment({std::cos(a) * radius, std::sin(a) * radius}, {std::cos(b) * radius, std::sin(b) * radius}, width, color);
-        }
+    // A ring of edge-sharing quads. The old chain of drawSegment calls put a
+    // round cap at every joint; with translucent colours the overlapping caps
+    // drew darker beads and the 60 chords showed as corners once the radar was
+    // scaled up. Segment count follows the on-screen radius, and a faint,
+    // slightly wider ring underneath softens the stair-stepped edges.
+    void drawQueueCircle(float radius, ccColor4F color, float width) {
+        if (!m_queueRadar || radius <= 0.0f || color.a <= 0.0f) return;
+        auto const scale = std::max(0.01f, m_queueRadar->getScale());
+        auto const segments = std::clamp(static_cast<int>(radius * scale * 0.9f), 48, 256);
+        auto band = [&](float half, ccColor4F tone) {
+            auto const r0 = std::max(0.0f, radius - half), r1 = radius + half;
+            for (int i = 0; i < segments; ++i) {
+                auto const a = 6.28318530718f * static_cast<float>(i) / segments, b = 6.28318530718f * static_cast<float>(i + 1) / segments;
+                CCPoint quad[] {{std::cos(a) * r0, std::sin(a) * r0}, {std::cos(a) * r1, std::sin(a) * r1},
+                    {std::cos(b) * r1, std::sin(b) * r1}, {std::cos(b) * r0, std::sin(b) * r0}};
+                m_queueRadar->drawPolygon(quad, 4, tone, 0, {0, 0, 0, 0});
+            }
+        };
+        band(width + 0.45f / scale, {color.r, color.g, color.b, color.a * 0.35f});
+        band(width, color);
     }
 
     // Every frame, also while the panel fades: CCDrawNode has no opacity, so
@@ -3665,7 +3723,7 @@ class CorumRankedLayer final : public CCLayerColor {
         if (found) drawQueueCircle(outer, {1.0f, 0.81f, 0.29f, 0.85f * k}, 0.8f);
         else if (!m_queueSurvivalArena) drawQueueCircle(outer, {0.78f, 1.0f, 0.18f, 0.30f * k}, 0.6f);
         if (!found) {
-            drawQueueCircle(inner, {0.78f, 1.0f, 0.18f, 0.12f * k}, 0.4f, 40);
+            drawQueueCircle(inner, {0.78f, 1.0f, 0.18f, 0.12f * k}, 0.4f);
             // 48-degree sweep, one turn per 3.6 s, fading from its leading edge.
             m_queueSweepAngle = std::fmod(m_queueSweepAngle + dt * 1.74532925f, 6.28318530718f);
             constexpr int steps = 12;
@@ -3679,9 +3737,9 @@ class CorumRankedLayer final : public CCLayerColor {
         }
         {
             // Dark hub disc behind the centre text.
-            CCPoint disc[40];
-            for (int i = 0; i < 40; ++i) { auto const a = 6.28318530718f * static_cast<float>(i) / 40.0f; disc[i] = CCPoint{std::cos(a) * hub, std::sin(a) * hub}; }
-            m_queueRadar->drawPolygon(disc, 40, {0.051f, 0.055f, 0.071f, 0.92f * k}, 0, {0, 0, 0, 0});
+            CCPoint disc[128];
+            for (int i = 0; i < 128; ++i) { auto const a = 6.28318530718f * static_cast<float>(i) / 128.0f; disc[i] = CCPoint{std::cos(a) * hub, std::sin(a) * hub}; }
+            m_queueRadar->drawPolygon(disc, 128, {0.051f, 0.055f, 0.071f, 0.92f * k}, 0, {0, 0, 0, 0});
         }
         if (!m_queueSurvivalArena) {
             if (!found) drawQueueCircle(search, {0.78f, 1.0f, 0.18f, 0.75f * k}, 0.7f);
@@ -6311,7 +6369,7 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const gradePanel = corum::ranked::ui::achievementGradePanel(grade.tier);
         auto const plateSize = CCSize{size.width*.19f, 27.0f};
         auto* ap = corum::ranked::ui::achievementPlate("", plateSize, gradeTone, gradePanel, kGold, 0.38f);
-        auto* emblem = corum::ranked::ui::achievementGradeEmblem(21.0f, gradeTone, gradePanel);
+        auto* emblem = corum::ranked::ui::achievementGradeEmblem(21.0f, grade.tier, gradeTone, gradePanel);
         emblem->setPosition({13.5f, 13.5f}); ap->addChild(emblem, 6);
         auto const textLeft = 26.0f, textRight = plateSize.width - 6.0f;
         auto* gradeName = makeLabel(grade.tier.empty() ? tr("achievement-grade-none", "NO GRADE") : std::string(grade.tier),

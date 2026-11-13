@@ -127,6 +127,11 @@ test('L1 <-> L2/L3 are separate pages: fade out, rebuild for the selection, fade
  assert.match(method(popup,'    void onCloseLayer('),/m_modeTransition.back\(\).*animateModeLobby\(mode,false\)/);
  const close=method(popup,'    void onCloseLayer(');assert(close.indexOf('if (m_page != Page::Live) { stepBack(); return; }')>0&&close.indexOf('stepBack()')<close.indexOf('leaveRanked()'),'sub-screens step back instead of leaving Ranked');
  assert.match(popup,/hitTop = y1 - kModeCardHitTopInset/);
+ // Popups own every touch: lobby menus are switched off while any FLAlertLayer covers the lobby.
+ assert.match(method(popup,'    void refresh(float)'),/^\s*void refresh\(float\) \{\s*syncModalInput\(\);/);
+ assert.match(method(popup,'    void syncLobbyInput()'),/if \(m_modalActive \|\| modalAbove\(\)\) \{ m_modalActive = true; suspendMenusUnderModal\(this\); return; \}/);
+ const suspend=method(popup,'    void suspendMenusUnderModal(');assert.match(suspend,/typeinfo_cast<FLAlertLayer\*>\(node\)\) return;/);assert.match(suspend,/menu->setTouchEnabled\(false\)/);
+ assert.match(method(popup,'    void syncModalInput()'),/menu->isRunning\(\)\) menu->setTouchEnabled\(true\);[\s\S]*syncLobbyInput\(\);/);
  assert.match(method(popup,'    void drawQueueArena('),/radar\.maximumRange <= 0 \? inner \+ 1\.5f/,'solo radar starts at the smallest ring');
  assert.match(method(popup,'    void animateQueue('),/m_queueContents->removeFromParentAndCleanup\(true\);\s*self->forgetQueueContents\(\);/,'the queue close animation drops every queue pointer');assert.match(popup,/kModeCardHitTopInset = 1[0-9]\.0f/);
  const card=method(popup,'    void renderModeCard(');
