@@ -1384,6 +1384,9 @@ void RankedRuntime::joinQueue() {
     auto request = baseRequest(m_sessionToken);
     request.bodyJSON(body);
     m_controlBusy = true;
+    // A new search starts at the narrowest range; the previous queue's widened
+    // range must not flash before the first status poll.
+    m_view.queueRadar = {};
     setStage(RuntimeStage::JoiningQueue, "Joining the Ranked queue...");
     m_controlRequest.spawn(
         request.post(endpoint("/api/ranked/queue/join")),

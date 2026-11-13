@@ -59,8 +59,12 @@ test('beta.152 crash: closing the queue forgets every arena node before the next
  const lobby=read('src/RankedPopup.cpp');
  const close=lobby.slice(lobby.indexOf('if (!self->m_queueShown && self->m_queueContents) {'));
  const block=close.slice(0,close.indexOf('}'));
- for(const name of ['m_queueOpponentBox','m_queueCenter','m_queueOpponentMark','m_queueOpponentLabel','m_queueHeading','m_queueRadar','m_queueRangeLabel'])
-  assert.match(block,new RegExp('self->'+name+' = '),name);
+ assert.match(block,/self->forgetQueueContents\(\);/);
+ // beta.58 crash: FREE PLAY was missed by one copy of this list; one helper now drops them all.
+ const forget=lobby.slice(lobby.indexOf('void forgetQueueContents() {'));
+ const reset=forget.slice(0,forget.indexOf('\n    }'));
+ for(const name of ['m_queueOpponentBox','m_queueCenter','m_queueOpponentMark','m_queueOpponentLabel','m_queueHeading','m_queueRadar','m_queueRangeLabel','m_queueFreePlay','m_queueLeave','m_queueFill','m_queueFillBar','m_queueContents','m_queueMenu'])
+  assert.match(reset,new RegExp(name+' = '),name);
  // The per-frame arena draw never touches a radar without live queue contents.
  assert.match(lobby,/if \(!m_queueRadar \|\| !m_queueContents\) return;/);
 });

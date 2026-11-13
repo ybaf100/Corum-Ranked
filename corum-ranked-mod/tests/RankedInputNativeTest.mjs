@@ -159,11 +159,15 @@ struct CorumRankedLayer : CCLayerColor {
     static void cancelNestedMenuTouches(Root*){}
     ${body(popup, 'void onEnter() override')}
     ${body(popup, 'void onExit() override')}
+    ${body(popup, 'void forgetQueueContents()')}
     ${body(popup, 'void clearUi()')}
 };
 int main(){
     auto& d=CCDirector::sharedDirector()->dispatcher; Menu menu;Root root{&menu};CorumRankedLayer lobby;
     lobby.m_menu=&menu;lobby.nativeChild=&menu;lobby.m_root=&root;
+    // beta.58 crash: closing the queue page left FREE PLAY dangling for placeLobbyFooter().
+    {int alive=1;for(void** p:{&lobby.m_queueContents,&lobby.m_queueMenu,&lobby.m_queueFreePlay,&lobby.m_queueLeave,&lobby.m_queueFill,&lobby.m_queueFillBar,&lobby.m_queueRadar,&lobby.m_queueRingCyan,&lobby.m_queueHeading})*p=&alive;
+     lobby.forgetQueueContents();for(void* p:{lobby.m_queueContents,lobby.m_queueMenu,lobby.m_queueFreePlay,lobby.m_queueLeave,lobby.m_queueFill,lobby.m_queueFillBar,lobby.m_queueRadar,lobby.m_queueRingCyan,lobby.m_queueHeading})assert(p==nullptr);}
     CCMenuItem button;button.parent=&menu;menu.item=&button;lobby.onEnter();
     for(int round=1;round<=3;++round){
         d.began(10+round); assert(menu.m_eState==kCCMenuStateTrackingTouch);

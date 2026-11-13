@@ -1370,6 +1370,18 @@ class CorumRankedLayer final : public CCLayerColor {
             cancelNestedMenuTouches(child);
         }
     }
+    // Every pointer into the queue page. The page is destroyed as one tree
+    // (close animation, rebuild, clearUi), so all of them are dropped together;
+    // beta.58 crashed on a FREE PLAY button that one of the copies missed.
+    void forgetQueueContents() {
+        m_queueContents = nullptr; m_queueMenu = nullptr;
+        m_queueSlots.clear(); m_queuePlayers = m_queueWait = m_queueMinimum = m_queueHint = m_queueHeading = nullptr;
+        m_queueLeave = m_queueFill = m_queueFreePlay = nullptr;
+        m_queueRingCyan = m_queueRingGold = m_queueSweep = m_queueOpponentBox = nullptr;
+        m_queueCenter = m_queueOpponentMark = m_queueOpponentLabel = nullptr;
+        m_queueRadar = nullptr; m_queueRangeLabel = nullptr; m_queueFillBar = nullptr;
+    }
+
     void clearUi() {
         resetHistoryUi();
         if(m_lobbyHover)m_lobbyHover->detach();
@@ -1380,10 +1392,7 @@ class CorumRankedLayer final : public CCLayerColor {
         setLobbyNodeInput(m_lobbySurvival,false); setLobbyNodeInput(m_lobbySolo,false); setLobbyNodeInput(m_lobbyPanel,false);
         setLobbyNodeInput(m_lobbyToolbar,false); m_lobbyToolbar = nullptr;
         m_lobbySurvival = m_lobbySolo = m_lobbyPanel = nullptr;
-        m_queueContents = nullptr; m_queueMenu = nullptr; m_queuePlayers = m_queueWait = m_queueMinimum = m_queueHint = m_queueHeading = nullptr;
-        m_queueRingCyan = m_queueRingGold = m_queueSweep = m_queueOpponentBox = nullptr; m_queueCenter = m_queueOpponentMark = m_queueOpponentLabel = nullptr;
-        m_queueRadar = nullptr; m_queueRangeLabel = nullptr;
-        m_queueSlots.clear(); m_queueFillBar = nullptr; m_queueLeave = m_queueFill = m_queueFreePlay = nullptr; m_queueShown = m_queueAnimating = false;
+        forgetQueueContents(); m_queueShown = m_queueAnimating = false;
         resetDynamicUiPointers();
         corum::ranked::ui::cancelMenuTouch(m_menu);
         cancelNestedMenuTouches(m_root);
@@ -3432,9 +3441,7 @@ class CorumRankedLayer final : public CCLayerColor {
     void buildQueueContents(corum::ranked::RankedMode mode, CCLayerColor* card) {
         (void)card;
         if (m_queueContents) m_queueContents->removeFromParentAndCleanup(true);
-        m_queueSlots.clear(); m_queuePlayers = m_queueWait = m_queueMinimum = m_queueHint = m_queueHeading = nullptr; m_queueLeave = m_queueFill = m_queueFreePlay = nullptr;
-        m_queueRingCyan = m_queueRingGold = m_queueSweep = m_queueOpponentBox = nullptr; m_queueCenter = m_queueOpponentMark = m_queueOpponentLabel = nullptr;
-        m_queueRadar = nullptr; m_queueRangeLabel = nullptr; m_queueFillBar = nullptr;
+        forgetQueueContents();
         auto const win = CCDirector::sharedDirector()->getWinSize();
         auto const top = win.height - kLobbyHeader, bottom = kLobbyFooter;
         m_queueContents = CCLayerColor::create({0,0,0,255},0,0);
@@ -3650,7 +3657,10 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const& radar = RankedRuntime::get().view().queueRadar;
         auto const maximum = std::max(1, radar.maximumRange);
         auto const range = std::clamp(radar.searchRange, 0, maximum);
-        auto const search = m_queueSurvivalArena || radar.maximumRange <= 0 ? 44.0f
+        // Solo starts at the smallest ring until the server reports a range,
+        // then widens; Survival has no range and keeps the full ring.
+        auto const search = m_queueSurvivalArena ? 44.0f
+            : radar.maximumRange <= 0 ? inner + 1.5f
             : inner + 1.5f + (outer - inner - 1.5f) * static_cast<float>(range) / static_cast<float>(maximum);
         if (found) drawQueueCircle(outer, {1.0f, 0.81f, 0.29f, 0.85f * k}, 0.8f);
         else if (!m_queueSurvivalArena) drawQueueCircle(outer, {0.78f, 1.0f, 0.18f, 0.30f * k}, 0.6f);
@@ -3821,14 +3831,8 @@ class CorumRankedLayer final : public CCLayerColor {
             self->m_queueAnimating = false;
             if (self->m_lobbyPanel) self->m_lobbyPanel->setVisible(!self->m_queueShown);
             if (!self->m_queueShown && self->m_queueContents) {
-                self->m_queueContents->removeFromParentAndCleanup(true); self->m_queueContents = nullptr; self->m_queueMenu = nullptr;
-                self->m_queueSlots.clear(); self->m_queuePlayers = self->m_queueWait = self->m_queueMinimum = self->m_queueHint = self->m_queueHeading = nullptr;
-                self->m_queueLeave = self->m_queueFill = nullptr;
-                // beta.152 crash: the rings died with the contents but their
-                // pointers survived into the next open's syncQueueRings().
-                self->m_queueRingCyan = self->m_queueRingGold = self->m_queueSweep = self->m_queueOpponentBox = nullptr;
-                self->m_queueCenter = self->m_queueOpponentMark = self->m_queueOpponentLabel = nullptr;
-                self->m_queueRadar = nullptr; self->m_queueRangeLabel = nullptr; self->m_queueFillBar = nullptr;
+                self->m_queueContents->removeFromParentAndCleanup(true);
+                self->forgetQueueContents();
             }
             self->syncLobbyInput(); self->placeLobbyFooter(); self->refreshLobbyHover();
         };
