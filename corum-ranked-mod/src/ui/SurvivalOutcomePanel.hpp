@@ -123,7 +123,9 @@ class SurvivalOutcomePanel final:public cocos2d::CCLayerColor {
     std::function<void(int)> m_action;CCMenu* m_menu=nullptr;CCMenuItemSpriteExtra* m_watch=nullptr;CCMenuItemSpriteExtra* m_freeChoice=nullptr;CCMenuItemSpriteExtra* m_resultChoice=nullptr;CCMenuItemSpriteExtra* m_close=nullptr;
     std::string m_key,m_identity;std::vector<SurvivalStanding> m_profiles;
     struct Podium {CCNode* pedestal;CCMenuItemSpriteExtra* avatar;CCNode* stamp;CCNode* place;CCNode* glow;float x,base,height;int rank;};
-    // Pedestals lean 8° (SkewX): a point at height y sits y·tan 8° to the right.
+    // Pedestals lean 8° (SkewX). A CCLayerColor skews about its centre, so a
+    // point at height y sits (y - h/2)·tan 8° right of the upright position:
+    // the top edge h/2·tan 8° right, the base as far left.
     static constexpr float kPodiumLean=0.14054083f;
     std::vector<CCNode*> m_badges;
     std::string m_badgeMatch;std::size_t m_badgePage=0,m_badgeCount=0;
@@ -220,11 +222,11 @@ public:
                     // .sk pedestal: a leaning fill with a 4 px top rule in the medal colour.
                     auto* pedestal=CCNode::create();pedestal->setContentSize({width,h});pedestal->setAnchorPoint({.5f,0});pedestal->setPosition({x,base});addChild(pedestal,5);
                     auto* fill=CCLayerColor::create({ground.r,ground.g,ground.b,255},width,h);fill->setSkewX(8);pedestal->addChild(fill,0);
-                    // SkewX shifts a point right by y·tan 8°, so the fill's top edge sits
-                    // (h-2)·tan 8° to the right of its base. The rule (only 2 pt tall) and
-                    // everything stacked on the pedestal follow that lean.
+                    // The fill skews about its centre: its top edge sits (h/2)·tan 8° right
+                    // of upright. The 2 pt rule (skewed about its own centre) moves by
+                    // (h/2 - 1)·tan 8° to meet it; labels and names follow the same lean.
                     constexpr float lean=kPodiumLean;
-                    auto* top=CCLayerColor::create({tint.r,tint.g,tint.b,255},width,2);top->setPosition({(h-2)*lean,h-2});top->setSkewX(8);pedestal->addChild(top,1);
+                    auto* top=CCLayerColor::create({tint.r,tint.g,tint.b,255},width,2);top->setPosition({(h/2-1)*lean,h-2});top->setSkewX(8);pedestal->addChild(top,1);
                     // A plain node has no fill and respects its anchor. A transparent CCLayerColor
                     // ignores that anchor by default; fading its own opacity also paints a black slab.
                     auto* stamp=CCNode::create();stamp->setContentSize({width,h});stamp->setAnchorPoint({.5f,.5f});stamp->setPosition({x,base+h/2});addChild(stamp,8);
@@ -248,8 +250,8 @@ public:
                     if(rank==1){auto* winnerText=menuLabel(i18n::text("survival-winner","WINNER"),css(15),{0,0},AccentInk,FontWeight::Black);auto const chipW=winnerText->getScaledContentSize().width+12;
                         auto* winner=CCLayerColor::create({Gold.r,Gold.g,Gold.b,255},chipW,12);winner->setPosition({width/2-chipW/2,76});winner->setSkewX(8);face->addChild(winner,5);
                         winnerText->setPosition({width/2,82});face->addChild(winnerText,6);}
-                    auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(SurvivalOutcomePanel::onAction));item->setTag(100+static_cast<int>(it-m_profiles.begin()));item->setPosition({x+h*lean,base+h+36});m_menu->addChild(item);
-                    auto* place=menuLabel(std::to_string(rank),rank==1?css(68):css(56),{x+3+placeY*lean,base+placeY},tint,FontWeight::Black);addChild(place,9);
+                    auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(SurvivalOutcomePanel::onAction));item->setTag(100+static_cast<int>(it-m_profiles.begin()));item->setPosition({x+h/2*lean,base+h+36});m_menu->addChild(item);
+                    auto* place=menuLabel(std::to_string(rank),rank==1?css(68):css(56),{x+3+(placeY-h/2)*lean,base+placeY},tint,FontWeight::Black);addChild(place,9);
                     // S5: the own pedestal also names the promotion state the server sent for us.
                     if(isOwn){auto const& r=view.result;std::string state;ccColor3B tone=Text;
                         if(r["promotionSucceeded"].asBool().unwrapOr(false)||r["promoted"].asBool().unwrapOr(false)){state=i18n::text("promoted","PROMOTED");tone=Green;}
@@ -259,9 +261,9 @@ public:
                         if(!state.empty()){auto* chip=menuLabel(state,css(13),{width/2,placeY-(rank==1?17.f:14.f)-8-extent-32},tone,FontWeight::Black);fitFullMenuLabel(chip,width-8,9,css(13));chip->setID("survival-podium-own-state"_spr);stamp->addChild(chip,5);}
                     }
                     // Text inside the pedestal is centred on its leaning middle at each height.
-                    for(auto* child:CCArrayExt<CCNode*>(stamp->getChildren()))child->setPositionX(child->getPositionX()+child->getPositionY()*lean);
+                    for(auto* child:CCArrayExt<CCNode*>(stamp->getChildren()))child->setPositionX(child->getPositionX()+(child->getPositionY()-h/2)*lean);
                     CCNode* glow=nullptr;
-                    if(rank==1){glow=createRankAmbientFx("GOLD",{68,68},RankBadgeDisplay::Matched);glow->setPosition({x+h*lean,base+h+46});glow->setID("survival-podium-gold-ambient"_spr);addChild(glow,4);m_halo=glow;}
+                    if(rank==1){glow=createRankAmbientFx("GOLD",{68,68},RankBadgeDisplay::Matched);glow->setPosition({x+h/2*lean,base+h+46});glow->setID("survival-podium-gold-ambient"_spr);addChild(glow,4);m_halo=glow;}
                     m_stages.push_back({pedestal,item,stamp,place,glow,x,base,h,rank});
                 }
             }else if(stage==SurvivalFlowStage::ScoreAnimation){
@@ -402,7 +404,7 @@ public:
         for(auto const& p:m_stages){auto const frame=survivalPodiumFrame(p.rank,m_elapsed);
             p.pedestal->setVisible(frame.rise>0);p.pedestal->setScaleY(static_cast<float>(frame.rise));
             p.avatar->setVisible(frame.avatar);p.avatar->setEnabled(frame.interactive);
-            p.avatar->setPosition({p.x+p.height*kPodiumLean,p.base+p.height+36+static_cast<float>(frame.drop*58)});
+            p.avatar->setPosition({p.x+p.height/2*kPodiumLean,p.base+p.height+36+static_cast<float>(frame.drop*58)});
             p.stamp->setVisible(frame.stamp>0);p.stamp->setScale(static_cast<float>(frame.stampScale));propagateModeOpacity(p.stamp,static_cast<GLubyte>(frame.stampOpacity*255));
             p.place->setVisible(frame.stamp>0);
             if(p.glow){p.glow->setVisible(frame.glowOpacity>0);

@@ -27,6 +27,8 @@
 #include "../SurvivalOptionsPreferences.hpp"
 #include "SurvivalMapSelectionLayer.hpp"
 #include "SurvivalDifficultyVote.hpp"
+#include <unordered_set>
+#include <algorithm>
 #include <array>
 #include "../RankedMapDetails.hpp"
 #include <Geode/binding/PlayLayer.hpp>
@@ -42,7 +44,7 @@ namespace {
 // Tag of the per-reveal red fade layer on a result card.
 constexpr int SurvivalEliminationWrapTag=7466;
 class SurvivalGameLayer final : public CCLayerColor {
-    struct Tile {CCNode* root=nullptr;CCLabelBMFont* name=nullptr;CCLabelBMFont* record=nullptr;CCPoint destination;CCNode* icon=nullptr;CCNode* tierBadge=nullptr;std::string tier="";CCNode* eliminatedBackground=nullptr;std::string titleText,recordText;std::array<CCNode*,3> medals{};int infoTag=0;SurvivalProgressTween progress{};SurvivalHudColor accent{};bool hasAccent=false;bool eliminationShown=false;CCNode* face=nullptr;CCNode* goldBackground=nullptr;};
+    struct Tile {CCNode* root=nullptr;CCLabelBMFont* name=nullptr;CCLabelBMFont* record=nullptr;CCPoint destination;CCNode* icon=nullptr;CCNode* tierBadge=nullptr;std::string tier="";std::unordered_map<std::string,CCNode*> tierBadges{};CCNode* eliminatedBackground=nullptr;std::string titleText,recordText;std::array<CCNode*,3> medals{};int infoTag=0;SurvivalProgressTween progress{};SurvivalHudColor accent{};bool hasAccent=false;bool eliminationShown=false;CCNode* face=nullptr;CCNode* goldBackground=nullptr;};
     std::unordered_map<std::string,Tile> m_tiles;
     std::unordered_map<int,SurvivalStanding> m_infoByTag;
     int m_nextInfoTag=1000;
@@ -91,6 +93,8 @@ class SurvivalGameLayer final : public CCLayerColor {
     std::chrono::steady_clock::time_point m_nextMapAt{},m_introUntil{},m_returnAt{};
     std::optional<RankedAudioMode> m_audioMode;
     bool m_closed=false,m_motion=false;float m_frameDelta=0;
+    std::string m_popupMoment;
+    std::string m_duplicateRowsLogged;
     SurvivalFlowStage m_loggedStage=SurvivalFlowStage::Lobby;
     static std::string text(char const* key,char const* fallback) {return i18n::text(key,fallback);}
     CCMenuItemSpriteExtra* button(CCMenu* menu,std::string const& caption,CCPoint position,float width,int tag,ccColor3B color=ui::Steel,CCLabelBMFont** saved=nullptr) {
@@ -215,6 +219,17 @@ class SurvivalGameLayer final : public CCLayerColor {
             }
         }
     }
+    // Round start, elimination and result presentations take over the board:
+    // info popups opened over it (player info, standings, map info, ...) close
+    // by themselves instead of covering the motion.
+    void dismissInfoPopups() {
+        auto* scene=CCDirector::sharedDirector()->getRunningScene();if(!scene)return;
+        std::vector<Ref<FLAlertLayer>> open;
+        for(auto* child:CCArrayExt<CCNode*>(scene->getChildren()))
+            if(auto* popup=typeinfo_cast<geode::Popup*>(child);popup && popup->getParent())open.emplace_back(popup);
+        for(auto& popup:open)if(popup->getParent())popup->keyBackClicked();
+        if(m_jukebox){m_jukebox.reset();}
+    }
     void closePlayerInfo() {
         auto* scene=CCDirector::sharedDirector()->getRunningScene();
         if(auto* popup=scene?typeinfo_cast<ui::SurvivalPlayerInfoPopup*>(scene->getChildByIDRecursive("survival-player-info-popup"_spr)):nullptr)popup->dismiss();
@@ -249,6 +264,14 @@ class SurvivalGameLayer final : public CCLayerColor {
         std::vector<SurvivalStanding> players=view.roundPlayers.empty()?view.standings:view.roundPlayers;
         if(result){players.clear();for(auto const& p:view.result["standings"].asArray().unwrapOr(std::vector<matjson::Value>{}))
             players.push_back({p["participantId"].asString().unwrapOr(""),p["name"].asString().unwrapOr(""),static_cast<int>(p["rank"].asInt().unwrapOr(0)),0,0,0,true,p["kind"].asString().unwrapOr("")=="BOT",false,p["displayedTier"].asString().unwrapOr("UNRANKED"),numFromString<int>(p["gdAccountId"].asString().unwrapOr("0")).unwrapOr(0)});}
+        {   // One card per participant. A repeated id made one card swap its tier
+            // badge every frame (a death match froze ~0.4 s per frame and iOS
+            // killed the app); keep the first row of each id.
+            std::unordered_set<std::string> seen;auto const before=players.size();
+            players.erase(std::remove_if(players.begin(),players.end(),[&](auto const& p){return !seen.insert(p.id).second;}),players.end());
+            if(players.size()!=before && m_duplicateRowsLogged!=view.id+":"+view.roundKey){m_duplicateRowsLogged=view.id+":"+view.roundKey;
+                log::warn("[SurvivalBoard] dropped {} duplicate participant rows match={} round={}",before-players.size(),view.id,view.roundKey);}
+        }
         auto const completed=view.roundKey.ends_with(":elimination");
         auto const survivors=result?1:std::count_if(players.begin(),players.end(),[completed](auto const& p){return completed?p.passing:!p.eliminated;});
         auto const size=getContentSize();auto const grid=survivalGridLayout(size.width,size.height,players.size(),static_cast<int>(survivors),view.phase,view.matchPlayerCount);
@@ -294,11 +317,17 @@ class SurvivalGameLayer final : public CCLayerColor {
             auto& tile=found->second;tile.root->setVisible(true);m_infoByTag[tile.infoTag]=value;
             if(!compact){tile.progress.observe(view.revision,value.attemptId,value.attemptActive,value.bestProgress,value.currentProgress);tile.progress.advance(m_frameDelta);}
             if(view.roundKey.ends_with(":elimination"))tile.progress.best.displayed=tile.progress.best.target;
-            if(!compact && !reduced && tile.tier!=value.tier){
-                tile.tier=value.tier;if(tile.tierBadge)tile.tierBadge->removeFromParentAndCleanup(true);
-                auto const badgeSize=std::min(20.0f,card.avatarSize);
-                tile.tierBadge=ui::createAnimatedRankBadge(value.tier,{badgeSize,badgeSize},ui::RankBadgeDisplay::Leaderboard);
-                tile.tierBadge->setPosition({12,0});tile.icon->addChild(tile.tierBadge,5);
+            if(!compact && !reduced && tile.tier!=value.tier && tile.icon){
+                // Badges are kept per tier and only shown/hidden: a tier that
+                // changes back never rebuilds (and re-decodes) its textures.
+                tile.tier=value.tier;if(tile.tierBadge)tile.tierBadge->setVisible(false);
+                auto& badge=tile.tierBadges[value.tier];
+                if(!badge){
+                    auto const badgeSize=std::min(20.0f,card.avatarSize);
+                    badge=ui::createAnimatedRankBadge(value.tier,{badgeSize,badgeSize},ui::RankBadgeDisplay::Leaderboard);
+                    if(badge){badge->setPosition({12,0});tile.icon->addChild(badge,5);}
+                }
+                tile.tierBadge=badge;if(badge)badge->setVisible(true);
             }
             if(tile.destination!=destination){tile.destination=destination;tile.root->stopActionByTag(7465);auto* move=CCEaseSineOut::create(CCMoveTo::create(.25f,destination));move->setTag(7465);tile.root->runAction(move);}
             auto rank=value.rank>0?(i18n::isKorean()?fmt::format(fmt::runtime(i18n::text("player-rank","{}")),value.rank):survivalOrdinal(value.rank)):std::string("-");
@@ -611,6 +640,10 @@ public:
         auto const stage=runtime.flowStage();
         if(stage!=m_loggedStage){log::info("[SurvivalFlow] stage {} -> {} match={} state={} eliminated={} motion={}",static_cast<int>(m_loggedStage),static_cast<int>(stage),view.id,view.state,view.ownEliminated,m_motion);m_loggedStage=stage;}
         auto const outcome=stage==SurvivalFlowStage::EliminatedChoice || stage==SurvivalFlowStage::PersonalResult || stage==SurvivalFlowStage::Ceremony || stage==SurvivalFlowStage::ScoreAnimation;
+        {   // Each new round state, map, elimination or outcome is a presentation moment.
+            auto const moment=view.id+":"+view.roundKey+":"+std::to_string(view.mapGeneration)+":"+view.state+(outcome?":outcome"+std::to_string(static_cast<int>(stage)):std::string{});
+            if(moment!=m_popupMoment){auto const first=m_popupMoment.empty();m_popupMoment=moment;if(!first)dismissInfoPopups();}
+        }
         if(outcome){
             if((stage==SurvivalFlowStage::Ceremony||stage==SurvivalFlowStage::ScoreAnimation) && runtime.promotionMotionPending())beginPromotionMotion();
             else if(stage==SurvivalFlowStage::ScoreAnimation)beginResultMotion();

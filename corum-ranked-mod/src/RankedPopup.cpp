@@ -2552,11 +2552,11 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     // A chip (.chip / .chip.sm): a skewed fill with dark or muted text.
-    void addChip(CCNode* parent, std::string const& text, CCPoint leftCenter, ccColor3B fill, ccColor3B ink, float cssPx = 13.0f) {
+    void addChip(CCNode* parent, std::string const& text, CCPoint leftCenter, ccColor3B fill, ccColor3B ink, float cssPx = 13.0f, bool lean = true) {
         auto* label = makeLabel(text, fontScale(cssPx), {0, 0}, ink, "black");
         auto const width = label->getScaledContentSize().width + px(20.0f), height = px(cssPx * 1.6f);
         auto* face = CCLayerColor::create({fill.r, fill.g, fill.b, 255}, width, height);
-        face->setPosition({leftCenter.x, leftCenter.y - height / 2.0f}); face->setSkewX(8.0f); parent->addChild(face, 6);
+        face->setPosition({leftCenter.x, leftCenter.y - height / 2.0f}); if (lean) face->setSkewX(8.0f); parent->addChild(face, 6);
         label->setPosition({leftCenter.x + width / 2.0f, leftCenter.y}); parent->addChild(label, 7);
     }
 
@@ -6507,8 +6507,9 @@ class CorumRankedLayer final : public CCLayerColor {
                 : card.unlocked ? upper(card.rarity) : tr("achievement-not-yet", "NOT YET");
             auto* chipProbe = makeLabel(chipText, fontScale(12.0f), {}, corum::ranked::ui::Text, "black");
             auto const chipWidth = chipProbe->getScaledContentSize().width + px(16.0f);
+            // The grade / stage chip stays upright (no lean).
             addChip(m_root, chipText, {right - 7.0f - chipWidth, top - 11.0f}, card.maxed ? kGold : ccc3(32, 35, 46),
-                card.maxed ? corum::ranked::ui::AccentInk : corum::ranked::ui::TextMuted, 12.0f);
+                card.maxed ? corum::ranked::ui::AccentInk : corum::ranked::ui::TextMuted, 12.0f, false);
             auto const baseName = corum::ranked::achievementCardName(card,corum::ranked::i18n::isKorean());
             auto const title = card.type == "PROGRESSIVE" && card.currentLevel > 0
                 ? fmt::format("{} - {}", baseName, card.displayLabel)

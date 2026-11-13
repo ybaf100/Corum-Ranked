@@ -148,6 +148,7 @@ test('live cards retain identity, retarget from the current position and recolor
 #include <cmath>
 #include <array>
 #include <unordered_map>
+#include <unordered_set>
 #include "domain/SurvivalBoardPresentation.hpp"
 #include "domain/SurvivalHudPresentation.hpp"
 #include "domain/ScoreDisplay.hpp"
@@ -178,7 +179,8 @@ constexpr int SurvivalEliminationWrapTag=7466;
 struct SurvivalMatchView{std::uint64_t revision=1;std::string id="m",roundKey="r1",ownId="a",phase="ROUND_1";std::string state="PLAYING";int mapGeneration=1,matchPlayerCount=16;std::vector<SurvivalStanding>standings,roundPlayers;matjson::Value result;};
 struct Coordinator:CCNode{
  CCLabelBMFont*m_status=new CCLabelBMFont;
- struct Tile{CCNode* root=nullptr;CCLabelBMFont* name=nullptr;CCLabelBMFont* record=nullptr;CCPoint destination;CCNode* icon=nullptr;CCNode* tierBadge=nullptr;std::string tier="";CCNode* eliminatedBackground=nullptr;std::string titleText={},recordText={};std::array<CCNode*,3>medals{};int infoTag=0;SurvivalProgressTween progress{};SurvivalHudColor accent{};bool hasAccent=false;bool eliminationShown=false;CCNode* face=nullptr;CCNode* goldBackground=nullptr;};
+ std::string m_duplicateRowsLogged;struct log{template<class...T>static void warn(T const&...){}};
+ struct Tile{CCNode* root=nullptr;CCLabelBMFont* name=nullptr;CCLabelBMFont* record=nullptr;CCPoint destination;CCNode* icon=nullptr;CCNode* tierBadge=nullptr;std::string tier="";std::unordered_map<std::string,CCNode*> tierBadges{};CCNode* eliminatedBackground=nullptr;std::string titleText={},recordText={};std::array<CCNode*,3>medals{};int infoTag=0;SurvivalProgressTween progress{};SurvivalHudColor accent{};bool hasAccent=false;bool eliminationShown=false;CCNode* face=nullptr;CCNode* goldBackground=nullptr;};
  std::set<std::string> m_eliminationRevealed;
  double m_frameDelta=1./60.;std::string m_gridContext;CCNode grid;CCNode* m_grid=&grid;CCNode pager;CCNode* m_pager=&pager;CCLabelBMFont pageLabel;CCLabelBMFont* m_pageLabel=&pageLabel;std::size_t m_cardPage=0,m_cardPages=1;std::unordered_map<std::string,Tile>m_tiles;std::unordered_map<int,SurvivalStanding>m_infoByTag;int m_nextInfoTag=1000;void onPlayerInfo(CCObject*){}CCSize getContentSize()const{return {568,320};}
  ${method(source,'void showParticipants(')}
@@ -258,4 +260,12 @@ int main(){using namespace corum::ranked;SurvivalRuntime r;GJGameLevel level;CCS
 `);
  const native=read('src/PlayLayer.cpp');const quit=method(native,'    void onQuit()');
  assert(quit.indexOf('requestDirectFreePlayReturn(this)')<quit.indexOf('freePlayReturnPending()'));
+});
+
+test('board keeps one card per participant and never rebuilds a tier badge it already made',()=>{
+ const source=read('src/ui/SurvivalGameLayer.cpp');
+ // A repeated participant row swapped one card's tier badge every frame and froze a death match.
+ assert.match(source,/players\.erase\(std::remove_if\(players\.begin\(\),players\.end\(\),\[&\]\(auto const& p\)\{return !seen\.insert\(p\.id\)\.second;\}\),players\.end\(\)\);/);
+ assert.match(source,/auto& badge=tile\.tierBadges\[value\.tier\];\s*if\(!badge\)\{/);
+ assert.doesNotMatch(source,/tile\.tierBadge->removeFromParentAndCleanup/);
 });
