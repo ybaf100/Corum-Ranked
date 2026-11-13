@@ -125,6 +125,8 @@ test('L1 <-> L2/L3 are separate pages: fade out, rebuild for the selection, fade
  assert.match(method(popup,'    bool prepareUiTransition('),/if \(m_modeTransition.moving\(\) \|\| \(!matched && m_queueAnimating\)\).*return false/);
  assert.match(method(popup,'    void render()'),/m_modeTransition.moving\(\)/);
  assert.match(method(popup,'    void onCloseLayer('),/m_modeTransition.back\(\).*animateModeLobby\(mode,false\)/);
+ const close=method(popup,'    void onCloseLayer(');assert(close.indexOf('if (m_page != Page::Live) { stepBack(); return; }')>0&&close.indexOf('stepBack()')<close.indexOf('leaveRanked()'),'sub-screens step back instead of leaving Ranked');
+ assert.match(popup,/hitTop = y1 - kModeCardHitTopInset/);assert.match(popup,/kModeCardHitTopInset = 1[0-9]\.0f/);
  const card=method(popup,'    void renderModeCard(');
  // L1 halves: whole-half hit areas; no hit area on the L2/L3 left section.
  assert.match(card,/select->setEnabled\(source.stage == RuntimeStage::Ready && !selected\)/);

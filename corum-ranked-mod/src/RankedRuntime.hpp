@@ -504,6 +504,8 @@ struct RuntimeView {
 class RankedRuntime final {
 public:
     static RankedRuntime& get();
+    /** Called from the GD title screen: wakes the server's database before Ranked is opened. */
+    void warmUp();
 
     void begin();
     void finishAdmission();
@@ -793,6 +795,8 @@ private:
     bool m_songBypassAllowed = false;
     bool m_placementResultAcknowledged = false;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_controlRequest;
+    geode::async::TaskHolder<geode::utils::web::WebResponse> m_warmRequest;
+    std::chrono::steady_clock::time_point m_warmedAt{};
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_historyRequest;
     std::uint64_t m_historyGeneration = 0;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_historyDetailRequest;

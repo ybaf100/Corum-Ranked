@@ -728,10 +728,27 @@ void RankedRuntime::observeSeasons(matjson::Value const& seasons) {
     m_view.survivalSeason = read("SURVIVAL");
 }
 
+void RankedRuntime::warmUp() {
+    // Neon suspends the server's database after five idle minutes and the next
+    // query waits for it to start. A config read from the title screen starts
+    // it (the server refreshes its cached reads in the background) before the
+    // player reaches the Ranked lobby. At most once every four minutes.
+    auto const now = std::chrono::steady_clock::now();
+    if (m_rankedOpen || (m_warmedAt != std::chrono::steady_clock::time_point{} && now - m_warmedAt < std::chrono::minutes(4))) return;
+    m_warmedAt = now;
+    auto request = baseRequest({});
+    request.timeout(std::chrono::seconds(15));
+    m_warmRequest.spawn(request.get(endpoint("/api/ranked/config")), [](web::WebResponse) {});
+}
+
 void RankedRuntime::fetchConfig() {
     if (m_controlBusy) return;
     m_controlBusy = true;
+    m_warmedAt = std::chrono::steady_clock::now();
     setStage(RuntimeStage::Loading, "Loading authoritative Ranked configuration...");
+    // Verify the GD account while the config is in flight; createSession then
+    // joins this request or reuses Argon's stored token instead of waiting.
+    RankedArgon::get().request([](ArgonOutcome const&) {});
     auto request = baseRequest({});
     auto const sessionGeneration = m_sessionGeneration;
     m_controlRequest.spawn(

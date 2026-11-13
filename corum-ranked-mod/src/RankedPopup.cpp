@@ -2448,6 +2448,8 @@ class CorumRankedLayer final : public CCLayerColor {
     // font size of N px is label scale N / 64. Lobby groups sit at the origin
     // at scale 1 and draw in screen points.
     static constexpr float kLobbyHeader = 36.0f, kLobbyFooter = 38.0f;
+    /** Gap between the header and a mode card's tap area, so header buttons never share a touch with it. */
+    static constexpr float kModeCardHitTopInset = 14.0f;
     // Floating SETTINGS button outside the page tree: 92 x 26 centred at
     // (width - inset - 46, 27); 41 keeps a point above its top edge (40).
     static constexpr float kSettingsButtonWidth = 92.0f, kSettingsButtonInset = 20.0f, kSettingsButtonTop = 41.0f;
@@ -2658,7 +2660,11 @@ class CorumRankedLayer final : public CCLayerColor {
                 timer->setPosition({cx + 50.0f, y1 - 12.0f}); m_root->addChild(timer, 8);
                 if (survival) m_seasonSurvival = timer; else m_seasonSolo = timer;
             }
-            hitCenter = CCPoint{(x0 + x1) / 2.0f, (y0 + y1) / 2.0f}; hitSize = CCSize{x1 - x0 - px(32.0f), y1 - y0};
+            // Stop the whole-half hit area well below the header: the top-left
+            // back button (28 pt, centred 24 pt from the top) reaches 2 pt into
+            // the card, and a fingertip on its lower edge opened Survival.
+            auto const hitTop = y1 - kModeCardHitTopInset;
+            hitCenter = CCPoint{(x0 + x1) / 2.0f, (y0 + hitTop) / 2.0f}; hitSize = CCSize{x1 - x0 - px(32.0f), hitTop - y0};
         } else {
             // L2 / L3 left section: trophy, season rank, tier name, division
             // ladder, LP, streak chip and record, from the bottom up.
@@ -7657,6 +7663,11 @@ class CorumRankedLayer final : public CCLayerColor {
     void onHistoryRoundPage(CCObject* sender){if(sender)m_historyTabPage+=sender->getTag();}
     void onHistoryLevel(CCObject* sender){if(sender)corum::ranked::showHistoryLevel(sender->getTag());}
 
+    void stepBack() {
+        if (m_page == Page::PlacementPoolSelection && m_placementPoolStep) { onPlacementStepBack(nullptr); return; }
+        onHistoryBack(nullptr);
+    }
+
     void onHistoryBack(CCObject*) {
         closeHistoryFilter();
         RankedRuntime::get().cancelHistoryReads();
@@ -7782,6 +7793,9 @@ class CorumRankedLayer final : public CCLayerColor {
     void onCloseLayer(CCObject*) {
         if (m_modeNoticeOpen) { closeModeNotice(); syncLobbyInput(); return; }
         if (m_modeTransition.moving() || m_uiFadingOut) return;
+        // Sub-screens (placement setup, records, achievements, map pool) step
+        // back one level; only the Ranked home screen leaves to Geometry Dash.
+        if (m_page != Page::Live) { stepBack(); return; }
         auto& runtime = RankedRuntime::get();
         if (m_page == Page::Live && m_modeTransition.selected() && m_lobbyPanel && runtime.view().stage != RuntimeStage::Matched) {
             if (m_queueAnimating) return;
@@ -7844,7 +7858,7 @@ class CorumRankedLayer final : public CCLayerColor {
         if (m_modeTransition.moving()) return;
         if (m_rankTransitionLayer || m_resultScoreLayer || m_resultScorePending) return;
         if (m_page != Page::Live) {
-            onHistoryBack(nullptr);
+            stepBack();
             return;
         }
         auto const& view = RankedRuntime::get().view();

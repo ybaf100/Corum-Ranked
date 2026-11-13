@@ -4,6 +4,7 @@ import { RankedConfigService } from "./ranked-config.service.js";
 import { DATABASE, type SqlExecutor } from "../database/database.port.js";
 import { readRankedAudioVolumes, withRankedAudioVolumes } from "./ranked-audio-volume.js";
 import { readRankedSeasons } from "./ranked-seasons.js";
+import { RankedConfigReadsService } from "./ranked-config-reads.service.js";
 import { SERVER_ENVIRONMENT, type ServerEnvironment } from "./server-environment.js";
 import { RankedModUpdateService } from "./ranked-mod-update.service.js";
 import { SurvivalConfigService } from "./survival-config.service.js";
@@ -14,7 +15,8 @@ export class RankedConfigController {
     @Optional() @Inject(DATABASE) private readonly database?: SqlExecutor,
     @Optional() @Inject(SERVER_ENVIRONMENT) private readonly environment?: ServerEnvironment,
     @Optional() @Inject(RankedModUpdateService) private readonly modUpdates?: RankedModUpdateService,
-    @Optional() @Inject(SurvivalConfigService) private readonly survival?: SurvivalConfigService) {}
+    @Optional() @Inject(SurvivalConfigService) private readonly survival?: SurvivalConfigService,
+    @Optional() @Inject(RankedConfigReadsService) private readonly reads?: RankedConfigReadsService) {}
 
   @Get("maps")
   @Header("Cache-Control", "public, max-age=60, stale-while-revalidate=120")
@@ -39,10 +41,11 @@ export class RankedConfigController {
   @Header("Cache-Control", "no-store")
   public async getClientConfig(): Promise<object> {
     const snapshot = this.rankedConfig.getSnapshot();
-    const [volumes, modUpdates, seasons] = await Promise.all([
-      readRankedAudioVolumes(snapshot.client, this.database),
+    const [{ volumes, seasons }, modUpdates] = await Promise.all([
+      this.reads?.read(snapshot.client) ??
+        Promise.all([readRankedAudioVolumes(snapshot.client, this.database), readRankedSeasons(this.database)])
+          .then(([volumes, seasons]) => ({ volumes, seasons })),
       this.modUpdates?.getPublishedClientUpdates() ?? this.environment?.rankedModUpdates ?? {},
-      readRankedSeasons(this.database),
     ]);
     return {
       serverNow: new Date().toISOString(),

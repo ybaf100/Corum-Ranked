@@ -13,13 +13,15 @@ import { sessionAliveSince } from "../session/session-presence.policy.js";
 import { signalAfterCommit } from "../database/database-work.js";
 import { readRankedAudioVolumes } from "../config/ranked-audio-volume.js";
 import { readRankedSeasons } from "../config/ranked-seasons.js";
+import { RankedConfigReadsService } from "../config/ranked-config-reads.service.js";
 
 @Injectable()
 export class AdminService {
   public constructor(@Inject(DATABASE) private readonly db: DatabasePort,
     @Inject(SERVER_ENVIRONMENT) private readonly env: ServerEnvironment, @Inject(RankedConfigService) private readonly config: RankedConfigService,
     @Inject(SERVER_CLOCK) private readonly clock: ServerClock,
-    @Optional() private readonly survivalConfig?:SurvivalConfigService) {}
+    @Optional() private readonly survivalConfig?:SurvivalConfigService,
+    @Optional() @Inject(RankedConfigReadsService) private readonly configReads?: RankedConfigReadsService) {}
 
   public async execute(session: RankedSessionContext, body: AdminActionDto) {
     // The standard SessionGuard supplies this DB-backed identity. Client button
@@ -183,6 +185,10 @@ export class AdminService {
       return {ok:true,own:player.id===session.playerId,profile:row ? {displayedTier:row.displayed_tier,
         visibleRankedScore:row.visible_ranked_score,placementGames:row.placement_games} : null,message:`Updated ${player.gd_username}.`};
     });
+    if(body.action==="SET_SEASON" || body.action==="SET_AUDIO_VOLUME" || body.action==="RESET_DB"){
+      // GET /config serves cached seasons and volumes; drop them once the write commits.
+      try { return await operation(); } finally { this.configReads?.invalidate(); }
+    }
     if(!modeAction)return operation();
     return this.survivalConfig!.withAdmission(async()=>{
       try{

@@ -112,6 +112,7 @@ void placeSurvivalMenuClock(CCNode* menu,CCNode* root,CCSize const& size){
 class $modify(CorumRankedMenuLayer, MenuLayer) {
     bool init() {
         if (!MenuLayer::init()) return false;
+        corum::ranked::RankedRuntime::get().warmUp();
 
         auto const size = CCDirector::sharedDirector()->getWinSize();
         auto* visual = CCNode::create();

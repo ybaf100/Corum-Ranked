@@ -334,11 +334,12 @@ struct RankedRuntime {RuntimeView state;int dismissals=0,fetches=0;bool acknowle
 #include "${root}/src/domain/RankedMode.hpp"
 struct Layer {
  corum::ranked::ModeLobbyTransition m_modeTransition;
- enum class Page {Live,History};Page m_page=Page::Live;
+ enum class Page {Live,History,PlacementPoolSelection};Page m_page=Page::Live;bool m_placementPoolStep=false;int stepBacks=0;void onPlacementStepBack(CCObject*){++stepBacks;m_placementPoolStep=false;}
  bool m_rankTransitionLayer=false,m_resultScoreLayer=false,m_resultScorePending=false,m_modeNoticeOpen=false;std::string m_localMessage;
  int noticeCloses=0,inputSyncs=0;void closeModeNotice(){m_modeNoticeOpen=false;++noticeCloses;}void syncLobbyInput(){++inputSyncs;}
  int exits=0,historyBacks=0;void onCloseLayer(CCObject*){++exits;}void onHistoryBack(CCObject*){++historyBacks;m_page=Page::Live;}
 ${method(source, '    void onResultClose(')}
+${method(source, '    void stepBack()')}
 ${method(source, '    void keyBackClicked()').replace(' override', '')}
 };
 int main(){auto& runtime=RankedRuntime::get();
@@ -350,6 +351,8 @@ int main(){auto& runtime=RankedRuntime::get();
  {Layer layer;runtime.state.stage=RuntimeStage::Ready;layer.keyBackClicked();assert(layer.exits==1);}
  {Layer layer;layer.m_modeNoticeOpen=true;layer.keyBackClicked();assert(layer.exits==0&&layer.noticeCloses==1&&layer.inputSyncs==1);}
  {Layer layer;layer.m_page=Layer::Page::History;layer.keyBackClicked();assert(layer.historyBacks==1&&layer.exits==0);}
+ {Layer layer;layer.m_page=Layer::Page::PlacementPoolSelection;layer.m_placementPoolStep=true;layer.keyBackClicked();assert(layer.stepBacks==1&&layer.historyBacks==0&&layer.exits==0&&layer.m_page==Layer::Page::PlacementPoolSelection);
+  layer.keyBackClicked();assert(layer.historyBacks==1&&layer.exits==0&&layer.m_page==Layer::Page::Live);}
  {Layer layer;layer.m_rankTransitionLayer=true;layer.keyBackClicked();assert(layer.exits==0);}
  {Layer layer;layer.m_resultScoreLayer=true;layer.keyBackClicked();assert(layer.exits==0);}
  {Layer layer;layer.m_resultScorePending=true;layer.keyBackClicked();assert(layer.exits==0);}
