@@ -10,6 +10,7 @@
 | `GET` | `/ready` | 공개 DB API와 실제 Ranked 매치 readiness |
 | `GET` | `/api/ranked/config` | client용 rules, CBF, allowlist, queue 상태 |
 | `GET` | `/api/ranked/leaderboard` | 서버 열림 상태, 공개 티어/LP, 배치·승급 상태, 승/패 순위 |
+| `GET` | `/api/ranked/live` | 웹사이트 LIVE 보드: 진행 중 Solo/Survival 경기 요약과 대기열 인원 |
 
 `leaderboard`는 브라우저에서 인증 없이 읽는 공개 전용 응답입니다. 플레이어 이름,
 visible Ranked Score, 표시 tier, placement/promotion 상태, 강등 경고와 승/패 전적만
@@ -21,6 +22,13 @@ visible Ranked Score, 표시 tier, placement/promotion 상태, 강등 경고와 
 반환하며 `serverOpen=false`로 표시합니다. 이때 placement 필요 판수처럼 config에서만
 알 수 있는 값은 `null`입니다. `/ready`의 `ready`와 `publicDataReady`는 공개 DB API
 readiness, `rankedReady`는 DB + 유효 config + `enabled=true`인 매치 readiness입니다.
+
+`live`도 인증 없는 공개 읽기 전용 응답입니다(5초 캐시). Solo는 최근 3시간 안에 만들어지고
+2분 안에 heartbeat가 있는 진행 중 매치만, Survival은 15분 안에 갱신된 진행 중 경기만 최대 20개씩
+반환합니다. 두 플레이어가 화면에서 이미 보는 정보(이름, 표시 티어, 매치 형식, 라운드, 맵,
+라운드 승수, 현재 라운드의 서버 판정 점수·Clear)와 Survival의 라운드·통과 목표·생존 인원·
+생존 중인 사람 이름만 포함합니다. 매치 ID, 세션, Hidden MMR, 진행 중 경기의 순위·진행률·미확정 LP는
+포함하지 않습니다. 대기열 인원은 60초 안에 heartbeat가 있는 `QUEUED` 항목 수입니다.
 
 ## Debug Spectate (beta22, default OFF)
 
