@@ -10,6 +10,7 @@
 #include "AchievementEffects.hpp"
 #include "../domain/AchievementStyle.hpp"
 #include "../domain/ScoreDisplay.hpp"
+#include <Geode/cocos/misc_nodes/CCClippingNode.h>
 #include "../domain/SurvivalBoardPresentation.hpp"
 #include "../domain/SurvivalPodiumMotion.hpp"
 #include "../domain/SurvivalBoardPresentation.hpp"
@@ -122,11 +123,17 @@ class SurvivalOutcomePanel final:public cocos2d::CCLayerColor {
     std::function<void(int)> m_action;CCMenu* m_menu=nullptr;CCMenuItemSpriteExtra* m_watch=nullptr;CCMenuItemSpriteExtra* m_freeChoice=nullptr;CCMenuItemSpriteExtra* m_resultChoice=nullptr;CCMenuItemSpriteExtra* m_close=nullptr;
     std::string m_key,m_identity;std::vector<SurvivalStanding> m_profiles;
     struct Podium {CCNode* pedestal;CCMenuItemSpriteExtra* avatar;CCNode* stamp;CCNode* place;CCNode* glow;float x,base,height;int rank;};
+    // Pedestals lean 8° (SkewX): a point at height y sits y·tan 8° to the right.
+    static constexpr float kPodiumLean=0.14054083f;
     std::vector<CCNode*> m_badges;
     std::string m_badgeMatch;std::size_t m_badgePage=0,m_badgeCount=0;
     std::vector<Podium> m_stages;double m_elapsed=0;
     CCLabelBMFont *m_watchText=nullptr,*m_detail=nullptr;
     CCNode* m_halo=nullptr;
+    // Personal result: the lime header is revealed by a diagonal wipe from the
+    // left (a sheared stencil sliding right), driven by m_elapsed so a rebuild
+    // of the same stage does not replay it.
+    CCNode* m_headerWipe=nullptr;float m_headerWipeFrom=0,m_headerWipeTo=0;
     void onAction(CCObject* object){if(auto* item=typeinfo_cast<CCMenuItemSpriteExtra*>(object);item && item->isEnabled()){
         auto const& current=SurvivalRuntime::get().view();if(!m_identity.starts_with(current.id+":"+current.ownId+":"))return;
         auto tag=item->getTag();if(tag>=100){if(static_cast<std::size_t>(tag-100)<m_profiles.size())openSurvivalProfile(this,m_profiles[tag-100]);}
@@ -164,7 +171,7 @@ public:
         for(auto const& p:view.result["standings"].asArray().unwrapOr(std::vector<matjson::Value>{}))
             buildKey+=":"+p["participantId"].asString().unwrapOr("")+":"+p["tierAfter"].asString().unwrapOr("")+":"+(p["lpAfter"].isNumber()?std::to_string(p["lpAfter"].asInt().unwrapOr(0)):"pending")+":"+std::to_string(p["delta"].asInt().unwrapOr(0));
         auto const size=CCDirector::sharedDirector()->getWinSize();
-        if(m_key!=buildKey){auto const elapsed=m_identity==key?m_elapsed:0.;m_identity=key;m_key=buildKey;removeAllChildrenWithCleanup(true);m_profiles=survivalRoster(view);m_stages.clear();m_badges.clear();m_elapsed=elapsed;m_watch=nullptr;m_freeChoice=m_resultChoice=m_close=nullptr;m_detail=m_watchText=nullptr;m_halo=nullptr;
+        if(m_key!=buildKey){auto const elapsed=m_identity==key?m_elapsed:0.;m_identity=key;m_key=buildKey;removeAllChildrenWithCleanup(true);m_profiles=survivalRoster(view);m_stages.clear();m_badges.clear();m_elapsed=elapsed;m_watch=nullptr;m_freeChoice=m_resultChoice=m_close=nullptr;m_detail=m_watchText=nullptr;m_halo=nullptr;m_headerWipe=nullptr;
             m_menu=CCMenu::create();m_menu->setPosition(CCPointZero);addChild(m_menu,20);
             auto const own=std::find_if(m_profiles.begin(),m_profiles.end(),[&](auto const& row){return row.id==view.ownId;});
             if(choice){
@@ -213,7 +220,11 @@ public:
                     // .sk pedestal: a leaning fill with a 4 px top rule in the medal colour.
                     auto* pedestal=CCNode::create();pedestal->setContentSize({width,h});pedestal->setAnchorPoint({.5f,0});pedestal->setPosition({x,base});addChild(pedestal,5);
                     auto* fill=CCLayerColor::create({ground.r,ground.g,ground.b,255},width,h);fill->setSkewX(8);pedestal->addChild(fill,0);
-                    auto* top=CCLayerColor::create({tint.r,tint.g,tint.b,255},width,2);top->setPosition({0,h-2});top->setSkewX(8);pedestal->addChild(top,1);
+                    // SkewX shifts a point right by y·tan 8°, so the fill's top edge sits
+                    // (h-2)·tan 8° to the right of its base. The rule (only 2 pt tall) and
+                    // everything stacked on the pedestal follow that lean.
+                    constexpr float lean=kPodiumLean;
+                    auto* top=CCLayerColor::create({tint.r,tint.g,tint.b,255},width,2);top->setPosition({(h-2)*lean,h-2});top->setSkewX(8);pedestal->addChild(top,1);
                     // A plain node has no fill and respects its anchor. A transparent CCLayerColor
                     // ignores that anchor by default; fading its own opacity also paints a black slab.
                     auto* stamp=CCNode::create();stamp->setContentSize({width,h});stamp->setAnchorPoint({.5f,.5f});stamp->setPosition({x,base+h/2});addChild(stamp,8);
@@ -237,8 +248,8 @@ public:
                     if(rank==1){auto* winnerText=menuLabel(i18n::text("survival-winner","WINNER"),css(15),{0,0},AccentInk,FontWeight::Black);auto const chipW=winnerText->getScaledContentSize().width+12;
                         auto* winner=CCLayerColor::create({Gold.r,Gold.g,Gold.b,255},chipW,12);winner->setPosition({width/2-chipW/2,76});winner->setSkewX(8);face->addChild(winner,5);
                         winnerText->setPosition({width/2,82});face->addChild(winnerText,6);}
-                    auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(SurvivalOutcomePanel::onAction));item->setTag(100+static_cast<int>(it-m_profiles.begin()));item->setPosition({x,base+h+36});m_menu->addChild(item);
-                    auto* place=menuLabel(std::to_string(rank),rank==1?css(68):css(56),{x+3,base+placeY},tint,FontWeight::Black);addChild(place,9);
+                    auto* item=CCMenuItemSpriteExtra::create(face,this,menu_selector(SurvivalOutcomePanel::onAction));item->setTag(100+static_cast<int>(it-m_profiles.begin()));item->setPosition({x+h*lean,base+h+36});m_menu->addChild(item);
+                    auto* place=menuLabel(std::to_string(rank),rank==1?css(68):css(56),{x+3+placeY*lean,base+placeY},tint,FontWeight::Black);addChild(place,9);
                     // S5: the own pedestal also names the promotion state the server sent for us.
                     if(isOwn){auto const& r=view.result;std::string state;ccColor3B tone=Text;
                         if(r["promotionSucceeded"].asBool().unwrapOr(false)||r["promoted"].asBool().unwrapOr(false)){state=i18n::text("promoted","PROMOTED");tone=Green;}
@@ -247,8 +258,10 @@ public:
                         else if(r["demoted"].asBool().unwrapOr(false)){state=i18n::text("demoted","DEMOTED");tone=Red;}
                         if(!state.empty()){auto* chip=menuLabel(state,css(13),{width/2,placeY-(rank==1?17.f:14.f)-8-extent-32},tone,FontWeight::Black);fitFullMenuLabel(chip,width-8,9,css(13));chip->setID("survival-podium-own-state"_spr);stamp->addChild(chip,5);}
                     }
+                    // Text inside the pedestal is centred on its leaning middle at each height.
+                    for(auto* child:CCArrayExt<CCNode*>(stamp->getChildren()))child->setPositionX(child->getPositionX()+child->getPositionY()*lean);
                     CCNode* glow=nullptr;
-                    if(rank==1){glow=createRankAmbientFx("GOLD",{68,68},RankBadgeDisplay::Matched);glow->setPosition({x,base+h+46});glow->setID("survival-podium-gold-ambient"_spr);addChild(glow,4);m_halo=glow;}
+                    if(rank==1){glow=createRankAmbientFx("GOLD",{68,68},RankBadgeDisplay::Matched);glow->setPosition({x+h*lean,base+h+46});glow->setID("survival-podium-gold-ambient"_spr);addChild(glow,4);m_halo=glow;}
                     m_stages.push_back({pedestal,item,stamp,place,glow,x,base,h,rank});
                 }
             }else if(stage==SurvivalFlowStage::ScoreAnimation){
@@ -258,19 +271,33 @@ public:
                 // S6 board: the lime band (bottom edge rising to the right) with
                 // the place, the round table on the left and the hatched LP
                 // panel on the right.
-                {   // The bottom edge runs from the left corner up 20 points to the right.
+                CCNode* header=this;
+                {   // The bottom edge runs from the left corner up 20 points to the right
+                    // as one straight line: a single band sheared along Y (it used to be
+                    // 2 pt strips of growing width, which read as a staircase). The
+                    // sheared top edge rises past the top of the screen.
                     constexpr float bandH=75,cut=20;
-                    for(float y=0;y<bandH;y+=2){
-                        auto const reach=y<cut?std::min(1.f,(y+1)/cut):1.f;
-                        auto* strip=CCLayerColor::create({AccentFill.r,AccentFill.g,AccentFill.b,255},size.width*reach,std::min(2.f,bandH-y));
-                        strip->setPosition({0,size.height-bandH+y});addChild(strip,1);}
+                    auto* band=CCLayerColor::create({AccentFill.r,AccentFill.g,AccentFill.b,255},size.width,bandH);
+                    band->setAnchorPoint({0,0});band->setPosition({0,size.height-bandH});
+                    band->setSkewY(std::atan2(cut,size.width)*57.29578f);
+                    // Diagonal wipe: a stencil leaning 30° whose leading edge crosses
+                    // the header from left to right, drawing band and text together.
+                    constexpr float wipeH=bandH+cut+12,lean=0.57735027f; // tan 30°
+                    auto const wipeW=size.width+2*wipeH*lean+8;
+                    auto* stencil=CCLayerColor::create({255,255,255,255},wipeW,wipeH);
+                    stencil->setAnchorPoint({0,0});stencil->setSkewX(30);
+                    m_headerWipeTo=-wipeH*lean-4;m_headerWipeFrom=m_headerWipeTo-wipeW;
+                    stencil->setPosition({m_headerWipeFrom,size.height-wipeH});
+                    auto* clip=CCClippingNode::create(stencil);clip->setID("survival-result-header-wipe"_spr);addChild(clip,1);
+                    m_headerWipe=stencil;header=clip;
+                    clip->addChild(band,1);
                 }
-                auto* eyebrow=menuLabel(fmt::format("SURVIVAL · {}",i18n::text("survival-personal-result","PERSONAL RESULT")),css(15),{14,size.height-8-5},AccentInk,FontWeight::Black);eyebrow->setAnchorPoint({0,.5f});addChild(eyebrow,5);
+                auto* eyebrow=menuLabel(fmt::format("SURVIVAL · {}",i18n::text("survival-personal-result","PERSONAL RESULT")),css(15),{14,size.height-8-5},AccentInk,FontWeight::Black);eyebrow->setAnchorPoint({0,.5f});header->addChild(eyebrow,5);
                 auto const placeText=own!=m_profiles.end() && own->rank>0?survivalOrdinal(own->rank):i18n::text("survival-result-wait","PENDING");
-                auto* placeLabel=menuLabel(placeText,css(84),{14,size.height-8-12-21},AccentInk,FontWeight::Black);placeLabel->setAnchorPoint({0,.5f});fitMenuLabelWidth(placeLabel,200,css(84),.5f);addChild(placeLabel,5);
+                auto* placeLabel=menuLabel(placeText,css(84),{14,size.height-8-12-21},AccentInk,FontWeight::Black);placeLabel->setAnchorPoint({0,.5f});fitMenuLabelWidth(placeLabel,200,css(84),.5f);header->addChild(placeLabel,5);
                 auto const field=std::max(view.matchPlayerCount,static_cast<int>(m_profiles.size()));
                 auto* ofField=menuLabel(fmt::format(fmt::runtime(i18n::text("survival-of-field","OF {}")),field),css(28),{14+placeLabel->getScaledContentSize().width+8,size.height-8-12-27},AccentInk,FontWeight::Black);
-                ofField->setAnchorPoint({0,.5f});fitMenuLabelWidth(ofField,size.width*.4f,css(28),.2f);addChild(ofField,5);
+                ofField->setAnchorPoint({0,.5f});fitMenuLabelWidth(ofField,size.width*.4f,css(28),.2f);header->addChild(ofField,5);
                 if(own!=m_profiles.end()){
                     // The own icon on the band opens the profile (as before).
                     auto* face=CCNode::create();face->setContentSize({40,40});if(auto* icon=survivalAvatar(*own,view.ownId,30)){icon->setPosition({20,20});face->addChild(icon,5);}
@@ -355,8 +382,8 @@ public:
                 }
                 // Header chip: the round badges earned in this match.
                 if(m_badgeCount>0){auto* text=menuLabel(fmt::format(fmt::runtime(i18n::text("survival-badges-earned","ROUND BADGES +{}")),m_badgeCount),css(15),{0,0},Accent,FontWeight::Black);
-                    auto const chipW=text->getScaledContentSize().width+12;auto* chip=CCLayerColor::create({Ink.r,Ink.g,Ink.b,255},chipW,13);chip->setPosition({size.width-14-40-8-chipW,size.height-8-5-6.5f});chip->setSkewX(8);addChild(chip,5);
-                    text->setPosition({chip->getPositionX()+chipW/2,size.height-8-5});addChild(text,6);}
+                    auto const chipW=text->getScaledContentSize().width+12;auto* chip=CCLayerColor::create({Ink.r,Ink.g,Ink.b,255},chipW,13);chip->setPosition({size.width-14-40-8-chipW,size.height-8-5-6.5f});chip->setSkewX(8);header->addChild(chip,5);
+                    text->setPosition({chip->getPositionX()+chipW/2,size.height-8-5});header->addChild(text,6);}
             }
             if(ceremony)button(i18n::text("survival-continue-result","CONTINUE · MY RESULT"),{size.width/2,23},150,20,true,27,20)->setEnabled(settled);
             else if(!choice && stage!=SurvivalFlowStage::ScoreAnimation){
@@ -368,11 +395,13 @@ public:
             }
         }
         m_elapsed+=std::max(0.f,dt);
+        if(m_headerWipe){auto const t=std::clamp(static_cast<float>(m_elapsed)/.55f,0.f,1.f),eased=1-(1-t)*(1-t)*(1-t);
+            m_headerWipe->setPositionX(m_headerWipeFrom+(m_headerWipeTo-m_headerWipeFrom)*eased);}
         for(std::size_t i=0;i<m_badges.size();++i){auto const frame=survivalBadgeMotion(i,m_elapsed);m_badges[i]->setScale(static_cast<float>(frame.scale));propagateModeOpacity(m_badges[i],static_cast<GLubyte>(frame.opacity*255));}
         for(auto const& p:m_stages){auto const frame=survivalPodiumFrame(p.rank,m_elapsed);
             p.pedestal->setVisible(frame.rise>0);p.pedestal->setScaleY(static_cast<float>(frame.rise));
             p.avatar->setVisible(frame.avatar);p.avatar->setEnabled(frame.interactive);
-            p.avatar->setPosition({p.x,p.base+p.height+36+static_cast<float>(frame.drop*58)});
+            p.avatar->setPosition({p.x+p.height*kPodiumLean,p.base+p.height+36+static_cast<float>(frame.drop*58)});
             p.stamp->setVisible(frame.stamp>0);p.stamp->setScale(static_cast<float>(frame.stampScale));propagateModeOpacity(p.stamp,static_cast<GLubyte>(frame.stampOpacity*255));
             p.place->setVisible(frame.stamp>0);
             if(p.glow){p.glow->setVisible(frame.glowOpacity>0);

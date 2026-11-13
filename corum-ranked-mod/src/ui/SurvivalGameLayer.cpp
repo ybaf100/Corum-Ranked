@@ -673,8 +673,9 @@ public:
             fmt::format("SURVIVAL · {}",view.phase=="TIEBREAK"?"DEATH MATCH":view.phase=="FINAL"?"FINAL":("ROUND "+std::to_string(view.roundNumber)))).c_str());
         ui::fitSingleLineMenuLabel(m_heading,headingWidth*.5f,20,.375f);
         auto const group=view.group=="RED_BRONZE"?std::string("RED-BRONZE"):view.group;
-        // The intro roster must not reveal the server's preselected map.
-        m_map->setString((!intro && view.map.levelId>0?fmt::format("{} · GD #{}",group,view.map.levelId):group).c_str());
+        // Never print the map number beside ROUND n: it spoils the map before
+        // it is shown (the intro roster and the vote would reveal it early).
+        m_map->setString(group.c_str());
         m_map->setPosition({14+m_heading->getScaledContentSize().width+10,getContentSize().height-18});
         ui::fitSingleLineMenuLabel(m_map,std::max(40.f,headingWidth-m_heading->getScaledContentSize().width-10),12,.20f);
         std::string status;

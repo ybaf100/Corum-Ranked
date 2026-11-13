@@ -44,7 +44,9 @@ inline SurvivalBadgeFaceEnvelope survivalBadgeFaceEnvelope(){
     }();
     return envelope;
 }
-inline CCNode* survivalCollectionBadge(int nativeCode,std::string_view grade,float side,float faceArea=0){
+// faceFraction caps the difficulty face at that share of its area; faceLift
+// raises the face (and the cross) above a caption row at the bottom.
+inline CCNode* survivalCollectionBadge(int nativeCode,std::string_view grade,float side,float faceArea=0,float faceFraction=.46f,float faceLift=0){
     auto const eliminated=grade=="ELIMINATED";
     // H4: the badge itself is unchanged; its frame is a neutral outline with
     // a top edge in the grade colour.
@@ -55,18 +57,28 @@ inline CCNode* survivalCollectionBadge(int nativeCode,std::string_view grade,flo
         // A round badge reserves its caption rows (area=side-22); keep the
         // cross legible instead of fitting it into a near-zero box.
         auto const box=std::max(area-16,side*.42f);
-        auto* cross=menuLabel("X",.82f,{side/2,side/2},Red,FontWeight::Black);
+        auto* cross=menuLabel("X",.82f,{side/2,side/2+faceLift},Red,FontWeight::Black);
         fitFullMenuLabel(cross,box,box,.82f);card->addChild(cross,5);topEdge(card,Red,std::max(2.f,side*.035f));return card;
     }
     auto* face=GJDifficultySprite::create(nativeCode,GJDifficultyName::Short);
     if(face){
         auto const base=face->getContentSize();
         face->updateFeatureState(survivalCollectionFeature(grade));
-        auto const envelope=survivalBadgeFaceEnvelope();auto const anchor=face->getAnchorPointInPoints();
-        auto const height=std::min({area*.46f,(area-12)/(2*std::max(.5f,envelope.halfWidth)),(area-12)/(2*std::max(.5f,envelope.halfHeight))});
+        auto envelope=survivalBadgeFaceEnvelope();auto const anchor=face->getAnchorPointInPoints();
+        auto margin=12.f;
+        if(faceLift>0){
+            // Result-table badges are sized by their own face: the shared
+            // envelope reserves room for the widest Mythic glow and left
+            // ordinary faces a few points tall in a 23 pt row.
+            auto const bounds=survivalCollectionVisualBounds(face);
+            envelope.halfWidth=std::max(std::abs(bounds.getMinX()-base.width/2),std::abs(bounds.getMaxX()-base.width/2))/std::max(1.f,base.height);
+            envelope.halfHeight=std::max(std::abs(bounds.getMinY()-base.height/2),std::abs(bounds.getMaxY()-base.height/2))/std::max(1.f,base.height);
+            margin=4.f;
+        }
+        auto const height=std::min({area*faceFraction,(area-margin)/(2*std::max(.5f,envelope.halfWidth)),(area-margin)/(2*std::max(.5f,envelope.halfHeight))});
         auto const scale=std::max(0.f,height)/std::max(1.f,base.height);
         face->setScale(scale);
-        face->setPosition({side/2-(base.width/2-anchor.x)*scale,side/2-(base.height/2-anchor.y)*scale});
+        face->setPosition({side/2-(base.width/2-anchor.x)*scale,side/2+faceLift-(base.height/2-anchor.y)*scale});
         card->addChild(face,5);
     }
     topEdge(card,tone,std::max(2.f,side*.035f));

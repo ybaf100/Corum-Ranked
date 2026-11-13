@@ -1407,7 +1407,10 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     void updateHistoryReconnect(RuntimeView const& noticeView) {
-        auto const history=m_page==Page::HistoryList||m_page==Page::HistoryDetail;
+        // Records and achievements both read with the session: an expired
+        // connection offers the same reconnect prompt on either page.
+        auto const achievements=m_page==Page::Achievements;
+        auto const history=m_page==Page::HistoryList||m_page==Page::HistoryDetail||achievements;
         auto const expired=corum::ranked::historyReconnectNeeded(history,noticeView.stage==RuntimeStage::Error,!RankedRuntime::get().spectatorLiveSessionToken().empty(),noticeView.accountActiveElsewhere);
         if(expired)closeHistoryFilter();
         if(!expired){
@@ -1417,7 +1420,7 @@ class CorumRankedLayer final : public CCLayerColor {
             return;
         }
         if(expired && !m_historyReconnectShown){
-            auto* popup=corum::ranked::ui::RankedConfirmPopup::create(tr("history-connection-expired","RANKED CONNECTION EXPIRED"),tr("history-connection-help","Reconnect to continue viewing your match history."),
+            auto* popup=corum::ranked::ui::RankedConfirmPopup::create(tr("history-connection-expired","RANKED CONNECTION EXPIRED"),achievements?tr("achievement-connection-help","Reconnect to continue viewing your achievements."):tr("history-connection-help","Reconnect to continue viewing your match history."),
                 [weak=WeakRef(this)](bool accepted){if(auto owner=weak.lock();owner && owner->isRunning()){
                     owner->m_historyReconnect.reset();owner->m_page=Page::Live;owner->m_renderedUiKey.clear();
                     if(accepted)RankedRuntime::get().begin();
@@ -2583,7 +2586,11 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const progress = tierProgressFor(source, survival);
         // After any LP change since the last visit the LP digits roll.
         SeenScore seen;
-        if (view.profileScoreVisible && !placement) { seen = readSeen("card", survival); writeSeen("card", survival, nowTier, view.profileScore); }
+        // Session profiles name GOLD; the ladder title (MASTER / CHAMPION)
+        // arrives with the standing a moment later. Recording GOLD meanwhile
+        // replayed a GOLD -> CHAMPION promotion on every entry.
+        auto const titlePending = !survival && corum::ranked::goldRankTier(nowTier) && !view.standing.loaded;
+        if (view.profileScoreVisible && !placement && !titlePending) { seen = readSeen("card", survival); writeSeen("card", survival, nowTier, view.profileScore); }
         auto const lpShift = seen.valid && seen.lp != view.profileScore;
         auto const addLp = [&](CCPoint at, float scale, CCPoint anchor) {
             if (!view.profileScoreVisible || placement) {
@@ -2841,17 +2848,23 @@ class CorumRankedLayer final : public CCLayerColor {
         if (progress.kind == corum::ranked::TierProgressKind::Hidden) return;
         auto const target = survival ? view.survival.profile.promotion.targetTier : view.promotion.targetTier;
         auto const* what = compact ? "cardbar" : "bar";
-        auto const seen = readSeen(what, survival);
+        // As on the card: no tier record until the ladder title is known.
+        auto const titlePending = !survival && corum::ranked::goldRankTier(progress.tier) && !view.standing.loaded;
+        auto const seen = titlePending ? SeenScore{} : readSeen(what, survival);
         auto const nowTier = progress.tier;auto const nowLp = progress.score;
         if (auto* bar = corum::ranked::ui::TierProgressBar::create(progress, width, upper(target), compact)) {
             bar->setPosition(at);m_root->addChild(bar, 6);
             if (seen.valid && (seen.tier != nowTier || seen.lp != nowLp)) {
                 auto from = tierProgressFor(view, survival, seen);
                 auto const up = seen.tier == nowTier ? nowLp >= seen.lp : corum::ranked::rankTierOrder(nowTier) > corum::ranked::rankTierOrder(seen.tier);
-                if (from.kind != corum::ranked::TierProgressKind::Hidden) bar->animateFrom(std::move(from), up);
+                // On the ladder with a full bar (Leader / Standing / Top) and the
+                // same tier, only the LP counts up: running the bar from the
+                // previous view made it jump between kinds and flicker.
+                if (seen.tier == nowTier && corum::ranked::ui::TierProgressBar::fullLadderBar(progress.kind)) bar->countScoreFrom(seen.lp);
+                else if (from.kind != corum::ranked::TierProgressKind::Hidden) bar->animateFrom(std::move(from), up);
             }
         }
-        writeSeen(what, survival, nowTier, nowLp);
+        if (!titlePending) writeSeen(what, survival, nowTier, nowLp);
     }
 
     // A ghost / filled skewed button (.btn.ghost / .btn) of a fixed size.
@@ -3135,10 +3148,7 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const size = CCDirector::sharedDirector()->getWinSize();
         auto const y = size.height - kLobbyHeader / 2.0f;
         float x = px(28.0f) + px(48.0f) + px(16.0f);
-        if (mode) {
-            addChip(m_root, *mode == corum::ranked::RankedMode::Survival ? "01" : "02", {x, y}, corum::ranked::ui::AccentFill, corum::ranked::ui::AccentInk, 15.0f);
-            x += 22.0f;
-        }
+        // The mode lobby header names the mode only (no 01 / 02 chip).
         auto* brand = makeLabel(!mode ? "RANKED" : *mode == corum::ranked::RankedMode::Survival ? "SURVIVAL" : "SOLO RANKED", fontScale(30.0f), {x, y},
             corum::ranked::ui::Text, "black", {0.0f, 0.5f});
         corum::ranked::ui::leanLabel(brand); brand->setID("ranked-screen-title"_spr); m_root->addChild(brand, 6);
@@ -3674,26 +3684,20 @@ class CorumRankedLayer final : public CCLayerColor {
         }
     }
 
-    // A ring of edge-sharing quads. The old chain of drawSegment calls put a
-    // round cap at every joint; with translucent colours the overlapping caps
-    // drew darker beads and the 60 chords showed as corners once the radar was
-    // scaled up. Segment count follows the on-screen radius, and a faint,
-    // slightly wider ring underneath softens the stair-stepped edges.
+    // One continuous ring: a many-sided circle drawn only through its outline.
+    // Rings built from separate pieces (segments, then quads) each carried
+    // their own anti-aliased fringe, and the overlapping fringes showed as
+    // beads or radial separator lines. The outline is a single strip.
     void drawQueueCircle(float radius, ccColor4F color, float width) {
         if (!m_queueRadar || radius <= 0.0f || color.a <= 0.0f) return;
         auto const scale = std::max(0.01f, m_queueRadar->getScale());
-        auto const segments = std::clamp(static_cast<int>(radius * scale * 0.9f), 48, 256);
-        auto band = [&](float half, ccColor4F tone) {
-            auto const r0 = std::max(0.0f, radius - half), r1 = radius + half;
-            for (int i = 0; i < segments; ++i) {
-                auto const a = 6.28318530718f * static_cast<float>(i) / segments, b = 6.28318530718f * static_cast<float>(i + 1) / segments;
-                CCPoint quad[] {{std::cos(a) * r0, std::sin(a) * r0}, {std::cos(a) * r1, std::sin(a) * r1},
-                    {std::cos(b) * r1, std::sin(b) * r1}, {std::cos(b) * r0, std::sin(b) * r0}};
-                m_queueRadar->drawPolygon(quad, 4, tone, 0, {0, 0, 0, 0});
-            }
-        };
-        band(width + 0.45f / scale, {color.r, color.g, color.b, color.a * 0.35f});
-        band(width, color);
+        auto const segments = std::clamp(static_cast<int>(radius * scale * 0.9f), 64, 256);
+        std::vector<CCPoint> points(static_cast<std::size_t>(segments));
+        for (int i = 0; i < segments; ++i) {
+            auto const a = 6.28318530718f * static_cast<float>(i) / segments;
+            points[static_cast<std::size_t>(i)] = {std::cos(a) * radius, std::sin(a) * radius};
+        }
+        m_queueRadar->drawPolygon(points.data(), static_cast<unsigned>(points.size()), {0, 0, 0, 0}, width, color, BorderAlignment::Center);
     }
 
     // Every frame, also while the panel fades: CCDrawNode has no opacity, so
@@ -3725,14 +3729,24 @@ class CorumRankedLayer final : public CCLayerColor {
         if (!found) {
             drawQueueCircle(inner, {0.78f, 1.0f, 0.18f, 0.12f * k}, 0.4f);
             // 48-degree sweep, one turn per 3.6 s, fading from its leading edge.
+            // Nested wedges that all end at the leading edge: their faint
+            // alphas stack into the fade, so no edge is shared between two
+            // differently coloured pieces (which drew separator lines). Each
+            // wedge closes on a chord hidden under the hub disc.
             m_queueSweepAngle = std::fmod(m_queueSweepAngle + dt * 1.74532925f, 6.28318530718f);
-            constexpr int steps = 12;
-            for (int i = 0; i < steps; ++i) {
-                auto const a = m_queueSweepAngle - 0.8377580f * static_cast<float>(steps - i) / steps;
-                auto const b = m_queueSweepAngle - 0.8377580f * static_cast<float>(steps - i - 1) / steps;
-                CCPoint points[] {{std::cos(a) * hub, std::sin(a) * hub}, {std::cos(a) * search, std::sin(a) * search},
-                    {std::cos(b) * search, std::sin(b) * search}, {std::cos(b) * hub, std::sin(b) * hub}};
-                m_queueRadar->drawPolygon(points, 4, {0.78f, 1.0f, 0.18f, 0.20f * k * static_cast<float>(i + 1) / steps}, 0, {0, 0, 0, 0});
+            constexpr int steps = 24, arc = 10;
+            constexpr float span = 0.8377580f;
+            auto const layer = 1.0f - std::pow(1.0f - 0.20f * k, 1.0f / steps);
+            for (int i = 1; i <= steps; ++i) {
+                auto const start = m_queueSweepAngle - span * static_cast<float>(i) / steps;
+                CCPoint points[arc + 3];
+                points[0] = {std::cos(start) * hub * 0.9f, std::sin(start) * hub * 0.9f};
+                for (int j = 0; j <= arc; ++j) {
+                    auto const a = start + (m_queueSweepAngle - start) * static_cast<float>(j) / arc;
+                    points[j + 1] = {std::cos(a) * search, std::sin(a) * search};
+                }
+                points[arc + 2] = {std::cos(m_queueSweepAngle) * hub * 0.9f, std::sin(m_queueSweepAngle) * hub * 0.9f};
+                m_queueRadar->drawPolygon(points, arc + 3, {0.78f, 1.0f, 0.18f, layer}, 0, {0, 0, 0, 0});
             }
         }
         {
@@ -7864,11 +7878,13 @@ class CorumRankedLayer final : public CCLayerColor {
             if (*m_modeTransition.selected() == corum::ranked::RankedMode::Survival) {
                 auto& survival = corum::ranked::SurvivalRuntime::get();
                 if (survival.creating() || survival.queue().status == "JOINING" || survival.queue().status == "MATCHED") return;
-                if (survival.queueing()) { m_returnToModesAfterQueue = true; survival.leaveQueue(); return; }
+                // Back from the queue page leaves the queue only: the player
+                // stays in this mode's lobby (one step), not the mode list.
+                if (survival.queueing()) { m_returnToModesAfterQueue = false; survival.leaveQueue(); return; }
             }
             if (runtime.view().stage == RuntimeStage::JoiningQueue) return;
             if (runtime.view().stage == RuntimeStage::Queued) {
-                m_returnToModesAfterQueue = true;
+                m_returnToModesAfterQueue = false;
                 runtime.leaveQueue();
                 return;
             }

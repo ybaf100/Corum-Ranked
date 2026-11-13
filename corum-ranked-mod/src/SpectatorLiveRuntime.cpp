@@ -29,7 +29,7 @@ bool successful(web::WebResponse const& response) {
 }
 
 web::WebRequest spectatorRequest(std::string const& sessionToken, std::string const& matchToken) {
-    web::WebRequest request;
+    web::WebRequest request;[](auto& q){if constexpr(requires{q.getHttpVersion();})q.version(decltype(q.getHttpVersion())::VERSION_2TLS);}(request); /* HTTP/2: see PREFER_HTTP2 note in RankedRuntime.cpp */
     request.header("User-Agent", fmt::format(
         "{}/{}; Geometry Dash/{}; Geode/{}; {}",
         Mod::get()->getID(),

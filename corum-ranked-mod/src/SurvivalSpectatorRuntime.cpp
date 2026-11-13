@@ -11,7 +11,7 @@
 #include <Geode/binding/PlayLayer.hpp>
 using namespace geode::prelude;
 namespace corum::ranked {
-namespace {web::WebRequest request(){web::WebRequest r;r.header("Authorization","Bearer "+RankedRuntime::get().spectatorLiveSessionToken());r.followRedirects(false);r.timeout(std::chrono::seconds(3));return r;}}
+namespace {web::WebRequest request(){web::WebRequest r;[](auto& q){if constexpr(requires{q.getHttpVersion();})q.version(decltype(q.getHttpVersion())::VERSION_2TLS);}(r); /* HTTP/2: see PREFER_HTTP2 note in RankedRuntime.cpp */r.header("Authorization","Bearer "+RankedRuntime::get().spectatorLiveSessionToken());r.followRedirects(false);r.timeout(std::chrono::seconds(3));return r;}}
 SurvivalSpectatorRuntime& SurvivalSpectatorRuntime::get(){static auto* r=new SurvivalSpectatorRuntime;return *r;}
 std::string SurvivalSpectatorRuntime::path()const{return "https://api.hwanhee1.com/api/ranked/survival/online/matches/"+SurvivalRuntime::get().view().id+"/spectator-live";}
 void SurvivalSpectatorRuntime::selectionVisible(bool visible){m_selectionVisible=visible;if(visible){m_nextTargets={};refreshTargets();}}

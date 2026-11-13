@@ -98,7 +98,7 @@ constexpr int Text=1;namespace FontWeight{constexpr int ExtraBold=1;}
 std::vector<std::string>captions;
 CCNode*menuLabel(std::string text,float,CCPoint,int,int){captions.push_back(text);return new CCNode;}
 void fitFullMenuLabel(CCNode*,float,float,float){}
-CCNode*survivalCollectionBadge(int code,std::string_view grade,float side,float area){auto*p=new CCNode;p->size={side,side};p->code=code;p->grade=grade;p->area=area;return p;}
+CCNode*survivalCollectionBadge(int code,std::string_view grade,float side,float area,float=.46f,float=0){auto*p=new CCNode;p->size={side,side};p->code=code;p->grade=grade;p->area=area;return p;}
 namespace fmt{std::string format(char const*,std::int64_t n){return "#"+std::to_string(n);}}
 ${method(round,'inline CCNode* survivalRoundBadge(')}
 ${method(counts,'inline std::int64_t survivalBadgeCollectionTotal(')}

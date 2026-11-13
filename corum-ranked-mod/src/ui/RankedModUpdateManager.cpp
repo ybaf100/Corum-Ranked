@@ -46,7 +46,7 @@ void RankedModUpdateManager::download() {
     auto const file = directory / fmt::format("{}.{}.tmp", m_metadata.filename(), generation);
     m_view.state = ModUpdateState::Downloading; m_view.progress = 0; m_view.error.clear();
     m_downloadStarted=std::chrono::steady_clock::now();
-    web::WebRequest request; request.timeout(std::chrono::seconds(180)); request.followRedirects(true);
+    web::WebRequest request;[](auto& q){if constexpr(requires{q.getHttpVersion();})q.version(decltype(q.getHttpVersion())::VERSION_2TLS);}(request); /* HTTP/2: see PREFER_HTTP2 note in RankedRuntime.cpp */ request.timeout(std::chrono::seconds(180)); request.followRedirects(true);
     auto const size = m_metadata.sizeBytes;
     auto nextProgress=std::make_shared<std::atomic<std::int64_t>>(0);
     auto firstByte=std::make_shared<std::atomic<std::int64_t>>(0);

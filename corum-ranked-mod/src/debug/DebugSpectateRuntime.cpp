@@ -12,7 +12,7 @@ constexpr std::string_view kServer = "https://api.hwanhee1.com";
 std::string endpoint(std::string const& path) { return std::string(kServer) + "/api/ranked/debug/spectate/" + path; }
 bool success(web::WebResponse const& response) { return response.code() >= 200 && response.code() < 300; }
 web::WebRequest request(std::string const& token = {}) {
-    web::WebRequest result;
+    web::WebRequest result;[](auto& q){if constexpr(requires{q.getHttpVersion();})q.version(decltype(q.getHttpVersion())::VERSION_2TLS);}(result); /* HTTP/2: see PREFER_HTTP2 note in RankedRuntime.cpp */
     result.header("x-corum-debug-spectate", "1");
     if (!token.empty()) result.header("x-debug-spectate-token", token);
     result.followRedirects(false);

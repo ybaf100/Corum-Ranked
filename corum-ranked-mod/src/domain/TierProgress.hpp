@@ -19,6 +19,7 @@ enum class TierProgressKind {
     Warning,    // demotion warning (bar still shows the band)
     RankChase,  // GOLD ladder: the target is the player one rank above
     Leader,     // GOLD ladder #1: full rainbow bar
+    Standing,   // GOLD ladder, nobody left to catch: own icon and rank, full bar
     Top,        // highest band, no ladder data
 };
 
@@ -84,6 +85,9 @@ inline TierProgressView tierProgress(TierProgressInput const& input) {
             view.fill = std::clamp(static_cast<float>(input.score - view.minimum) / span, 0.0f, 1.0f);
             return view;
         }
+        // No one above to chase (e.g. Survival GOLD without a target): show
+        // the own rank like the Solo ladder instead of a bare TOP TIER.
+        if (input.rank && *input.rank > 0) { view.kind = TierProgressKind::Standing;view.fill = 1.0f;view.targetRank = *input.rank;return view; }
         view.kind = TierProgressKind::Top;view.fill = 1.0f;return view;
     }
     if (band == input.bands.end() || std::next(band) == input.bands.end()) {

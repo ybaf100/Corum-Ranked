@@ -48,7 +48,7 @@ void openRecoveredGame() {
     });
 }
 web::WebRequest request(std::string const& session) {
-    web::WebRequest http;http.header("Authorization","Bearer "+session);http.followRedirects(false);http.timeout(std::chrono::seconds(10));return http;
+    web::WebRequest http;[](auto& q){if constexpr(requires{q.getHttpVersion();})q.version(decltype(q.getHttpVersion())::VERSION_2TLS);}(http); /* HTTP/2: see PREFER_HTTP2 note in RankedRuntime.cpp */http.header("Authorization","Bearer "+session);http.followRedirects(false);http.timeout(std::chrono::seconds(10));return http;
 }
 SurvivalMapPhase mapPhase(std::string const& value) {
     return value=="ROUND_1"?SurvivalMapPhase::Round1:value=="ROUND_2"?SurvivalMapPhase::Round2:value=="ROUND_3"?SurvivalMapPhase::Round3:value=="ROUND_4"?SurvivalMapPhase::Round4:

@@ -137,7 +137,7 @@ void DebugLogUploader::sendNext() {
     matjson::Value body;
     body["uploadId"] = m_uploadId;body["fileIndex"] = chunk.fileIndex;body["fileName"] = chunk.fileName;
     body["part"] = chunk.part;body["totalParts"] = chunk.totalParts;body["totalFiles"] = m_files;body["content"] = chunk.content;
-    web::WebRequest http;
+    web::WebRequest http;[](auto& q){if constexpr(requires{q.getHttpVersion();})q.version(decltype(q.getHttpVersion())::VERSION_2TLS);}(http); /* HTTP/2: see PREFER_HTTP2 note in RankedRuntime.cpp */
     auto const& token = RankedRuntime::get().spectatorLiveSessionToken();
     std::string url = "https://api.hwanhee1.com/api/ranked/debug/logs";
     if (!token.empty()) http.header("Authorization", "Bearer " + token);

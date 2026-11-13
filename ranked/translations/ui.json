@@ -4130,5 +4130,13 @@
   "next-stage-pool": {
     "en": "NEXT STAGE · POOL {}",
     "ko": "다음 STAGE · POOL {}"
+  },
+  "achievement-connection-help": {
+    "en": "Reconnect to continue viewing your achievements.",
+    "ko": "도전과제를 계속 보려면 다시 접속하세요."
+  },
+  "tier-bar-standing": {
+    "en": "#{} ON THE LADDER",
+    "ko": "현재 {}위"
   }
 }

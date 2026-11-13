@@ -90,8 +90,12 @@ class RankedAchievementGradePopup final : public Popup {
             auto const y = height - 66 - 30.f * static_cast<float>(i);
             auto* row = surface({302, 26}, {165, y}, current ? rowTone : ccColor3B{42, 36, 64}, current ? achievementGradePanel(name) : ccColor3B{18, 12, 36}, reached ? 255 : 170, true);
             panel->addChild(row, 3);
-            auto* emblem = achievementGradeEmblem(18, reached ? name : std::string_view{}, reached ? rowTone : ccColor3B{90, 84, 112}, current ? achievementGradePanel(name) : ccColor3B{18, 12, 36});
-            emblem->setPosition({16, 13}); row->addChild(emblem, 5);
+            // The ladder shows each grade's full tier mark; grades not reached
+            // yet keep their mark, dimmed.
+            if (auto* emblem = createAnimatedRankBadge(std::string(name), {22, 22}, RankBadgeDisplay::Leaderboard)) {
+                if (!reached) if (auto* rgba = typeinfo_cast<CCRGBAProtocol*>(emblem)) { rgba->setCascadeOpacityEnabled(true); rgba->setOpacity(95); }
+                emblem->setPosition({16, 13}); row->addChild(emblem, 5);
+            }
             auto* label = menuLabel(std::string(name), .26f, {32, 13}, reached ? rowTone : TextMuted, FontWeight::Black);
             label->setAnchorPoint({0, 0.5f}); fitSingleLineMenuLabel(label, 70, 16, .26f); row->addChild(label, 5);
             auto* threshold = menuLabel(fmt::format("{} AP", minAp), .22f, {108, 13}, reached ? Text : TextMuted, FontWeight::ExtraBold);

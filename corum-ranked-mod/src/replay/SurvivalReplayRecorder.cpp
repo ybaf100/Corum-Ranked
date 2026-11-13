@@ -158,7 +158,7 @@ void Recorder::pump(){
     if(!m_endQueue.empty()){
         auto metadata=std::move(m_endQueue.front());m_endQueue.pop_front();
         if(str(metadata["closingEvent"],"type")!="ATTEMPT_END")return;
-        web::WebRequest req;req.header("Authorization","Bearer "+token);req.timeout(std::chrono::seconds(3));req.followRedirects(false);req.bodyJSON(metadata["closingEvent"]);
+        web::WebRequest req;[](auto& q){if constexpr(requires{q.getHttpVersion();})q.version(decltype(q.getHttpVersion())::VERSION_2TLS);}(req); /* HTTP/2: see PREFER_HTTP2 note in RankedRuntime.cpp */req.header("Authorization","Bearer "+token);req.timeout(std::chrono::seconds(3));req.followRedirects(false);req.bodyJSON(metadata["closingEvent"]);
         auto url="https://api.hwanhee1.com/api/ranked/survival/"+std::string(metadata["debug"].asBool().unwrapOr(false)?"debug":"online")+"/matches/"+str(metadata,"matchId")+"/events";
         note(ReplayNotice::Receipt,"OFFICIAL_END_RETRY","SAVED_START_CONTEXT",metadata);
         m_endBusy=true;m_nextReceipt=now+std::chrono::seconds(2);
@@ -170,7 +170,7 @@ void Recorder::pump(){
     }
     if(m_receipts.empty())return;
     auto metadata=m_receipts.front();m_receipts.pop_front();m_receiptBusy=true;m_nextReceipt=now+std::chrono::seconds(2);
-    web::WebRequest req;req.header("Authorization","Bearer "+token);req.timeout(std::chrono::seconds(3));req.followRedirects(false);
+    web::WebRequest req;[](auto& q){if constexpr(requires{q.getHttpVersion();})q.version(decltype(q.getHttpVersion())::VERSION_2TLS);}(req); /* HTTP/2: see PREFER_HTTP2 note in RankedRuntime.cpp */req.header("Authorization","Bearer "+token);req.timeout(std::chrono::seconds(3));req.followRedirects(false);
     auto url="https://api.hwanhee1.com/api/ranked/survival/replays/matches/"+str(metadata,"matchId")+"/attempts/"+str(metadata,"attemptId");
     m_request.spawn(req.get(url),[this,metadata,token](web::WebResponse response)mutable{
         m_receiptBusy=false;if(token!=RankedRuntime::get().spectatorLiveSessionToken()){queueReceipt(metadata);return;}

@@ -26,6 +26,8 @@ struct StandingView {
     std::string displayTier = {}, nextTier = {};
     int goldPosition = 0, goldTotal = 0;
     std::optional<int> nextTierCutoff = {}, championCutoff = {}, masterCutoff = {};
+    // Set once the ladder standing (MASTER / CHAMPION titles) has arrived.
+    bool loaded = false;
 };
 
 struct TierCutoffView { std::string tier; int minimum = 0; };

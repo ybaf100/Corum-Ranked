@@ -15,6 +15,9 @@ class TierProgressBar final : public cocos2d::CCNode {
     cocos2d::ccColor3B m_tone{255, 207, 74};
     cocos2d::CCDrawNode* m_draw = nullptr;
     cocos2d::CCLabelBMFont* m_caption = nullptr;
+    // Ladder kinds with a full bar: an LP change only counts this label up.
+    cocos2d::CCLabelBMFont* m_score = nullptr;
+    int m_scoreFrom = 0;float m_scoreAnim = -1.0f;
     cocos2d::CCNode* m_labels = nullptr;
     // During a tier change: the previous tier's labels until the hand-over.
     cocos2d::CCNode* m_oldLabels = nullptr;
@@ -32,6 +35,11 @@ public:
     static TierProgressBar* create(TierProgressView view, float width, std::string const& promotionTarget = {}, bool compact = false);
     void update(float dt) override;
     void animateFrom(TierProgressView from, bool up);
+    // Leader / Standing / Top: the bar stays full and still; the LP counts up.
+    void countScoreFrom(int score);
+    static bool fullLadderBar(TierProgressKind kind) {
+        return kind == TierProgressKind::Leader || kind == TierProgressKind::Standing || kind == TierProgressKind::Top;
+    }
 };
 
 } // namespace corum::ranked::ui

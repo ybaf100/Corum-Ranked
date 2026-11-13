@@ -466,8 +466,14 @@ int pollIntervalMillis(bool spectatorActive = false) {
     return spectatorActive ? std::min(configured, 150) : configured;
 }
 
+// PREFER_HTTP2: Ranked API and CDN requests go through Cloudflare. After the
+// app returns from the background, HTTP/3 (QUIC) streams on iOS were seen
+// stalling until the 10 s timeout with half a response received (config,
+// heartbeat and the elimination effect list in one burst). Every Ranked
+// request pins HTTP/2 over TLS, which recovers through TCP; request types
+// without HTTP version control (test doubles) are left alone.
 web::WebRequest baseRequest(std::string const& sessionToken, std::string const& matchToken = {}) {
-    web::WebRequest request;
+    web::WebRequest request;[](auto& q){if constexpr(requires{q.getHttpVersion();})q.version(decltype(q.getHttpVersion())::VERSION_2TLS);}(request); /* HTTP/2: see PREFER_HTTP2 note in RankedRuntime.cpp */
     request.header("User-Agent", fmt::format(
         "{}/{}; Geometry Dash/{}; Geode/{}; {}",
         Mod::get()->getID(),
@@ -4357,6 +4363,7 @@ void RankedRuntime::fetchStanding() {
             m_standingBusy = false;
             if (!successful(response)) return;
             m_view.standing = parseStanding(response.json().unwrapOr(matjson::Value())["standing"]);
+            m_view.standing.loaded = true;
             if(!m_view.standing.displayTier.empty()) {
                 m_view.profileTier=m_view.standing.displayTier;
             }

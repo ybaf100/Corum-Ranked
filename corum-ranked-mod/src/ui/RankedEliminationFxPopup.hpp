@@ -49,6 +49,8 @@ private:
     EliminationEffect m_selected = EliminationEffect::Default;
     std::uint64_t m_generation = 0;
     bool m_loaded = false, m_busy = false, m_closed = false, m_exited = false;
+    // Silent retries of the effect list before the RETRY message appears.
+    int m_autoRetries = 0;
 };
 
 } // namespace corum::ranked::ui

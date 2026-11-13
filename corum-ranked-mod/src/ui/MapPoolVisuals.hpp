@@ -116,7 +116,7 @@ inline std::optional<MapDifficulty> displayedDifficulty(MapPoolRow const& row) {
 }
 
 inline web::WebRequest request() {
-    web::WebRequest request;
+    web::WebRequest request;[](auto& q){if constexpr(requires{q.getHttpVersion();})q.version(decltype(q.getHttpVersion())::VERSION_2TLS);}(request); /* HTTP/2: see PREFER_HTTP2 note in RankedRuntime.cpp */
     auto const& token = RankedRuntime::get().sessionToken();
     if (!token.empty()) request.header("Authorization", "Bearer " + token);
     request.followRedirects(false);

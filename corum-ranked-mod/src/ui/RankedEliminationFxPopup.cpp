@@ -134,9 +134,21 @@ void RankedEliminationFxPopup::fetch() {
             self->m_busy = false;
             auto const data = response.json().unwrapOr(matjson::Value());
             if (!response.ok() || !data["effects"].isArray()) {
+                // A connection that stalls after the app resumes times out once
+                // and then recovers: retry twice quietly before asking the player.
+                auto const transient = response.code() <= 0 || response.code() == 429 || response.code() >= 500;
+                if (transient && self->m_autoRetries < 2) {
+                    auto const delay = 1.0f + static_cast<float>(self->m_autoRetries);
+                    ++self->m_autoRetries;
+                    self->runAction(CCSequence::create(CCDelayTime::create(delay), CallFuncExt::create([weak = WeakRef(self.data())] {
+                        if (auto popup = weak.lock(); popup && !popup->m_closed && !popup->m_loaded) popup->fetch();
+                    }), nullptr));
+                    return;
+                }
                 self->showMessage(i18n::text("elim-fx-error", "Could not load the effects. Try again."), Red);
                 return;
             }
+            self->m_autoRetries = 0;
             self->apply(data);
         });
     });
@@ -350,7 +362,7 @@ void RankedEliminationFxPopup::onReplay(CCObject*) {
     schedule(schedule_selector(RankedEliminationFxPopup::previewTick), previewLoop(m_selected));
 }
 
-void RankedEliminationFxPopup::onRetry(CCObject*) { fetch(); }
+void RankedEliminationFxPopup::onRetry(CCObject*) { m_autoRetries = 0; fetch(); }
 
 void RankedEliminationFxPopup::onClose(CCObject*) { dismiss(); }
 

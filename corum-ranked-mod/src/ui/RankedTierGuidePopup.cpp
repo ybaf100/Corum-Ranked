@@ -78,7 +78,7 @@ void RankedTierGuidePopup::fetch() {
     if(m_closed || m_busy)return;
     m_busy=true;m_refresh->setEnabled(false);
     auto const generation=++m_generation;
-    web::WebRequest request;request.timeout(std::chrono::seconds(20));
+    web::WebRequest request;[](auto& q){if constexpr(requires{q.getHttpVersion();})q.version(decltype(q.getHttpVersion())::VERSION_2TLS);}(request); /* HTTP/2: see PREFER_HTTP2 note in RankedRuntime.cpp */request.timeout(std::chrono::seconds(20));
     m_request.spawn(request.get(RankedRuntime::get().tierGuideUrl()),[weak=WeakRef(this),generation](web::WebResponse response) {
         queueInMainThread([weak,generation,response=std::move(response)] {
             auto self=weak.lock();if(!self || self->m_closed || generation!=self->m_generation)return;

@@ -10,7 +10,10 @@ inline CCNode* survivalRoundBadge(matjson::Value const& badge,CCSize size,bool h
     auto const eliminated=grade=="ELIMINATED";
     auto const difficulty=recordedMapDifficulty(badge["difficulty"].asString().unwrapOr(""));
     auto const side=std::min(size.width,size.height);
-    auto* card=survivalCollectionBadge(difficulty?difficulty->nativeCode:0,grade,side,side-22);
+    // With a heading the face sits between two caption rows; without one (the
+    // result table) only the rank row stays below, so the face takes the rest.
+    auto* card=heading?survivalCollectionBadge(difficulty?difficulty->nativeCode:0,grade,side,side-22)
+        :survivalCollectionBadge(difficulty?difficulty->nativeCode:0,grade,side,side-10,.80f,5);
     card->setAnchorPoint({.5f,.5f});
     auto const round=badge["roundLabel"].asString().unwrapOr("");
     if(heading){auto* label=menuLabel(round,.22f,{side/2,side-10},Text,FontWeight::ExtraBold);fitFullMenuLabel(label,side-8,12,.22f);card->addChild(label,5);}

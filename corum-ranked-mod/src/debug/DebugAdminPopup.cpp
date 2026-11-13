@@ -116,7 +116,7 @@ class DebugAudioVolumePopup final : public Popup {
         matjson::Value body; body["scope"]="COMMON";body["password"]=m_password; body["action"]=save ? "SET_AUDIO_VOLUME" : "GET_AUDIO_VOLUMES";
         auto const selected=m_songs.empty() ? 0 : m_songs[m_index].id;
         if (save) { body["songId"]=selected; body["volumePercent"]=selectedPercent(); }
-        web::WebRequest http; http.header("Authorization","Bearer "+m_session); http.bodyJSON(body);
+        web::WebRequest http;[](auto& q){if constexpr(requires{q.getHttpVersion();})q.version(decltype(q.getHttpVersion())::VERSION_2TLS);}(http); /* HTTP/2: see PREFER_HTTP2 note in RankedRuntime.cpp */ http.header("Authorization","Bearer "+m_session); http.bodyJSON(body);
         http.followRedirects(false); http.timeout(std::chrono::seconds(20));
         m_busy=true; controls(); status(i18n::text("admin-working","Applying changes..."));
         auto const weak=WeakRef<DebugAudioVolumePopup>(this);
@@ -221,7 +221,7 @@ class DebugSurvivalModePopup final : public Popup {
         if(m_busy || m_closed || !authorized())return;
         matjson::Value body;body["scope"]="SURVIVAL";body["password"]=m_password;
         body["action"]=count?"SET_SURVIVAL_MODE":"GET_SURVIVAL_MODE";if(count)body["matchPlayerCount"]=count;
-        web::WebRequest http;http.header("Authorization","Bearer "+m_session);http.bodyJSON(body);http.followRedirects(false);http.timeout(std::chrono::seconds(20));
+        web::WebRequest http;[](auto& q){if constexpr(requires{q.getHttpVersion();})q.version(decltype(q.getHttpVersion())::VERSION_2TLS);}(http); /* HTTP/2: see PREFER_HTTP2 note in RankedRuntime.cpp */http.header("Authorization","Bearer "+m_session);http.bodyJSON(body);http.followRedirects(false);http.timeout(std::chrono::seconds(20));
         m_busy=true;controls();status(i18n::text("admin-working","Applying changes..."));
         m_request.spawn(http.post("https://api.hwanhee1.com/api/ranked/debug/admin"),[weak=WeakRef(this)](web::WebResponse response){
             auto keep=weak.lock();if(!keep || keep->m_closed || !keep->isRunning() || !keep->authorized())return;
@@ -333,7 +333,7 @@ class DebugSeasonPopup final : public Popup {
             else if(auto iso=localToIso(when))body["seasonTargetAt"]=*iso;
             else{status(i18n::text("admin-season-time-invalid","Enter the time as YYYY-MM-DD HH:MM."));return;}
         }
-        web::WebRequest http;http.header("Authorization","Bearer "+m_session);http.bodyJSON(body);http.followRedirects(false);http.timeout(std::chrono::seconds(20));
+        web::WebRequest http;[](auto& q){if constexpr(requires{q.getHttpVersion();})q.version(decltype(q.getHttpVersion())::VERSION_2TLS);}(http); /* HTTP/2: see PREFER_HTTP2 note in RankedRuntime.cpp */http.header("Authorization","Bearer "+m_session);http.bodyJSON(body);http.followRedirects(false);http.timeout(std::chrono::seconds(20));
         m_busy=true;controls();status(i18n::text("admin-working","Applying changes..."));
         m_request.spawn(http.post("https://api.hwanhee1.com/api/ranked/debug/admin"),[weak=WeakRef(this),save](web::WebResponse response){
             auto keep=weak.lock();if(!keep || keep->m_closed || !keep->isRunning() || !keep->authorized())return;
@@ -502,7 +502,7 @@ class DebugAdminPopup final : public Popup {
         if (choice==1 || choice==3) { auto value=number(m_lp); if (!value) { status("Enter valid LP (0 - 2147483647)."); return; } body["lp"]=*value; }
         if (choice==2 || choice==3) { auto value=number(m_mmr,true); if (!value) { status("Enter valid MMR (-2147483648 - 2147483647)."); return; } body["mmr"]=*value; }
         if (confirmed) body["confirmation"]="RESET";
-        web::WebRequest http; http.header("Authorization","Bearer "+m_session); http.bodyJSON(body);
+        web::WebRequest http;[](auto& q){if constexpr(requires{q.getHttpVersion();})q.version(decltype(q.getHttpVersion())::VERSION_2TLS);}(http); /* HTTP/2: see PREFER_HTTP2 note in RankedRuntime.cpp */ http.header("Authorization","Bearer "+m_session); http.bodyJSON(body);
         http.followRedirects(false); http.timeout(std::chrono::seconds(20));
         m_busy=true; enabled(false); status(i18n::text("admin-working","Applying changes..."));
         auto const weak=WeakRef<DebugAdminPopup>(this);

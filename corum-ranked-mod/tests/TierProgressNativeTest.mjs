@@ -25,7 +25,8 @@ int main(){
  v=tierProgress(in);assert(v.kind==TierProgressKind::RankChase&&v.targetRank==11&&v.remaining==30&&v.minimum==700&&v.maximum==790);
  in.target->score=760;assert(tierProgress(in).remaining==1);
  in.rank=1;in.target.reset();v=tierProgress(in);assert(v.kind==TierProgressKind::Leader&&v.fill==1.0f);
- in.rank=5;assert(tierProgress(in).kind==TierProgressKind::Top);
+ in.rank=5;v=tierProgress(in);assert(v.kind==TierProgressKind::Standing&&v.targetRank==5&&v.fill==1.0f); // nobody left to catch: own rank
+ in.rank.reset();assert(tierProgress(in).kind==TierProgressKind::Top);
  in.ladderTier=false;in.tier="GOLD";in.rank.reset();assert(tierProgress(in).kind==TierProgressKind::Top);
  in.scoreKnown=false;assert(tierProgress(in).kind==TierProgressKind::Hidden);
 }

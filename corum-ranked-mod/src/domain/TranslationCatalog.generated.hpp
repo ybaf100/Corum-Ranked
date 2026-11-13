@@ -3,7 +3,7 @@
 #include <array>
 namespace corum::ranked {
 struct CatalogTranslation {char const* key;char const* english;char const* korean;};
-inline constexpr std::array<CatalogTranslation, 1131> kTranslations {{
+inline constexpr std::array<CatalogTranslation, 1133> kTranslations {{
     CatalogTranslation{"A logged-in Geometry Dash account is required.", "A logged-in Geometry Dash account is required.", "로그인된 Geometry Dash 계정이 필요합니다."},
     CatalogTranslation{"A mod update is required before entering Ranked.", "A mod update is required before entering Ranked.", "랭크에 입장하려면 모드를 업데이트하세요."},
     CatalogTranslation{"AUDIO_CACHE_INVALID", "Audio file is missing or empty · retry required", "음원 파일이 없거나 비어 있음 · 재시도 필요"},
@@ -88,6 +88,7 @@ inline constexpr std::array<CatalogTranslation, 1131> kTranslations {{
     CatalogTranslation{"Verifying your Geometry Dash account...", "Verifying your Geometry Dash account...", "GD 계정을 확인하는 중..."},
     CatalogTranslation{"WAITING FOR PLAYERS", "WAITING FOR PLAYERS", "참가자 입장 대기"},
     CatalogTranslation{"Your queue batch is not at the front yet", "Your queue batch is not at the front yet", "매칭 대기 중입니다. 잠시 후 다시 시도하세요."},
+    CatalogTranslation{"achievement-connection-help", "Reconnect to continue viewing your achievements.", "도전과제를 계속 보려면 다시 접속하세요."},
     CatalogTranslation{"achievement-grade-basis", "Set by the AP you claimed (4,965 AP in all)", "수령한 AP 합계로 정해집니다 (전체 4,965 AP)"},
     CatalogTranslation{"achievement-grade-current", "CURRENT", "현재"},
     CatalogTranslation{"achievement-grade-next", "{1} AP TO {0}", "다음 등급 {0}까지 {1} AP"},
@@ -1089,6 +1090,7 @@ inline constexpr std::array<CatalogTranslation, 1131> kTranslations {{
     CatalogTranslation{"tier-bar-next", "{} LP to next tier", "다음 티어까지 {} LP"},
     CatalogTranslation{"tier-bar-promotion", "PROMOTION SERIES", "승격전 진행 중"},
     CatalogTranslation{"tier-bar-rank", "To #{}: {} LP", "#{}까지 {} LP"},
+    CatalogTranslation{"tier-bar-standing", "#{} ON THE LADDER", "현재 {}위"},
     CatalogTranslation{"tier-bar-top", "TOP TIER", "최고 티어"},
     CatalogTranslation{"tier-guide", "TIER GUIDE", "티어 안내"},
     CatalogTranslation{"tier-guide-current", "CURRENT {}", "현재 {}"},

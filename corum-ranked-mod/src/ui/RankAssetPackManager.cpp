@@ -193,7 +193,7 @@ void RankAssetPackManager::downloadConfiguredPack() {
     if (ec) { fail("cannot create Ranked asset cache"); return; }
     auto const generation = ++m_downloadGeneration;
     auto const zip = rootDir() / fmt::format("download-{}.zip.tmp", generation);
-    web::WebRequest request;
+    web::WebRequest request;[](auto& q){if constexpr(requires{q.getHttpVersion();})q.version(decltype(q.getHttpVersion())::VERSION_2TLS);}(request); /* HTTP/2: see PREFER_HTTP2 note in RankedRuntime.cpp */
     request.timeout(kDownloadTimeout);
     request.followRedirects(true);
     request.onProgress([this, generation](web::WebProgress const& progress) {

@@ -198,7 +198,7 @@ void RankedLeaderboardPopup::fetch(int offset) {
     m_caption->setColor(TextMuted);
     auto const generation = ++m_generation;
     auto const mode = m_mode;
-    web::WebRequest request; request.timeout(std::chrono::seconds(20));
+    web::WebRequest request;[](auto& q){if constexpr(requires{q.getHttpVersion();})q.version(decltype(q.getHttpVersion())::VERSION_2TLS);}(request); /* HTTP/2: see PREFER_HTTP2 note in RankedRuntime.cpp */ request.timeout(std::chrono::seconds(20));
     auto url=RankedRuntime::get().leaderboardUrl(offset,kPageSize,mode);
     if(!m_searchQuery.empty()) {
         url+="&search=";

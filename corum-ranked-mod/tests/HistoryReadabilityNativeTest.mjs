@@ -196,7 +196,7 @@ std::string operator""_spr(char const*s,std::size_t n){return {s,n};}
 namespace corum::ranked::ui{struct RankedConfirmPopup{inline static int creates=0;inline static RankedConfirmPopup*last=nullptr;std::function<void(bool)>done;bool shown=false;int z=0,cancellations=0;
  static auto*create(std::string,std::string,std::function<void(bool)> callback,std::string){++creates;auto*p=new RankedConfirmPopup;p->done=callback;return last=p;}
  void setID(std::string){}void show(){shown=true;}void setZOrder(int value){z=value;}void cancel(){++cancellations;shown=false;}};}
-struct Layer{enum class Page{Live,HistoryList,HistoryDetail};Page m_page=Page::HistoryDetail;bool running=true,m_historyReconnectShown=false;
+struct Layer{enum class Page{Live,HistoryList,HistoryDetail,Achievements};Page m_page=Page::HistoryDetail;bool running=true,m_historyReconnectShown=false;
  std::optional<WeakRef<corum::ranked::ui::RankedConfirmPopup>>m_historyReconnect;std::string m_renderedUiKey="history";
  void closeHistoryFilter(){}
  bool isRunning(){return running;}std::string tr(char const*,char const*fallback){return fallback;}

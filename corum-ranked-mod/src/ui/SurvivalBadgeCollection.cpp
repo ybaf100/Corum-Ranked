@@ -78,7 +78,7 @@ class BadgeCollection final:public Popup {
         if(m_closed||m_busy)return;m_busy=true;auto const generation=++m_generation;auto const session=m_session;
         m_status->setString(i18n::text("loading","Loading...").c_str());
         clearCards();
-        web::WebRequest request;request.header("Authorization","Bearer "+session);request.followRedirects(false);request.timeout(std::chrono::seconds(15));
+        web::WebRequest request;[](auto& q){if constexpr(requires{q.getHttpVersion();})q.version(decltype(q.getHttpVersion())::VERSION_2TLS);}(request); /* HTTP/2: see PREFER_HTTP2 note in RankedRuntime.cpp */request.header("Authorization","Bearer "+session);request.followRedirects(false);request.timeout(std::chrono::seconds(15));
         m_request.spawn(request.get("https://api.hwanhee1.com/api/ranked/survival/badges"),[weak=WeakRef(this),generation,session](web::WebResponse response){
             auto p=weak.lock();if(!p||p->m_closed||p->m_generation!=generation||session!=RankedRuntime::get().spectatorLiveSessionToken())return;p->m_busy=false;
             auto json=response.json();bool const valid=response.code()==200&&json.isOk()&&survivalBadgeCollectionValid(json.unwrap());

@@ -1,4 +1,5 @@
 #include "TierProgressBar.hpp"
+#include "PlayerIcon.hpp"
 #include "RankBadgeAssets.hpp"
 #include "RankedVisuals.hpp"
 #include "RankedTranslations.hpp"
@@ -84,11 +85,22 @@ CCNode* TierProgressBar::buildLabels(TierProgressView const& view, std::string c
             if (!promotionTarget.empty()) { next = rankTierDisplay(promotionTarget);nextBadge = createAnimatedRankBadge(promotionTarget, {15, 15}, RankBadgeDisplay::Matched); }
             break;
         case TierProgressKind::RankChase: nextBadge = rankChip(view.targetRank);break;
-        case TierProgressKind::Leader: nextBadge = rankChip(1);break;
+        case TierProgressKind::Leader: case TierProgressKind::Standing: {
+            // The own icon beside the own ladder rank.
+            auto* holder = CCNode::create();
+            holder->addChild(rankChip(view.kind == TierProgressKind::Leader ? 1 : view.targetRank), 2);
+            if (auto* icon = PlayerIcon::createLocal()) {
+                auto const box = icon->getContentSize();
+                icon->setScale(14.0f / std::max(1.0f, std::max(box.width, box.height)));
+                icon->setPosition({-18.0f, 0.0f});holder->addChild(icon, 1);
+            }
+            nextBadge = holder;break;
+        }
         default: break;
     }
     auto nextX = right;
-    if (nextBadge) { nextBadge->setPosition({right - 9.0f, 11.0f});root->addChild(nextBadge, 3);nextX = right - 20.0f; }
+    if (nextBadge) { nextBadge->setPosition({right - 9.0f, 11.0f});root->addChild(nextBadge, 3);
+        nextX = right - (view.kind == TierProgressKind::Leader || view.kind == TierProgressKind::Standing ? 38.0f : 20.0f); }
     if (!next.empty()) {
         auto* nextLabel = label(next, .20f, {nextX, 11.0f}, TextMuted, FontWeight::ExtraBold);
         nextLabel->setAnchorPoint({1.0f, 0.5f});fitMenuLabelWidth(nextLabel, width * .34f, .20f, .12f);root->addChild(nextLabel, 4);
@@ -109,6 +121,8 @@ CCNode* TierProgressBar::buildLabels(TierProgressView const& view, std::string c
             caption = fmt::format(fmt::runtime(i18n::text("tier-bar-rank", "To #{}: {} LP")), view.targetRank, view.remaining);break;
         case TierProgressKind::Leader:
             caption = i18n::text("tier-bar-leader", "#1 ON THE LADDER");break;
+        case TierProgressKind::Standing:
+            caption = fmt::format(fmt::runtime(i18n::text("tier-bar-standing", "#{} ON THE LADDER")), view.targetRank);break;
         case TierProgressKind::Top:
             caption = i18n::text("tier-bar-top", "TOP TIER");break;
         default: break;
@@ -123,6 +137,7 @@ CCNode* TierProgressBar::buildLabels(TierProgressView const& view, std::string c
     if (!score.empty()) {
         auto* scoreLabel = label(score, .18f, {right, row}, TextMuted, FontWeight::SemiBold);
         scoreLabel->setAnchorPoint({1.0f, 0.5f});fitMenuLabelWidth(scoreLabel, width * .36f, .18f, .11f);root->addChild(scoreLabel, 4);
+        if (!m_score) m_score = scoreLabel;
     }
     if (view.kind == TierProgressKind::Promotion) {
         // Series marks, right-aligned: won (green), lost (red), left (empty).
@@ -138,8 +153,22 @@ CCNode* TierProgressBar::buildLabels(TierProgressView const& view, std::string c
     return root;
 }
 
+void TierProgressBar::countScoreFrom(int score) {
+    if (!m_score || score == m_view.score) return;
+    m_scoreFrom = score;m_scoreAnim = 0.0f;
+    m_score->setString(fmt::format("{} LP", score).c_str());
+    unschedule(schedule_selector(TierProgressBar::update));scheduleUpdate();
+}
+
 void TierProgressBar::update(float dt) {
     m_time += dt;
+    if (m_scoreAnim >= 0.0f && m_score) {
+        m_scoreAnim += dt;
+        auto const t = std::clamp((m_scoreAnim - 0.2f) / 0.9f, 0.0f, 1.0f), eased = 1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t);
+        auto const value = static_cast<int>(std::lround(m_scoreFrom + (m_view.score - m_scoreFrom) * eased));
+        m_score->setString(fmt::format("{} LP", value).c_str());
+        if (t >= 1.0f) m_scoreAnim = -1.0f;
+    }
     if (m_animating) {
         m_anim += dt;
         if (m_anim > 3.2f) {
