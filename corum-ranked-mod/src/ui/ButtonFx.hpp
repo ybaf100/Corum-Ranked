@@ -14,9 +14,11 @@ using namespace geode::prelude;
 enum class ButtonFxKind { Standard, Hero };
 
 inline constexpr int ButtonFxTag = 8040;
-// A button face tagged with this keeps its rectangle and its contents
-// upright: ButtonFx does not lean it (the achievement grade plate).
-inline constexpr int UprightFaceTag = 8041;
+// A button face marked upright keeps its rectangle and its contents: ButtonFx
+// does not lean it (the achievement grade plate). A user flag, not the tag:
+// CCMenuItemSprite re-tags its image (kNormalTag) when it becomes a button.
+inline void keepUpright(CCNode* face) { if (face) face->setUserFlag("upright-face"_spr); }
+inline bool keepsUpright(CCNode* face) { return face && face->getUserFlag("upright-face"_spr); }
 // Lean of every slanted slab, caption and title, in degrees.
 inline constexpr float SlabSkew = 8.0f;
 
@@ -81,7 +83,7 @@ class ButtonFx final : public CCNode {
         bool leaned = false;
         // Button-shaped faces lean like every other slab, captions included.
         // Rows, cards and square icon buttons keep their rectangle.
-        if (m_kind == ButtonFxKind::Standard && m_skew == 0.0f && face->getSkewX() == 0.0f && face->getTag() != UprightFaceTag &&
+        if (m_kind == ButtonFxKind::Standard && m_skew == 0.0f && face->getSkewX() == 0.0f && !keepsUpright(face) &&
             size.height <= 40.0f && size.width <= 200.0f && size.width >= size.height * 1.6f) {
             // Only the chrome leans; captions and icons stay upright to read.
             for (auto* child : CCArrayExt<CCNode*>(face->getChildren()))

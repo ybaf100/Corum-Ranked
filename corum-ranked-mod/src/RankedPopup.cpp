@@ -6570,7 +6570,7 @@ class CorumRankedLayer final : public CCLayerColor {
         auto* ap = corum::ranked::ui::achievementPlate("", plateSize, gradeTone, gradePanel, kGold, 0.38f);
         // A button, but the grade plate does not lean: its core, name, AP and
         // steps stay upright like the grade elsewhere.
-        ap->setTag(corum::ranked::ui::UprightFaceTag);
+        corum::ranked::ui::keepUpright(ap);
         auto* emblem = corum::ranked::ui::achievementGradeEmblem(21.0f, grade.tier, gradeTone, gradePanel);
         emblem->setPosition({13.5f, 13.5f}); ap->addChild(emblem, 6);
         auto const textLeft = 26.0f, textRight = plateSize.width - 6.0f;

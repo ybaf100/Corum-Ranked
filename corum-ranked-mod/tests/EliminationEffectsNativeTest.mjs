@@ -82,8 +82,13 @@ test('achievement grade emblem opens the ladder; effect picker previews the sele
  // The grade ladder shows each grade's tier core only, not the full tier mark.
  assert.match(grades,/achievementGradeEmblem\(20\.0f, name, rowTone, achievementGradePanel\(name\)\)/);
  assert.doesNotMatch(grades,/createAnimatedRankBadge/);
- // The grade plate is a button face that stays upright (no slab lean).
- assert.match(popup,/ap->setTag\(corum::ranked::ui::UprightFaceTag\)/);
+ // The grade plate is a button face that stays upright (no slab lean). The
+ // mark is a user flag: CCMenuItemSprite re-tags its image, so a tag is lost
+ // as soon as the plate becomes the button's face (beta.70 shipped that way).
+ assert.match(popup,/auto\* ap = corum::ranked::ui::achievementPlate\([^\n]*\n(?:\s*\/\/[^\n]*\n)*\s*corum::ranked::ui::keepUpright\(ap\);/);
+ const buttonFx=readFileSync(join(root,'src/ui/ButtonFx.hpp'),'utf8');
+ assert.match(buttonFx,/setUserFlag\("upright-face"_spr\)/);assert.match(buttonFx,/!keepsUpright\(face\) &&/);
+ assert.doesNotMatch(buttonFx,/getTag\(\) != Upright/);
  assert.match(popup,/RankedAchievementGradePopup::create\(RankedRuntime::get\(\)\.view\(\)\.achievements\.totalAp\)/);
  assert.match(ladder,/for \(std::size_t i = 0; i < kAchievementApGrades\.size\(\); \+\+i\)/);
  // Border between the first F frame (1.5) and the thin draft (0.8).
