@@ -34,14 +34,19 @@ test('editing text regenerates native and server wording and font coverage; inva
  try{
   const builder=join(dir,'ranked/tools/localization/build.mjs');mkdirSync(dirname(builder),{recursive:true});cpSync(join(root,'ranked/tools/localization/build.mjs'),builder);
   cpSync(join(root,'ranked/translations'),join(dir,'ranked/translations'),{recursive:true});mkdirSync(join(dir,'corum-ranked-mod'),{recursive:true});cpSync(join(root,'corum-ranked-mod/mod.json'),join(dir,'corum-ranked-mod/mod.json'));
-  const catalog=structuredClone(ui);catalog.close={en:'Close the panel',ko:'힣 닫기'};
+  // A new character joins every weight's charset. Hangul cannot grow: the
+  // atlas budget (352 syllables) is full, so that is a build error below.
+  const catalog=structuredClone(ui);catalog.close={en:'Close the panel',ko:'◇ 닫기'};
   const path=join(dir,'ranked/translations/ui.json');writeFileSync(path,JSON.stringify(catalog,null,2)+'\n');
   const ach=structuredClone(achievements);ach.ranked_wins.name.en='Changed in text';writeFileSync(join(dir,'ranked/translations/achievements.json'),JSON.stringify(ach,null,2));
   execFileSync('node',[builder],{stdio:'pipe'});
   assert.match(readFileSync(join(dir,'corum-ranked-mod/src/domain/TranslationCatalog.generated.hpp'),'utf8'),/Close the panel/);
   assert.match(readFileSync(join(dir,'ranked/packages/rules/src/achievement-translations.generated.ts'),'utf8'),/Changed in text/);
   const manifest=JSON.parse(readFileSync(join(dir,'corum-ranked-mod/mod.json'),'utf8'));
-  for(const name of ['CorumSansMedium','CorumSansSemiBold','CorumSansBold','CorumSansBlack'])assert(manifest.resources.fonts[name].charset.split(',').includes('55203'));
+  for(const name of ['CorumSansMedium','CorumSansSemiBold','CorumSansBold','CorumSansBlack'])assert(manifest.resources.fonts[name].charset.split(',').includes('9671'));
+  catalog.close.ko='힣 닫기';writeFileSync(path,JSON.stringify(catalog,null,2)+'\n');
+  {const run=spawnSync('node',[builder]);assert.notEqual(run.status,0);assert.match(run.stderr.toString(),/font atlas holds 352\. New: 힣/);}
+  catalog.close.ko='◇ 닫기';
   catalog.close.en='Missing {value}';writeFileSync(path,JSON.stringify(catalog,null,2));assert.notEqual(spawnSync('node',[builder]).status,0);
   writeFileSync(path,'{\n  "duplicate": {"en":"A","ko":"A"},\n  "duplicate": {"en":"B","ko":"B"}\n}\n');assert.notEqual(spawnSync('node',[builder]).status,0);
   writeFileSync(path,JSON.stringify({missing:{en:'No Korean'}}));assert.notEqual(spawnSync('node',[builder]).status,0);

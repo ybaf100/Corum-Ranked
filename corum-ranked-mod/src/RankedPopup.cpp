@@ -57,6 +57,8 @@
 #include "ui/LobbyScoreTransition.hpp"
 #include "ui/RankedTranslations.hpp"
 #include "ui/RankedVisuals.hpp"
+#include "ui/RankedLoadingBar.hpp"
+#include "domain/LoadingTips.generated.hpp"
 #include "ui/RankedInput.hpp"
 #include "ui/RankedSettingsPopup.hpp"
 #include "ui/RankedHistoryFilterPopup.hpp"
@@ -91,6 +93,7 @@
 #include <iomanip>
 #include <limits>
 #include <optional>
+#include <random>
 #include <utility>
 #include <sstream>
 #include <string>
@@ -539,6 +542,10 @@ class CorumRankedLayer final : public CCLayerColor {
     // when it began, and whether it is over for this lobby visit.
     mutable std::optional<std::chrono::steady_clock::time_point> m_survivalWaitSince;
     mutable bool m_survivalWaitDone = false;
+    // Loading view: the bar's shown fill (kept across re-renders) and the tip
+    // on screen (-1 until the first loading view picks one).
+    float m_loadingShown = 0.0f;
+    int m_loadingTip = -1;
     corum::ranked::ModeLobbyTransition m_modeTransition;
     bool m_returnToModesAfterQueue = false;
     CCLayerColor *m_lobbySurvival = nullptr, *m_lobbySolo = nullptr, *m_lobbyPanel = nullptr;
@@ -4038,24 +4045,75 @@ class CorumRankedLayer final : public CCLayerColor {
         if(visible&&m_root)if(auto* population=typeinfo_cast<corum::ranked::ui::LobbyPopulationView*>(m_root->getChildByID("ranked-lobby-population"_spr)))population->updatePopulation({runtime.view().lobbyOffline,runtime.view().lobbyOnline,runtime.view().lobbyPopulationKnown});
     }
 
+    // Loading view: the status, a bar that follows the real entry steps, and
+    // a random tip (tap for another) from ranked/translations/loading-tips.md.
+    void addLoadingView(RuntimeView const& view, std::string const& message, bool awaitingSurvival) {
+        auto const size = CCDirector::sharedDirector()->getWinSize();
+        auto* status = makeLabel(message, 0.30f, {size.width / 2, size.height / 2 + 16.0f}, kGold, "semibold");
+        corum::ranked::ui::fitMenuLabelWidth(status, size.width - 60, 0.30f, 0.17f); m_root->addChild(status, 5);
+        auto const barWidth = std::min(280.0f, size.width * 0.46f);
+        if (auto* bar = corum::ranked::ui::RankedLoadingBar::create(barWidth, 7.0f, &m_loadingShown,
+                corum::ranked::loadingStepFor(view.status, awaitingSurvival))) {
+            bar->setPosition({size.width / 2 - barWidth / 2, size.height / 2 - 8.0f});
+            bar->setID("ranked-loading-bar"_spr); m_root->addChild(bar, 5);
+        }
+        if (corum::ranked::kLoadingTips.empty()) return;
+        auto const count = corum::ranked::kLoadingTips.size();
+        if (m_loadingTip < 0 || static_cast<std::size_t>(m_loadingTip) >= count)
+            m_loadingTip = static_cast<int>(randomLoadingTipSeed() % count);
+        auto const width = std::min(420.0f, size.width - 80.0f);
+        auto* face = CCNode::create(); face->setContentSize({width, 52.0f});
+        addChip(face, tr("loading-tip", "TIP"), {width / 2 - 14.0f, 45.0f}, corum::ranked::ui::Accent, corum::ranked::ui::AccentInk, 13.0f, false);
+        auto* text = makeLabel("", fontScale(16.0f), {width / 2, 25.0f}, corum::ranked::ui::Text, "semibold");
+        text->setID("ranked-loading-tip-text"_spr);
+        corum::ranked::ui::fitWrappedMenuLabel(text, loadingTipText(), width, 26.0f, fontScale(16.0f)); face->addChild(text, 5);
+        auto* hint = makeLabel(tr("loading-tip-next", "TAP FOR ANOTHER TIP"), fontScale(12.0f), {width / 2, 5.0f}, corum::ranked::ui::TextMuted, "semibold");
+        corum::ranked::ui::fitMenuLabelWidth(hint, width, fontScale(12.0f), 0.1f); face->addChild(hint, 5);
+        auto* item = CCMenuItemSpriteExtra::create(face, this, menu_selector(CorumRankedLayer::onLoadingTip));
+        item->setID("ranked-loading-tip"_spr); item->setPosition({size.width / 2, 58.0f}); m_menu->addChild(item);
+    }
+    static std::size_t randomLoadingTipSeed() {
+        static std::mt19937 random{std::random_device{}()};
+        return static_cast<std::size_t>(random());
+    }
+    std::string loadingTipText() const {
+        auto const& tip = corum::ranked::kLoadingTips[static_cast<std::size_t>(std::max(0, m_loadingTip)) % corum::ranked::kLoadingTips.size()];
+        return corum::ranked::i18n::isKorean() ? tip.korean : tip.english;
+    }
+    void onLoadingTip(CCObject*) {
+        if (corum::ranked::kLoadingTips.empty()) return;
+        m_loadingTip = static_cast<int>(corum::ranked::nextLoadingTip(static_cast<std::size_t>(std::max(0, m_loadingTip)),
+            corum::ranked::kLoadingTips.size(), randomLoadingTipSeed()));
+        // Update the tip in place: re-rendering here would remove the button
+        // being pressed from inside its own callback.
+        if (!m_root) return;
+        if (auto* text = typeinfo_cast<CCLabelBMFont*>(m_root->getChildByIDRecursive("ranked-loading-tip-text"_spr))) {
+            auto const width = std::min(420.0f, CCDirector::sharedDirector()->getWinSize().width - 80.0f);
+            corum::ranked::ui::fitWrappedMenuLabel(text, loadingTipText(), width, 26.0f, fontScale(16.0f));
+        }
+    }
+
     void renderMain(RuntimeView const& view) {
         auto const size = CCDirector::sharedDirector()->getWinSize();
         auto const selected = m_modeTransition.selected();
         addTopBack(true);
         addLobbyHeader(view, selected);
         if (awaitingSurvivalProfile(view)) {
-            auto* message = makeLabel(tr("syncing","SYNCING..."),0.30f,{size.width/2,size.height/2},kGold,"semibold");
-            corum::ranked::ui::fitMenuLabelWidth(message,size.width-60,0.30f,0.17f); m_root->addChild(message,5);
-            auto* spinner = LoadingSpinner::create(42); spinner->setPosition({size.width/2,size.height/2-45}); m_root->addChild(spinner,5);
+            addLoadingView(view, tr("syncing","SYNCING..."), true);
+            return;
+        }
+        if (view.stage == RuntimeStage::Loading) {
+            addLoadingView(view, lobbyMessage(view), false);
             return;
         }
         if (view.stage != RuntimeStage::Ready && view.stage != RuntimeStage::Queued && view.stage != RuntimeStage::JoiningQueue) {
             auto* message = makeLabel(lobbyMessage(view),0.30f,{size.width/2,size.height/2},kGold,"semibold");
             corum::ranked::ui::fitMenuLabelWidth(message,size.width-60,0.30f,0.17f); m_root->addChild(message,5);
-            if (view.stage == RuntimeStage::Loading) { auto* spinner = LoadingSpinner::create(42); spinner->setPosition({size.width/2,size.height/2-45}); m_root->addChild(spinner,5); }
-            else addButton(tr("retry","RETRY"),{size.width/2,size.height/2-45},menu_selector(CorumRankedLayer::onRetry),false,0.65f);
+            addButton(tr("retry","RETRY"),{size.width/2,size.height/2-45},menu_selector(CorumRankedLayer::onRetry),false,0.65f);
             return;
         }
+        // The lobby is up: the next loading view starts its bar from empty.
+        m_loadingShown = 0.0f;
         // L1 halves / L2-L3 page: lobby groups sit at the origin at scale 1.
         m_lobbySurvival = makeLobbyGroup({0.0f,0.0f},1.0f,"survival-profile-half"_spr);
         m_lobbySolo = makeLobbyGroup({0.0f,0.0f},1.0f,"solo-ranked-profile-half"_spr);

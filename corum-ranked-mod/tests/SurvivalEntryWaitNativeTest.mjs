@@ -10,7 +10,7 @@ function body(name){const at=source.indexOf(name);assert(at>=0,name);let end=sou
 test('the lobby waits for the Survival profile once, so its card never shows a provisional UNRANKED',()=>{
  // The main lobby renders the loading view while waiting, and the wait is part of the re-render key.
  const main=body('void renderMain(RuntimeView const& view)'),wait=main.indexOf('if (awaitingSurvivalProfile(view)) {');
- assert(wait>=0&&main.indexOf('LoadingSpinner::create',wait)>wait&&main.indexOf('return;',wait)<main.indexOf('makeLobbyGroup',wait));
+ assert(wait>=0&&main.indexOf('addLoadingView(view',wait)>wait&&main.indexOf('return;',wait)<main.indexOf('makeLobbyGroup',wait));
  assert.match(source,/:sur-wait:\{\}",[^\n]*awaitingSurvivalProfile\(view\)\)/);
  const dir=mkdtempSync(join(tmpdir(),'corum-survival-wait-'));
  try{

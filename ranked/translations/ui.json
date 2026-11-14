@@ -4150,5 +4150,13 @@
   "ladder-demoted": {
     "en": "LADDER DEMOTION",
     "ko": "순위 변동으로 강등"
+  },
+  "loading-tip": {
+    "en": "TIP",
+    "ko": "TIP"
+  },
+  "loading-tip-next": {
+    "en": "TAP FOR ANOTHER TIP",
+    "ko": "누르면 다른 TIP"
   }
 }
