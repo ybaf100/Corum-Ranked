@@ -286,7 +286,17 @@ void TierProgressBar::redraw() {
             : shown.kind == TierProgressKind::Promotion || style != TierBarStyle::Plain ? Gold : shown.kind == TierProgressKind::Near ? Green : tone;
         auto const glow = shown.kind == TierProgressKind::Promotion ? 0.75f + 0.25f * std::sin(m_time * 4.0f) : 1.0f;
         auto const x = left + m_width * std::max(fill, 0.02f);
-        quad(m_draw, left, y0, x, y1, rgba(color, glow * k));
+        if (shown.tier == "CHAMPION" && !edge) {
+            // Solo CHAMPION: the fill in the Mythic achievement's moving pastels.
+            constexpr int segments = 42;
+            for (int i = 0; i < segments; ++i) {
+                auto const a = left + m_width * static_cast<float>(i) / segments, b = std::min(x, left + m_width * static_cast<float>(i + 1) / segments + 0.3f);
+                if (b <= a) break;
+                quad(m_draw, a, y0, b, y1, mythicPastel(static_cast<float>(i) / segments, seconds, k));
+            }
+        } else {
+            quad(m_draw, left, y0, x, y1, rgba(color, glow * k));
+        }
         quad(m_draw, left, y0, x, y0 + 1.6f, {0, 0, 0, 0.28f * k});
         if (style != TierBarStyle::Plain) {
             // Gold fill shine: a soft light band sweeps across the filled part

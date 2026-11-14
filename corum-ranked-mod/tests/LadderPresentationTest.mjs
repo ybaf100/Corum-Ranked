@@ -109,3 +109,10 @@ test('during a promotion series the LP shows in the gold title shimmer',()=>{
  // Survival's card reads the Survival series.
  assert.match(card,/view\.promotion = profile\.promotion;/);
 });
+
+test('Solo MASTER / CHAMPION ladder bars shine like the achievement bars (Legendary gold, Mythic rainbow)',()=>{
+ const panel=method(read('src/RankedPopup.cpp'),'    void renderModePanel(RuntimeView const& view, corum::ranked::RankedMode mode) {');
+ assert.match(panel,/if \(!survival && \(nowTier == "MASTER" \|\| nowTier == "CHAMPION"\)\) \{[\s\S]*?styleAchievementFill\(bar, nowTier == "CHAMPION" \? 5 : 4, true, true\);/);
+ // The bar under the start button: CHAMPION's fill in the Mythic pastels (MASTER keeps its gold shine).
+ assert.match(read('src/ui/TierProgressBar.cpp'),/if \(shown\.tier == "CHAMPION" && !edge\) \{[\s\S]*?mythicPastel\(/);
+});

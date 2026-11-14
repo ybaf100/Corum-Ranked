@@ -2580,14 +2580,15 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     // Skewed progress bar (.bar / .ladder segment): track and fill.
-    void addSkewBar(CCNode* parent, CCPoint leftCenter, float width, float height, float fill, ccColor3B color, int z = 6) {
+    // Returns the fill (nullptr when empty) so a caller can restyle it.
+    CCLayerColor* addSkewBar(CCNode* parent, CCPoint leftCenter, float width, float height, float fill, ccColor3B color, int z = 6) {
         auto* track = CCLayerColor::create({32, 35, 46, 255}, width, height);
         track->setPosition({leftCenter.x, leftCenter.y - height / 2.0f}); track->setSkewX(20.0f); parent->addChild(track, z);
         auto const filled = std::clamp(fill, 0.0f, 1.0f) * width;
-        if (filled > 0.5f) {
-            auto* bar = CCLayerColor::create({color.r, color.g, color.b, 255}, filled, height);
-            bar->setPosition({leftCenter.x, leftCenter.y - height / 2.0f}); bar->setSkewX(20.0f); parent->addChild(bar, z + 1);
-        }
+        if (filled <= 0.5f) return nullptr;
+        auto* bar = CCLayerColor::create({color.r, color.g, color.b, 255}, filled, height);
+        bar->setPosition({leftCenter.x, leftCenter.y - height / 2.0f}); bar->setSkewX(20.0f); parent->addChild(bar, z + 1);
+        return bar;
     }
 
     // III · II · I ladder: passed divisions full, the current one partly.
@@ -3047,7 +3048,14 @@ class CorumRankedLayer final : public CCLayerColor {
                     survival ? 0 : series.winsRequired, series.results));
             }
             else if (division) addDivisionLadder(m_root, {ladderX, ladderTop - 19.0f}, ladderW, division, progress.fill, tierColor(nowTier), true);
-            else addSkewBar(m_root, {ladderX, ladderTop - 19.0f}, ladderW, px(12.0f), progress.fill, tierColor(nowTier));
+            else if (auto* bar = addSkewBar(m_root, {ladderX, ladderTop - 19.0f}, ladderW, px(12.0f), progress.fill, tierColor(nowTier))) {
+                // Solo ladder titles shine like the achievement bars: MASTER in
+                // the Legendary gold sweep (IV), CHAMPION in the Mythic rainbow (V).
+                if (!survival && (nowTier == "MASTER" || nowTier == "CHAMPION")) {
+                    bar->setID("ranked-panel-ladder-title-bar"_spr);
+                    corum::ranked::ui::styleAchievementFill(bar, nowTier == "CHAMPION" ? 5 : 4, true, true);
+                }
+            }
         }
 
         // Row 3: the hero START slab and its line.
