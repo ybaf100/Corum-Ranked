@@ -384,6 +384,19 @@ public:
         // through our post-call ownership cleanup even for native menu callers.
         [[maybe_unused]] Ref<PauseLayer> keepAlive(this);
         auto owner = m_fields->owner ? m_fields->owner->lock() : Ref<PlayLayer>();
+        // Native Resume resumes PlayLayer::get(). A key press can reach a
+        // Pause left in the scene a finished round departed (custom-keybinds
+        // keeps its listener on the detached Pause): with the PlayLayer
+        // retired, or another round's in its place, native Resume runs on a
+        // null or foreign PlayLayer (Windows crash mashing keys on the
+        // elimination screen). Release this Pause's ranked state only.
+        auto* play = PlayLayer::get();
+        if (!play || (owner && owner.data() != play)) {
+            geode::log::info("[RankedPause] stale resume ignored play={} owner={}", play != nullptr, static_cast<bool>(owner));
+            retireRankedPause();
+            releaseRankedPauseOwnership();
+            return;
+        }
         retireRankedPause(); PauseLayer::onResume(sender);
         // Keep the exact ownership if a native/other-hook Resume refuses. A
         // second quit must not bypass the refusal just because the lease ended.

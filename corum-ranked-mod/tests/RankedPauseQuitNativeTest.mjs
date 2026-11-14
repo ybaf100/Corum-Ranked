@@ -52,6 +52,15 @@ void PauseLayer::onResume(CCObject* sender){if(dispatching){nativeResume();retur
 ${body('bool resumeRankedPauseBeforeQuit(PlayLayer* layer)')}
 int main(){
  PlayLayer a,b;PlayLayer::current=&a;
+ // A key reaching a Pause the finished round left behind: no native Resume
+ // on a null (retired) or foreign PlayLayer; ranked state is still released.
+ for(PlayLayer* live:{static_cast<PlayLayer*>(nullptr),&b}){
+  CorumRankedPauseLayer pause;Popup dialog;pause.fields.owner.emplace(&a);pause.fields.popup.emplace(&dialog);activeRankedPause.emplace(&pause);
+  auto const ends=RankedRuntime::get().ends;PlayLayer::current=live;
+  pause.onResume(nullptr);
+  assert(pause.resumes==0&&a.m_isPaused&&!activeRankedPause&&!pause.fields.owner&&dialog.dismisses==1&&RankedRuntime::get().ends==ends+1&&pause.fields.leaseId.empty());
+ }
+ PlayLayer::current=&a;
  // Ordinary/Placement Pause is never claimed by the Ranked helper.
  assert(resumeRankedPauseBeforeQuit(&a)&&a.m_isPaused);
  assert(resumeRankedPauseBeforeQuit(nullptr));
@@ -95,6 +104,7 @@ struct CCObject{};
 struct SurvivalRuntime {static SurvivalRuntime& get(){static SurvivalRuntime r;return r;}bool surrenderPending()const{return false;}};
 struct AppDelegate {bool m_gamePaused=false;static AppDelegate* get(){static AppDelegate a;return &a;}};
 struct Object {int refs=1;bool alive=true;void retain(){assert(alive);++refs;}void release(){assert(alive&&refs>0);if(--refs==0)alive=false;}};
+namespace geode::log {template<class...T>void info(T...) {}}
 struct PlayLayer:Object {bool m_isPaused=true;inline static PlayLayer* current=nullptr;static PlayLayer* get(){return current;}};
 template<class T>struct Ref{T* p=nullptr;Ref()=default;explicit Ref(T* v):p(v){if(p)p->retain();}Ref(Ref const& v):Ref(v.p){}Ref(Ref&& v):p(std::exchange(v.p,nullptr)){}~Ref(){if(p)p->release();}T* data()const{return p;}T* operator->()const{assert(p&&p->alive);return p;}explicit operator bool()const{return p;}};
 template<class T>struct WeakRef {T* p;explicit WeakRef(T* v):p(v){p->retain();}~WeakRef(){p->release();}Ref<T> lock()const{return Ref<T>(p);}};
