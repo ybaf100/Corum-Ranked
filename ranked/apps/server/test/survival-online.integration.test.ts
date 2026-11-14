@@ -379,6 +379,13 @@ describe("Survival M5 public HTTP and persistent online game",()=>{
    m=await engine.get(id);expect(m.state).toBe("FINAL_RESULT");expect(m.winnerId).toBe(group[1]!.session.playerId);
    const result=(await api(group[1]!,`/online/matches/${id}`)).body.result;expect(result).toMatchObject({rank:1,requestedDelta:50});
    expect((await db.query("SELECT * FROM sur_lp_ledger")).rows).toHaveLength(2);
+   // The result carries the own ladder rank before / after the match for the
+   // result screen's GOLD bar (own icon and rank, as in Solo).
+   const winner=group[1]!.session.playerId,live=await survival.standing(winner);
+   expect(result.standingAfter).toEqual(live);
+   expect(result.standingBefore.totalPlayers).toBe(live.totalPlayers);expect(result.standingBefore.rank).toBeGreaterThanOrEqual(1);
+   expect((await survival.standingAt(winner,1_000_000)).rank).toBe(1);
+   expect((await survival.standingAt(winner,-1)).rank).toBe(live.totalPlayers);
  });
  it("refuses foreign score writes, changed duplicate payloads, arbitrary maps, out-of-range progress and stale sessions",async()=>{
    const {group,id}=await game(8);const stranger=await client();let m=await prepare(id,group);const c=group[0]!,r=survivalCurrentRound(m);

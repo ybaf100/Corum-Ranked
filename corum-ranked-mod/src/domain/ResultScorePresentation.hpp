@@ -255,7 +255,10 @@ inline ScoreProgressSample sampleScoreProgress(ScoreAnimationInput const& input,
         sample.nextTier=sample.standing.nextTier;
         sample.target=*sample.standing.nextTierCutoff==std::numeric_limits<int>::max()?*sample.standing.nextTierCutoff:*sample.standing.nextTierCutoff+1;
     } else {
-        sample.goldLeader = sample.standing.rank == 1;
+        // The top band with nobody above to chase (#1, or a ladder without
+        // targets such as Survival's): the own icon and rank on a full bar,
+        // as the lobby's Leader / Standing bar shows it.
+        sample.goldLeader = sample.standing.rank == 1 || (sample.standing.rank && !sample.standing.target);
         sample.target = sample.standing.target ? sample.standing.target->score : sample.score;
     }
     auto const span = static_cast<double>(sample.target) - sample.minimum;

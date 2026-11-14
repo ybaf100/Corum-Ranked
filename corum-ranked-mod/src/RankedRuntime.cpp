@@ -4503,5 +4503,8 @@ void RankedRuntime::tick() {
     flushProgressTelemetry();
 }
 
-} // namespace corum::ranked
+StandingView parseStandingView(matjson::Value const& value) {
+    return ::parseStanding(value);
+}
 
+} // namespace corum::ranked

@@ -7,6 +7,7 @@
 #include "../domain/RankTierPresentation.hpp"
 #include "../domain/AchievementStyle.hpp"
 #include "../domain/LeaderboardPresentation.hpp"
+#include "../domain/PromotionMarks.hpp"
 #include <chrono>
 #include <algorithm>
 #include <cmath>
@@ -140,14 +141,23 @@ CCNode* TierProgressBar::buildLabels(TierProgressView const& view, std::string c
         if (!m_score) m_score = scoreLabel;
     }
     if (view.kind == TierProgressKind::Promotion) {
-        // Series marks, right-aligned: won (green), lost (red), left (empty).
-        auto const games = std::clamp(view.promotionGames, 1, 9);
+        // Series marks, right-aligned: won (green), lost (red), left (empty);
+        // the games still needed as wins carry a green outline (Solo).
+        auto const marks = seriesMarks(view.promotionGames, view.promotionWins, view.promotionResults);
+        auto const games = static_cast<int>(marks.size());
         for (int i = 0; i < games; ++i) {
             auto const x = right - 4.0f - static_cast<float>(games - 1 - i) * 10.0f;
-            auto const result = i < static_cast<int>(view.promotionResults.size()) ? view.promotionResults[static_cast<std::size_t>(i)] : std::string();
-            auto const accent = result == "WIN" ? Green : result.empty() ? TextMuted : Red;
-            auto* mark = surface({8, 8}, {x, row}, accent, result.empty() ? Ink : SurfaceSoft, 255, !result.empty());
-            root->addChild(mark, 4);
+            auto const mark = marks[static_cast<std::size_t>(i)];
+            if (mark == SeriesMark::NeedWin) {
+                auto* frame = CCLayerColor::create({Green.r, Green.g, Green.b, 255}, 8.0f, 8.0f);
+                frame->setPosition({x - 4.0f, row - 4.0f}); root->addChild(frame, 4);
+                auto* inside = CCLayerColor::create({Ink.r, Ink.g, Ink.b, 255}, 6.0f, 6.0f);
+                inside->setPosition({x - 3.0f, row - 3.0f}); root->addChild(inside, 5);
+                continue;
+            }
+            auto const played = mark == SeriesMark::Win || mark == SeriesMark::Loss;
+            auto const accent = mark == SeriesMark::Win ? Green : played ? Red : TextMuted;
+            root->addChild(surface({8, 8}, {x, row}, accent, played ? SurfaceSoft : Ink, 255, played), 4);
         }
     }
     return root;

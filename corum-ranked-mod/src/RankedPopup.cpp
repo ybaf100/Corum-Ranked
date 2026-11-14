@@ -58,6 +58,8 @@
 #include "ui/RankedTranslations.hpp"
 #include "ui/RankedVisuals.hpp"
 #include "ui/RankedLoadingBar.hpp"
+#include "ui/LadderShineBar.hpp"
+#include "domain/PromotionMarks.hpp"
 #include "domain/LoadingTips.generated.hpp"
 #include "ui/RankedInput.hpp"
 #include "ui/RankedSettingsPopup.hpp"
@@ -1729,7 +1731,16 @@ class CorumRankedLayer final : public CCLayerColor {
                 : menu_selector(CorumRankedLayer::onHistoryBack)
         );
         button->setPosition({24.0f, size.height - 24.0f});
-        m_menu->addChild(button);
+        button->setID("ranked-top-back"_spr);
+        // Its own menu, one step ahead of every other lobby menu: where the
+        // back button overlaps another tap area (the Survival half on the
+        // mode select), the back button wins. A tap outside it falls through.
+        auto* menu = CCMenu::create();
+        menu->setPosition(CCPointZero);
+        menu->setTouchPriority(kCCMenuHandlerPriority - 1);
+        menu->setID("ranked-top-back-menu"_spr);
+        menu->addChild(button);
+        m_root->addChild(menu, 30);
     }
 
     void addScreenHeader(
@@ -2596,9 +2607,29 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     // A chip (.chip / .chip.sm): a skewed fill with dark or muted text.
-    void addChip(CCNode* parent, std::string const& text, CCPoint leftCenter, ccColor3B fill, ccColor3B ink, float cssPx = 13.0f, bool lean = true) {
+    // Promotion series slots as chips: W, L, - for a game to come, and a green
+    // outline on the games still needed as wins (Solo; seriesMarks).
+    void addSeriesChips(CCNode* parent, CCPoint leftCenter, std::vector<corum::ranked::SeriesMark> const& marks) {
+        for (std::size_t i = 0; i < marks.size(); ++i) {
+            auto const at = CCPoint{leftCenter.x + static_cast<float>(i) * 22.0f, leftCenter.y};
+            switch (marks[i]) {
+                case corum::ranked::SeriesMark::Win: addChip(parent, tr("win-short", "W"), at, corum::ranked::ui::AccentFill, corum::ranked::ui::AccentInk); break;
+                case corum::ranked::SeriesMark::Loss: addChip(parent, tr("lose-short", "L"), at, kRed, corum::ranked::ui::AccentInk); break;
+                case corum::ranked::SeriesMark::NeedWin: addChip(parent, "-", at, ccc3(32, 35, 46), corum::ranked::ui::Green, 13.0f, true, corum::ranked::ui::Green); break;
+                case corum::ranked::SeriesMark::Open: addChip(parent, "-", at, ccc3(32, 35, 46), corum::ranked::ui::TextMuted); break;
+            }
+        }
+    }
+
+    void addChip(CCNode* parent, std::string const& text, CCPoint leftCenter, ccColor3B fill, ccColor3B ink, float cssPx = 13.0f, bool lean = true,
+        std::optional<ccColor3B> outline = std::nullopt) {
         auto* label = makeLabel(text, fontScale(cssPx), {0, 0}, ink, "black");
         auto const width = label->getScaledContentSize().width + px(20.0f), height = px(cssPx * 1.6f);
+        if (outline) {
+            // A 1 pt frame under the face; both skew about the same centre.
+            auto* frame = CCLayerColor::create({outline->r, outline->g, outline->b, 255}, width + 2.0f, height + 2.0f);
+            frame->setPosition({leftCenter.x - 1.0f, leftCenter.y - height / 2.0f - 1.0f}); if (lean) frame->setSkewX(8.0f); parent->addChild(frame, 6);
+        }
         auto* face = CCLayerColor::create({fill.r, fill.g, fill.b, 255}, width, height);
         face->setPosition({leftCenter.x, leftCenter.y - height / 2.0f}); if (lean) face->setSkewX(8.0f); parent->addChild(face, 6);
         label->setPosition({leftCenter.x + width / 2.0f, leftCenter.y}); parent->addChild(label, 7);
@@ -2696,13 +2727,8 @@ class CorumRankedLayer final : public CCLayerColor {
                 auto* need = makeLabel(fmt::format("{} · {}", upper(view.promotion.targetTier), corum::ranked::i18n::promotionMatch(view.promotion.winsRequired)),
                     fontScale(13.0f), {cx + 50.0f, y + 14.0f}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f});
                 corum::ranked::ui::fitMenuLabelWidth(need, blockW - 50.0f, fontScale(13.0f), 0.12f); m_root->addChild(need, 6);
-                auto const slots = std::clamp(view.promotion.gamesRequired, 1, 9);
-                for (int i = 0; i < slots; ++i) {
-                    auto const result = i < static_cast<int>(view.promotion.results.size()) ? view.promotion.results[static_cast<std::size_t>(i)] : std::string();
-                    auto const win = result == "WIN", loss = result == "LOSS";
-                    addChip(m_root, win ? tr("win-short", "W") : loss ? tr("lose-short", "L") : std::string("-"), {cx + static_cast<float>(i) * 22.0f, y + 1.0f},
-                        win ? corum::ranked::ui::AccentFill : loss ? kRed : ccc3(32, 35, 46), win || loss ? corum::ranked::ui::AccentInk : corum::ranked::ui::TextMuted);
-                }
+                addSeriesChips(m_root, {cx, y + 1.0f}, corum::ranked::seriesMarks(view.promotion.gamesRequired,
+                    survival ? 0 : view.promotion.winsRequired, view.promotion.results));
             } else if (progress.kind != corum::ranked::TierProgressKind::Hidden) {
                 auto const caption = progress.nextTier.empty() ? fmt::format("{} LP", view.profileScore)
                     : fmt::format(fmt::runtime(tr("lp-to-next-tier", "{} LP TO NEXT TIER")), progress.remaining);
@@ -2873,6 +2899,7 @@ class CorumRankedLayer final : public CCLayerColor {
             input.bands = view.soloTierBands;
             input.promotionActive = view.promotion.active;input.promotionGames = view.promotion.gamesRequired;
             input.promotionResults = view.promotion.results;input.demotionWarning = view.demotionWarning;
+            input.promotionWins = view.promotion.winsRequired;
             input.rank = view.standing.rank;input.target = view.standing.target;
             input.ladderTier = corum::ranked::goldRankTier(input.tier);
         }
@@ -2976,9 +3003,18 @@ class CorumRankedLayer final : public CCLayerColor {
         // Row 2: season ladder with the current and next tier marks.
         auto const progress = tierProgressFor(view, survival);
         auto const ladderTop = top - 50.0f;
+        // A promotion series: its target, requirement and marks, and the bar
+        // shining in the current tier's colour.
+        auto const& series = survival ? view.survival.profile.promotion : view.promotion;
+        auto const promotion = progress.kind == corum::ranked::TierProgressKind::Promotion && series.active;
         if (progress.kind != corum::ranked::TierProgressKind::Hidden) {
             m_root->addChild(makeLabel(tr("season-ladder", "SEASON LADDER"), fontScale(14.0f), {x0, ladderTop}, corum::ranked::ui::TextMuted, "extrabold", {0.0f, 0.5f}), 4);
-            if (!progress.nextTier.empty()) {
+            if (promotion) {
+                auto* need = makeLabel(fmt::format("{} · {} · {}", tr("promotion-short", "PROMOTION"), upper(series.targetTier),
+                    corum::ranked::i18n::promotionMatch(series.winsRequired)), fontScale(16.0f), {x1, ladderTop}, kGold, "extrabold", {1.0f, 0.5f});
+                corum::ranked::ui::fitMenuLabelWidth(need, width * 0.62f, fontScale(16.0f), 0.12f);
+                need->setID("ranked-panel-promotion"_spr); m_root->addChild(need, 4);
+            } else if (!progress.nextTier.empty()) {
                 auto* remaining = makeLabel(fmt::format(fmt::runtime(tr("lp-to-next-tier", "{} LP TO NEXT TIER")), progress.remaining), fontScale(16.0f),
                     {x1, ladderTop}, kGold, "extrabold", {1.0f, 0.5f});
                 m_root->addChild(remaining, 4);
@@ -2987,13 +3023,23 @@ class CorumRankedLayer final : public CCLayerColor {
             if (auto* mark = corum::ranked::ui::createAnimatedRankBadge(progress.tier, {iconSize, iconSize}, corum::ranked::ui::RankBadgeDisplay::Matched)) {
                 mark->setPosition({x0 + iconSize / 2.0f, ladderTop - 22.0f}); m_root->addChild(mark, 4);
             }
-            if (!progress.nextTier.empty()) if (auto* next = corum::ranked::ui::createAnimatedRankBadge(progress.nextTier, {iconSize, iconSize}, corum::ranked::ui::RankBadgeDisplay::Matched)) {
+            auto const nextMark = promotion ? upper(series.targetTier) : progress.nextTier;
+            if (!nextMark.empty()) if (auto* next = corum::ranked::ui::createAnimatedRankBadge(nextMark, {iconSize, iconSize}, corum::ranked::ui::RankBadgeDisplay::Matched)) {
                 next->setPosition({x1 - iconSize / 2.0f, ladderTop - 22.0f}); m_root->addChild(next, 4);
             }
             auto const nowTier = upper(progress.tier);
             auto const division = nowTier.size() > 1 && nowTier.back() >= '1' && nowTier.back() <= '3' ? '4' - nowTier.back() : 0;
             auto const ladderX = x0 + iconSize + px(12.0f), ladderW = width - 2.0f * (iconSize + px(12.0f));
-            if (division) addDivisionLadder(m_root, {ladderX, ladderTop - 19.0f}, ladderW, division, progress.fill, tierColor(nowTier), true);
+            if (promotion) {
+                if (auto* shine = corum::ranked::ui::LadderShineBar::create({ladderX, ladderTop - 19.0f}, ladderW, px(12.0f), tierColor(nowTier))) {
+                    shine->setID("ranked-panel-promotion-bar"_spr); m_root->addChild(shine, 6);
+                }
+                // The series marks under the bar: W, L, - for a game to come,
+                // the games still needed as wins outlined in green (Solo).
+                addSeriesChips(m_root, {ladderX, ladderTop - 36.0f}, corum::ranked::seriesMarks(series.gamesRequired,
+                    survival ? 0 : series.winsRequired, series.results));
+            }
+            else if (division) addDivisionLadder(m_root, {ladderX, ladderTop - 19.0f}, ladderW, division, progress.fill, tierColor(nowTier), true);
             else addSkewBar(m_root, {ladderX, ladderTop - 19.0f}, ladderW, px(12.0f), progress.fill, tierColor(nowTier));
         }
 
@@ -5963,26 +6009,20 @@ class CorumRankedLayer final : public CCLayerColor {
             CCDirector::sharedDirector()->getNextScene()) return;
         auto const& view = RankedRuntime::get().view();
         if (view.stage != RuntimeStage::Ready || corum::ranked::SurvivalRuntime::get().queueing()) return;
-        for (auto const survival : {false, true}) {
-            std::string now;
-            auto known = false;
-            if (survival) {
-                known = view.survival.loaded && view.survival.profile.visibleRankedScore.has_value();
-                now = upper(view.survival.profile.displayedTier);
-            } else {
-                // Ladder titles arrive with the standing; until then GOLD is not final.
-                known = view.profileScoreVisible && view.standing.loaded && view.placementGames >= view.placementGamesRequired;
-                now = upper(view.profileTier);
-            }
-            if (!known || now.empty() || now == "UNRANKED" || !corum::ranked::ui::isKnownRankName(now)) continue;
-            auto const* what = survival ? "tier-survival" : "tier-solo";
-            auto const seen = corum::ranked::ui::readTierAck(what);
-            corum::ranked::ui::writeTierAck(what, now);
-            // First visit records the tier silently; placement results show their own reveal.
-            if (!seen || *seen == now || seen->empty() || *seen == "UNRANKED" || !corum::ranked::ui::isKnownRankName(*seen)) continue;
-            auto const up = corum::ranked::rankTierOrder(now) > corum::ranked::rankTierOrder(*seen);
-            if (playUnseenTierTransition(*seen, now, up)) return;
-        }
+        // Only the Solo ladder titles move without an own match: GOLD, MASTER
+        // and CHAMPION follow ladder positions, so another player's result can
+        // change them. Every other tier change, and every Survival change,
+        // comes from an own result, which shows its own motion.
+        // Ladder titles arrive with the standing; until then GOLD is not final.
+        auto const known = view.profileScoreVisible && view.standing.loaded && view.placementGames >= view.placementGamesRequired;
+        auto const now = upper(view.profileTier);
+        if (!known || now.empty() || now == "UNRANKED" || !corum::ranked::ui::isKnownRankName(now)) return;
+        auto const seen = corum::ranked::ui::readTierAck("tier-solo");
+        corum::ranked::ui::writeTierAck("tier-solo", now);
+        // First visit records the tier silently; placement results show their own reveal.
+        if (!seen || *seen == now || seen->empty() || *seen == "UNRANKED" || !corum::ranked::ui::isKnownRankName(*seen)) return;
+        if (!corum::ranked::goldRankTier(*seen) || !corum::ranked::goldRankTier(now)) return;
+        playUnseenTierTransition(*seen, now, corum::ranked::rankTierOrder(now) > corum::ranked::rankTierOrder(*seen));
     }
 
     bool playUnseenTierTransition(std::string const& before, std::string const& after, bool up) {

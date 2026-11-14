@@ -30,6 +30,7 @@ struct TierProgressInput {
     std::vector<TierCutoffView> bands; // ascending minimum
     bool promotionActive = false;
     int promotionGames = 0;
+    int promotionWins = 0;  // wins the series needs (Solo); 0 marks no slot
     std::vector<std::string> promotionResults;
     bool demotionWarning = false;
     std::optional<int> rank;
@@ -57,6 +58,7 @@ struct TierProgressView {
     float fill = 0.0f;
     int targetRank = 0;
     int promotionGames = 0;
+    int promotionWins = 0;
     std::vector<std::string> promotionResults;
 };
 
@@ -67,6 +69,7 @@ inline TierProgressView tierProgress(TierProgressInput const& input) {
     if (input.promotionActive) {
         view.kind = TierProgressKind::Promotion;view.fill = 1.0f;
         view.promotionGames = std::max(1, input.promotionGames);view.promotionResults = input.promotionResults;
+        view.promotionWins = input.promotionWins;
         return view;
     }
     // Solo ladder titles (MASTER, CHAMPION, ...) sit on the GOLD band.

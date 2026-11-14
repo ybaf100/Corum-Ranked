@@ -501,6 +501,9 @@ struct RuntimeView {
     PlayerInfoView playerInfo;
 };
 
+// The server's ladder standing object (Solo standing, Survival result).
+StandingView parseStandingView(matjson::Value const& value);
+
 class RankedRuntime final {
 public:
     static RankedRuntime& get();

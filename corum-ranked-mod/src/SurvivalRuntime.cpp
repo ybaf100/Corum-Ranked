@@ -933,6 +933,13 @@ std::optional<ScoreAnimationInput> SurvivalRuntime::scoreAnimation() const {
         input.promoted=input.promoted || result["promotionSucceeded"].asBool().unwrapOr(false);
     }
     for(auto const& b:result["bands"].asArray().unwrapOr(std::vector<matjson::Value>{}))input.bands.push_back({b["tier"].asString().unwrapOr(""),static_cast<int>(b["minimum"].asInt().unwrapOr(0))});
+    // Own ladder rank before / after (servers since beta.73). Survival has no
+    // player-above target, so on the top band the result shows the own icon
+    // and rank on a full bar, as Solo does for #1. The display tier marks the
+    // standing as current (not a pre-standing Solo GOLD result).
+    input.standingBefore=parseStandingView(result["standingBefore"]);input.standingAfter=parseStandingView(result["standingAfter"]);
+    if(input.standingBefore.rank)input.standingBefore.displayTier=input.beforeTier;
+    if(input.standingAfter.rank)input.standingAfter.displayTier=input.afterTier;
     if(!validScoreBands(input.bands))return std::nullopt;return input;
 }
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)

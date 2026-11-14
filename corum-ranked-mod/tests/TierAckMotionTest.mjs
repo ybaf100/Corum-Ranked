@@ -6,14 +6,18 @@ const root=new URL('..',import.meta.url).pathname;
 const read=p=>readFileSync(join(root,p),'utf8');
 const method=(src,sig)=>{const at=src.indexOf(sig);assert(at>=0,sig);let depth=0,i=src.indexOf('{',at);for(;i<src.length;i++){if(src[i]==='{')depth++;else if(src[i]==='}'&&--depth===0)break;}return src.slice(at,i+1);};
 
-test('lobby plays an unseen tier change (other players moved the ladder) once, never for the own result',()=>{
+test('lobby plays an unseen ladder change once, only for Solo GOLD / MASTER / CHAMPION, never for Survival or an own result',()=>{
  const popup=read('src/RankedPopup.cpp');
  const unseen=method(popup,'    void maybePlayUnseenTierChange() {');
  // Solo ladder titles (MASTER / CHAMPION) are final only once the standing arrived.
  assert.match(unseen,/view\.profileScoreVisible && view\.standing\.loaded && view\.placementGames >= view\.placementGamesRequired/);
  // The first visit records silently; placement and unknown tiers never play here.
  assert.match(unseen,/if \(!seen \|\| \*seen == now \|\| seen->empty\(\) \|\| \*seen == "UNRANKED"/);
- assert.match(unseen,/corum::ranked::ui::writeTierAck\(what, now\);/);
+ assert.match(unseen,/corum::ranked::ui::writeTierAck\("tier-solo", now\);/);
+ // Only ladder titles move without an own match: both tiers on the GOLD ladder,
+ // and Survival never (its own result shows any change).
+ assert.match(unseen,/if \(!corum::ranked::goldRankTier\(\*seen\) \|\| !corum::ranked::goldRankTier\(now\)\) return;/);
+ assert.doesNotMatch(unseen,/tier-survival|view\.survival/);
  assert.match(unseen,/rankTierOrder\(now\) > corum::ranked::rankTierOrder\(\*seen\)/);
  assert.match(method(popup,'    bool playUnseenTierTransition('),/up \? RankTransitionType::Promotion : RankTransitionType::Demotion/);
  // The own Solo result and the own Survival result mark their tier as seen.

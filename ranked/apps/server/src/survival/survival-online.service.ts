@@ -14,7 +14,7 @@ import { SessionService } from "../session/session.service.js";
 import { sessionAliveSince } from "../session/session-presence.policy.js";
 import type { RankedSessionContext } from "../session/session.types.js";
 import { SurvivalEngineService } from "./survival-engine.service.js";
-import { SurvivalService } from "./survival.service.js";
+import { SurvivalService,type SurvivalLadderStanding } from "./survival.service.js";
 import { driveSurvivalBots } from "./survival-bot-driver.js";
 import type { SurvivalOnlineEventDto } from "./survival-online.dto.js";
 
@@ -28,6 +28,8 @@ export interface SurvivalOnlineResult {
   promotionStarted?:boolean;promotionSucceeded?:boolean;promotionFailed?:boolean;promotion?:SurvivalPromotionSeries|null;promotionMarksBefore?:number;
   bands:{tier:string;minimum:number}[];
   standings:ReturnType<typeof survivalResultRoster>;
+  // Own ladder rank before / after this match, for the result screen's GOLD bar.
+  standingBefore?:SurvivalLadderStanding;standingAfter?:SurvivalLadderStanding;
   completedAt:string;completionKind:string;finalStandings?:boolean;achievementUnlocks?:readonly AchievementUnlockNotice[];
 }
 const terminal=(m:SurvivalMatch)=>["FINAL_RESULT","CANCELLED"].includes(m.state);
@@ -160,11 +162,12 @@ export class SurvivalOnlineService implements OnApplicationBootstrap,OnApplicati
       const rating=await this.survival.settleLp(row.player_id,input.eventKey,input.delta,{generation:match.configGeneration,config:match.config},{rank:input.rank,playerCount:match.config.matchPlayerCount});
       const ledger=(await this.db.query<{lp_before:number;tier_before:string;warning_before:boolean}>("SELECT lp_before,tier_before,warning_before FROM sur_lp_ledger WHERE player_id=$1 AND event_key=$2",[row.player_id,input.eventKey])).rows[0]!;
       const groups=new Set<string>();const bands=match.config.tierBands.filter(b=>{if(groups.has(b.group))return false;groups.add(b.group);return true;}).map(b=>({tier:b.group,minimum:b.minimumLp}));
+      const standingBefore=await this.survival.standingAt(row.player_id,Number(ledger.lp_before)),standingAfter=await this.survival.standing(row.player_id);
       const result:SurvivalOnlineResult={matchId:match.id,debug:false,botFilled:match.players.some(p=>p.kind==="BOT"),won:(match.winnerIds??[match.winnerId]).includes(row.participant_id),rank:input.rank,tiedPlayers:input.tiedPlayers,
         requestedDelta:input.delta,actualDelta:rating.actualDelta,profileBefore:{lp:Number(ledger.lp_before),tier:ledger.tier_before,demotionWarning:ledger.warning_before},
         profileAfter:rating.profile,promoted:rating.promoted,demoted:rating.demoted,protected:rating.protected,warningRecoveryLp:rating.warningRecoveryLp,bands,
         ...survivalSeriesResult(rating),
-        standings:survivalResultRoster(match,new Map([[row.player_id,{profileAfter:rating.profile,actualDelta:rating.actualDelta}]])),
+        standings:survivalResultRoster(match,new Map([[row.player_id,{profileAfter:rating.profile,actualDelta:rating.actualDelta}]])),standingBefore,standingAfter,
         completedAt:new Date(match.finishedAt??this.clock.now().getTime()).toISOString(),completionKind:match.completionKind??"NORMAL"};
       await this.db.transaction(async tx=>{
         await tx.query("UPDATE sur_online_players SET result=$3::jsonb,settled_at=$4 WHERE match_id=$1 AND player_id=$2 AND result IS NULL",[match.id,row.player_id,JSON.stringify(result),this.clock.now().toISOString()]);

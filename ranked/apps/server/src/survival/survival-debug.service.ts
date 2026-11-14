@@ -17,7 +17,7 @@ import { SessionService } from "../session/session.service.js";
 import { sessionAliveSince } from "../session/session-presence.policy.js";
 import type { RankedSessionContext } from "../session/session.types.js";
 import { SurvivalEngineService, type SurvivalAdmissionPlayer } from "./survival-engine.service.js";
-import { SurvivalService } from "./survival.service.js";
+import { SurvivalService,type SurvivalLadderStanding } from "./survival.service.js";
 import type { ClearSurvivalDebugDto, CreateSurvivalDebugDto, ForceSurvivalDebugDto, SurvivalDebugEventDto } from "./survival-debug.dto.js";
 
 interface DebugRow {
@@ -30,6 +30,7 @@ export interface SurvivalDebugResult {
   promoted:boolean; demoted:boolean; protected:boolean; warningRecoveryLp:number|null;
   promotionStarted?:boolean; promotionSucceeded?:boolean; promotionFailed?:boolean; promotion?:SurvivalPromotionSeries|null; promotionMarksBefore?:number;
   bands:{tier:string;minimum:number}[]; standings:ReturnType<typeof survivalResultRoster>;finalStandings?:boolean;
+  standingBefore?:SurvivalLadderStanding; standingAfter?:SurvivalLadderStanding;
   completedAt:string; completionKind:string;achievementUnlocks?:readonly AchievementUnlockNotice[];
 }
 const terminal=(m:SurvivalMatch)=>["FINAL_RESULT","CANCELLED"].includes(m.state);
@@ -261,10 +262,11 @@ export class SurvivalDebugService implements OnApplicationBootstrap,OnApplicatio
       "SELECT lp_before,tier_before,warning_before FROM sur_lp_ledger WHERE player_id=$1 AND event_key=$2",[row.human_player_id,human.eventKey])).rows[0]!;
     const groups=new Set<string>();
     const bands=match.config.tierBands.filter(b=>{if(groups.has(b.group))return false;groups.add(b.group);return true;}).map(b=>({tier:b.group,minimum:b.minimumLp}));
+    const standingBefore=await this.survival.standingAt(row.human_player_id,Number(ledger.lp_before)),standingAfter=await this.survival.standing(row.human_player_id);
     const result:SurvivalDebugResult={matchId:match.id,debug:true,won:(match.winnerIds??[match.winnerId]).includes("human"),rank:human.rank,tiedPlayers:human.tiedPlayers,requestedDelta:human.delta,
       actualDelta:rating.actualDelta,profileBefore:{lp:Number(ledger.lp_before),tier:ledger.tier_before,demotionWarning:ledger.warning_before},
       profileAfter:rating.profile,promoted:rating.promoted,demoted:rating.demoted,protected:rating.protected,
-      warningRecoveryLp:rating.warningRecoveryLp,bands,...survivalSeriesResult(rating),standings:survivalResultRoster(match,new Map([[row.human_player_id,{profileAfter:rating.profile,actualDelta:rating.actualDelta}]])),
+      warningRecoveryLp:rating.warningRecoveryLp,bands,...survivalSeriesResult(rating),standings:survivalResultRoster(match,new Map([[row.human_player_id,{profileAfter:rating.profile,actualDelta:rating.actualDelta}]])),standingBefore,standingAfter,
       completedAt:new Date(match.finishedAt??this.clock.now().getTime()).toISOString(),completionKind:match.completionKind??"NORMAL",finalStandings:terminal(match)};
     await this.db.transaction(async tx=>{
       // The ledger's unique key closes a crash between payment and this result

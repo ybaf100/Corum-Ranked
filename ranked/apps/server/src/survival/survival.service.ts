@@ -24,6 +24,9 @@ export function survivalPromotionView(series: SurvivalPromotionSeries | null | u
 }
 interface LadderRow extends ProfileRow { public_title_id?:string|null;public_title_level?:number|null; gd_account_id: string; gd_username: string; rank: number; total: number; }
 
+// Own Survival ladder rank (standing() / standingAt()), also stored in results.
+export interface SurvivalLadderStanding { rank: number | null; totalPlayers: number; topPercent: number | null; }
+
 @Injectable()
 export class SurvivalService {
   public constructor(@Inject(DATABASE) private readonly database: DatabasePort,
@@ -73,6 +76,20 @@ export class SurvivalService {
     const row = result.rows[0];
     return { rank: row ? Number(row.rank) : null, totalPlayers: row ? Number(row.total) : 0,
       topPercent: row ? Math.ceil(Number(row.rank) / Number(row.total) * 1000) / 10 : null };
+  }
+
+  // The ladder rank the player had at `lp` against everyone else's current
+  // LP: a result's "before" standing, from its ledger row, so a replayed
+  // settlement reports the same value. Same ladder and RANK() ties as standing().
+  public async standingAt(playerId: string, lp: number) {
+    const result = await this.database.query<{ above: number; total: number; listed: boolean }>(`SELECT
+      COUNT(*) FILTER (WHERE sp.lp > $2 AND sp.player_id <> $1)::int AS above, COUNT(*)::int AS total,
+      COALESCE(BOOL_OR(sp.player_id = $1), FALSE) AS listed
+      FROM sur_profiles sp JOIN ranked_players p ON p.id=sp.player_id WHERE p.gd_account_id > 0 AND NOT p.is_bot`, [playerId, lp]);
+    const row = result.rows[0];
+    if (!row || !row.listed) return { rank: null, totalPlayers: row ? Number(row.total) : 0, topPercent: null };
+    const rank = Number(row.above) + 1, total = Number(row.total);
+    return { rank, totalPlayers: total, topPercent: Math.ceil(rank / total * 1000) / 10 };
   }
 
   public async leaderboard(offset = 0, limit = 20, search?:string) {
