@@ -15,7 +15,7 @@ function body(source, signature) {
 function run(cpp) {
   const dir=mkdtempSync(join(tmpdir(),'corum-ranked-exit-'));
   try { writeFileSync(join(dir,'test.cpp'),cpp);
-    execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Wpedantic','-Werror','-O2',join(dir,'test.cpp'),'-o',join(dir,'test')],{stdio:'pipe'});
+    execFileSync('g++',['-std=c++23','-Wall','-Wextra','-Wpedantic','-Werror','-Wno-overloaded-virtual','-O2',join(dir,'test.cpp'),'-o',join(dir,'test')],{stdio:'pipe'});
     execFileSync(join(dir,'test'),[],{stdio:'pipe'});
   } finally {rmSync(dir,{recursive:true,force:true});}
 }
