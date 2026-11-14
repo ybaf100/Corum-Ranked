@@ -79,8 +79,11 @@ test('achievement grade emblem opens the ladder; effect picker previews the sele
  const grades=ladder;
  // Grade emblems are the tier's rank core; the artwork is already a 45-degree square, so it is not rotated again.
  assert.match(grades,/rankResourceSprite\("rank-" \+ name \+ "-core\.png"\)/);assert.match(grades,/core->setRotation\(0\.0f\)/);
- // The grade ladder shows each grade's full tier mark.
- assert.match(grades,/createAnimatedRankBadge\(std::string\(name\), \{22, 22\}, RankBadgeDisplay::Leaderboard\)/);
+ // The grade ladder shows each grade's tier core only, not the full tier mark.
+ assert.match(grades,/achievementGradeEmblem\(20\.0f, name, rowTone, achievementGradePanel\(name\)\)/);
+ assert.doesNotMatch(grades,/createAnimatedRankBadge/);
+ // The grade plate is a button face that stays upright (no slab lean).
+ assert.match(popup,/ap->setTag\(corum::ranked::ui::UprightFaceTag\)/);
  assert.match(popup,/RankedAchievementGradePopup::create\(RankedRuntime::get\(\)\.view\(\)\.achievements\.totalAp\)/);
  assert.match(ladder,/for \(std::size_t i = 0; i < kAchievementApGrades\.size\(\); \+\+i\)/);
  // Border between the first F frame (1.5) and the thin draft (0.8).

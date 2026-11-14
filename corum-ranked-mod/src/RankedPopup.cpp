@@ -535,6 +535,10 @@ class CorumRankedLayer final : public CCLayerColor {
     bool m_accountConflictShown = false;
     CCMenuItemSpriteExtra* m_jukeboxButton = nullptr;
     Page m_page = Page::Live;
+    // The entry wait for the Survival profile (see awaitingSurvivalProfile):
+    // when it began, and whether it is over for this lobby visit.
+    mutable std::optional<std::chrono::steady_clock::time_point> m_survivalWaitSince;
+    mutable bool m_survivalWaitDone = false;
     corum::ranked::ModeLobbyTransition m_modeTransition;
     bool m_returnToModesAfterQueue = false;
     CCLayerColor *m_lobbySurvival = nullptr, *m_lobbySolo = nullptr, *m_lobbyPanel = nullptr;
@@ -942,6 +946,28 @@ class CorumRankedLayer final : public CCLayerColor {
             level && level->m_lowDetailModeToggled, level && level->m_disableShakeToggled);
     }
 
+    // The lobby stays on its loading view until the Survival profile has
+    // loaded, so the Survival card never shows a provisional UNRANKED tier
+    // for the second the profile takes after the session. It stops waiting
+    // on a Survival error, when Survival is not configured, or after 5 s
+    // (the card then shows SYNCING as before). It waits once per lobby
+    // visit: a later refetch (a retry clears the error) never brings the
+    // loading view back over a lobby already shown.
+    bool awaitingSurvivalProfile(RuntimeView const& view) const {
+        if (m_survivalWaitDone || view.stage != RuntimeStage::Ready) return false;
+        if (!view.survivalConfigReady || view.survival.loaded || !view.survival.error.empty()) {
+            m_survivalWaitDone = true;
+            return false;
+        }
+        auto const now = std::chrono::steady_clock::now();
+        if (!m_survivalWaitSince) m_survivalWaitSince = now;
+        if (now - *m_survivalWaitSince >= std::chrono::seconds(5)) {
+            m_survivalWaitDone = true;
+            return false;
+        }
+        return true;
+    }
+
     std::string presentationKey() const {
         auto const& view = RankedRuntime::get().view();
         auto const detailsKey = fmt::format(":details:{}:assets:{}", corum::ranked::RankedMapDetails::get().revision(),
@@ -1006,7 +1032,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 view.achievements.equippedTitle.achievementId,view.achievements.equippedTitle.level.value_or(0),
                 view.achievements.totalAp,view.achievements.unclaimedRewardCount,
                 CCDirector::sharedDirector()->getWinSize().width,CCDirector::sharedDirector()->getWinSize().height) + fmt::format(":sur-record:{}:{}:format:{}",view.survival.wins,view.survival.losses,view.survivalPlayerCount)
-                + fmt::format(":season:{}:{}:{}",seasonShared(view),view.soloSeason.targetAtMs.has_value(),view.survivalSeason.targetAtMs.has_value())
+                + fmt::format(":season:{}:{}:{}:sur-wait:{}",seasonShared(view),view.soloSeason.targetAtMs.has_value(),view.survivalSeason.targetAtMs.has_value(),awaitingSurvivalProfile(view))
                 + fmt::format(":tierbar:{}:{}:{}:{}:{}:{}",view.profileScore,view.standing.target?view.standing.target->score:-1,view.soloTierBands.size(),
                     view.survival.tierBands.size(),view.survival.standing.target?view.survival.standing.target->score:-1,view.survival.standing.rank.value_or(0));
         }
@@ -4017,6 +4043,12 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const selected = m_modeTransition.selected();
         addTopBack(true);
         addLobbyHeader(view, selected);
+        if (awaitingSurvivalProfile(view)) {
+            auto* message = makeLabel(tr("syncing","SYNCING..."),0.30f,{size.width/2,size.height/2},kGold,"semibold");
+            corum::ranked::ui::fitMenuLabelWidth(message,size.width-60,0.30f,0.17f); m_root->addChild(message,5);
+            auto* spinner = LoadingSpinner::create(42); spinner->setPosition({size.width/2,size.height/2-45}); m_root->addChild(spinner,5);
+            return;
+        }
         if (view.stage != RuntimeStage::Ready && view.stage != RuntimeStage::Queued && view.stage != RuntimeStage::JoiningQueue) {
             auto* message = makeLabel(lobbyMessage(view),0.30f,{size.width/2,size.height/2},kGold,"semibold");
             corum::ranked::ui::fitMenuLabelWidth(message,size.width-60,0.30f,0.17f); m_root->addChild(message,5);
@@ -6478,6 +6510,9 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const gradePanel = corum::ranked::ui::achievementGradePanel(grade.tier);
         auto const plateSize = CCSize{size.width*.19f, 27.0f};
         auto* ap = corum::ranked::ui::achievementPlate("", plateSize, gradeTone, gradePanel, kGold, 0.38f);
+        // A button, but the grade plate does not lean: its core, name, AP and
+        // steps stay upright like the grade elsewhere.
+        ap->setTag(corum::ranked::ui::UprightFaceTag);
         auto* emblem = corum::ranked::ui::achievementGradeEmblem(21.0f, grade.tier, gradeTone, gradePanel);
         emblem->setPosition({13.5f, 13.5f}); ap->addChild(emblem, 6);
         auto const textLeft = 26.0f, textRight = plateSize.width - 6.0f;
