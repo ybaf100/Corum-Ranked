@@ -42,6 +42,8 @@ private:
     cocos2d::CCDrawNode* m_track = nullptr;
     cocos2d::CCDrawNode* m_trackWipe = nullptr;
     cocos2d::CCDrawNode* m_fill = nullptr;
+    int m_fillShine = 0;       // achievement shine on m_fill: 0, 4 (MASTER) or 5 (CHAMPION)
+    bool m_scoreShine = false; // LP in the gold title shimmer (series running)
     cocos2d::CCLayerColor* m_leftIcon = nullptr;
     cocos2d::CCLayerColor* m_rightIcon = nullptr;
     cocos2d::CCLabelBMFont* m_score = nullptr;

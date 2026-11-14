@@ -74,6 +74,7 @@ struct CCNode : CCObject {
 };
 struct CCLayerColor : CCNode {
     static CCLayerColor* create(ccColor4B c) { auto* n=new CCLayerColor; n->color={c.r,c.g,c.b}; n->opacity=c.a; return n; }
+    static CCLayerColor* create(ccColor4B c,float w,float h) { auto* n=create(c); n->size={w,h}; return n; }
     bool initWithColor(ccColor4B c) { color={c.r,c.g,c.b}; opacity=c.a; return true; }
 };
 struct CCDrawNode : CCNode {

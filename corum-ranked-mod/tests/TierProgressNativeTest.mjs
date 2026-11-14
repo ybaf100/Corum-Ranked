@@ -95,7 +95,7 @@ test('lobby mode card shows a compact tier bar (bar and caption) where it has ro
  const popup=readFileSync(join(root,'src/RankedPopup.cpp'),'utf8');
  const card=popup.slice(popup.indexOf('    void renderModeCard('),popup.indexOf('    struct SeenScore {'));
  assert.match(card,/progress\.kind != corum::ranked::TierProgressKind::Hidden/);
- assert.match(card,/addSkewBar\(m_root, \{cx, y \+ 6\.0f\}, blockW, px\(12\.0f\), progress\.fill, tone\);/);
+ assert.match(card,/styleTierBarFill\(addSkewBar\(m_root, \{cx, y \+ 6\.0f\}, blockW, px\(12\.0f\), progress\.fill, tone\), nowTier, survival\);/);
  const bar=readFileSync(join(root,'src/ui/TierProgressBar.cpp'),'utf8');
  assert.match(bar,/auto const row = m_compact \? -11\.0f : -14\.0f;/);assert.match(bar,/if \(!m_compact\) \{/);
 });

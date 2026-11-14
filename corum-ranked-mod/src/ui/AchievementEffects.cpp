@@ -102,6 +102,11 @@ void styleAchievementTree(CCNode* node,int tier){
  if(!node)return;if(auto* label=typeinfo_cast<CCLabelBMFont*>(node)){styleAchievementText(label,tier,false);return;}
  for(auto* child:CCArrayExt<CCNode*>(node->getChildren()))styleAchievementTree(child,tier);
 }
+void styleAchievementShine(CCNode* node,int tier,char const* plainShader){
+ if(!node)return;node->stopActionByTag(EffectTag);
+ node->setShaderProgram(CCShaderCache::sharedShaderCache()->programForKey(plainShader));
+ if(tier==4 || tier==5)attach(node,tier,true);
+}
 void styleAchievementFill(CCLayerColor* fill,int tier,bool rainbowProgress,bool achieved){
  if(!fill)return;
  fill->stopActionByTag(EffectTag);

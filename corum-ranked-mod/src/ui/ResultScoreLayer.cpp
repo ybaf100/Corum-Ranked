@@ -7,6 +7,8 @@
 #include "RankedInput.hpp"
 #include "ResultBackdropBlur.hpp"
 #include "StandingVisuals.hpp"
+#include "AchievementEffects.hpp"
+#include "../domain/PromotionMarks.hpp"
 
 #include <array>
 #include <cmath>
@@ -350,7 +352,11 @@ void ResultScoreLayer::applySample(ScoreProgressSample const& actual, bool anima
     updateRank(m_ownRank,m_ownRankValue,ownRank,{getContentSize().width / 2,m_barY + 24},0.44f);
     if (m_ownRank) m_ownRank->setID("ranked-result-current-rank"_spr);
     auto const color = tierColor(sample.tier);
-    drawRoundedBar(m_fill,m_barWidth * static_cast<float>(display.fill),color);
+    // Solo ladder titles shine like the achievement bars: MASTER the
+    // Legendary gold sweep, CHAMPION the Mythic rainbow (white under the shader).
+    auto const shine = m_input.survivalRank ? 0 : sample.tier == "CHAMPION" ? 5 : sample.tier == "MASTER" ? 4 : 0;
+    if (shine != m_fillShine) { m_fillShine = shine; styleAchievementShine(m_fill,shine,kCCShader_PositionLengthTexureColor); }
+    drawRoundedBar(m_fill,m_barWidth * static_cast<float>(display.fill),shine ? ccColor3B{255,255,255} : color);
     m_leftTier->setString(rankTierDisplay(sample.tier).c_str()); m_leftTier->setColor(color);
     m_rightTier->setString(rankTierDisplay(sample.nextTier).c_str());
     if (!sample.nextTier.empty()) m_rightTier->setColor(tierColor(sample.nextTier));
@@ -359,7 +365,12 @@ void ResultScoreLayer::applySample(ScoreProgressSample const& actual, bool anima
     auto const labelWidth = std::clamp(m_barWidth * 0.26f,75.0f,132.0f);
     for (auto* label : {m_leftTier,m_rightTier}) fitMenuLabelWidth(label,m_barLeft - 20,0.44f,0.30f);
     for (auto* label : {m_leftCutoff,m_rightCutoff}) fitMenuLabelWidth(label,labelWidth,0.40f,0.28f);
-    m_score->setString(fmt::format("{} LP",sample.score).c_str()); m_score->setColor(color);
+    m_score->setString(fmt::format("{} LP",sample.score).c_str());
+    // A promotion series still running after this match: the LP in the gold
+    // title shimmer, as in the lobby.
+    auto const series = m_input.promotion.active && !m_input.promoted && !m_input.promotionFailed;
+    if (series != m_scoreShine) { m_scoreShine = series; if (series) styleAchievementText(m_score,4); else styleAchievementText(m_score,0,false); }
+    if (!series) m_score->setColor(color);
     fitMenuLabelWidth(m_score,140,0.64f,0.46f);
     auto const scoreWidth = m_score->getContentSize().width * m_score->getScaleX();
     auto const deltaWidth = m_delta->getContentSize().width * m_delta->getScaleX();
@@ -398,6 +409,8 @@ void ResultScoreLayer::showSeries(bool entering) {
     }
     // Wrap longer server-configured series instead of assuming three games or
     // creating negative-sized squares on a narrow screen.
+    auto const neededMarks = !m_input.survivalRank && !m_input.promoted && !m_input.promotionFailed
+        ? seriesMarks(games,m_input.promotion.winsRequired,m_input.promotion.results) : std::vector<SeriesMark>{};
     auto const columns = std::min(games,9);
     auto const rows = (games - 1) / columns + 1;
     constexpr float square = 21, spacing = 28;
@@ -411,6 +424,11 @@ void ResultScoreLayer::showSeries(bool entering) {
         auto const y = ((rows - 1) / 2.0f - row) * spacing;
         auto* face = surface({square,square},{x,y},ccc3(138,145,157),ccc3(82,89,105),255,false);
         grid->addChild(face,1);
+        // Solo: the games still needed as wins, framed in green.
+        if (static_cast<std::size_t>(i) < neededMarks.size() && neededMarks[static_cast<std::size_t>(i)] == SeriesMark::NeedWin) {
+            auto* frame = CCLayerColor::create({Green.r,Green.g,Green.b,255},square + 3.0f,square + 3.0f);
+            frame->setPosition({-1.5f,-1.5f}); face->addChild(frame,-3);
+        }
         auto const delay = std::min(0.60f,static_cast<float>(i) * 0.08f);
         stamp(face,delay);
         if (static_cast<std::size_t>(i) >= m_input.promotion.results.size()) continue;

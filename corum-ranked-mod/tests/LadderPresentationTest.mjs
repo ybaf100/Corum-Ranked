@@ -112,7 +112,31 @@ test('during a promotion series the LP shows in the gold title shimmer',()=>{
 
 test('Solo MASTER / CHAMPION ladder bars shine like the achievement bars (Legendary gold, Mythic rainbow)',()=>{
  const panel=method(read('src/RankedPopup.cpp'),'    void renderModePanel(RuntimeView const& view, corum::ranked::RankedMode mode) {');
- assert.match(panel,/if \(!survival && \(nowTier == "MASTER" \|\| nowTier == "CHAMPION"\)\) \{[\s\S]*?styleAchievementFill\(bar, nowTier == "CHAMPION" \? 5 : 4, true, true\);/);
+ const popup=read('src/RankedPopup.cpp');
+ assert.match(method(popup,'    static void styleTierBarFill('),/if \(!fill \|\| survival \|\| \(tier != "MASTER" && tier != "CHAMPION"\)\) return;\s*corum::ranked::ui::styleAchievementFill\(fill, tier == "CHAMPION" \? 5 : 4, true, true\);/);
+ // Mode panel and mode-select card bars both go through it.
+ assert.match(panel,/styleTierBarFill\(addSkewBar\(m_root, \{ladderX, ladderTop - 19\.0f\}/);
+ assert.match(popup,/styleTierBarFill\(addSkewBar\(m_root, \{cx, y \+ 6\.0f\}, blockW/);
  // The bar under the start button: CHAMPION's fill in the Mythic pastels (MASTER keeps its gold shine).
  assert.match(read('src/ui/TierProgressBar.cpp'),/if \(shown\.tier == "CHAMPION" && !edge\) \{[\s\S]*?mythicPastel\(/);
+});
+
+test('the ladder rules show on every screen: result, queue, VS cards and leaderboard',()=>{
+ const result=read('src/ui/ResultScoreLayer.cpp');
+ // Result bar: MASTER gold / CHAMPION rainbow (Solo), drawn white under the shine.
+ assert.match(result,/auto const shine = m_input\.survivalRank \? 0 : sample\.tier == "CHAMPION" \? 5 : sample\.tier == "MASTER" \? 4 : 0;/);
+ assert.match(result,/styleAchievementShine\(m_fill,shine,kCCShader_PositionLengthTexureColor\)/);
+ // Result LP: gold shimmer while the series still runs.
+ assert.match(result,/auto const series = m_input\.promotion\.active && !m_input\.promoted && !m_input\.promotionFailed;/);
+ assert.match(result,/if \(series\) styleAchievementText\(m_score,4\)/);
+ // Result series squares: needed wins framed in green (Solo).
+ assert.match(result,/!m_input\.survivalRank && !m_input\.promoted && !m_input\.promotionFailed\s*\? seriesMarks\(games,m_input\.promotion\.winsRequired,m_input\.promotion\.results\)/);
+ const popup=read('src/RankedPopup.cpp');
+ assert.match(popup,/if \(live\.promotion\.active\) corum::ranked::ui::styleAchievementText\(queueLp, 4\);/);
+ assert.match(popup,/if \(!placement && profile\.promotion\.active && ratingText\) corum::ranked::ui::styleAchievementText\(ratingText, 4\);/);
+ assert.match(popup,/if \(profile\.visibleRankedScore && profile\.promotion\.active\) corum::ranked::ui::styleAchievementText\(chipLabel, 4\);/);
+ assert.match(method(popup,'    void addRatingMarks('),/seriesMarks\(slots, ranks \? 0 : winsRequired, results\)[\s\S]*?addOutlineBox\(/);
+ const board=read('src/ui/RankedLeaderboardPopup.cpp');
+ assert.match(board,/m_mode == RankedMode::SoloRanked\s*\? seriesMarks\(count,static_cast<int>\(player\["promotion"\]\["winsRequired"\]/);
+ assert.match(read('src/ui/AchievementEffects.cpp'),/void styleAchievementShine\(CCNode\* node,int tier,char const\* plainShader\)/);
 });

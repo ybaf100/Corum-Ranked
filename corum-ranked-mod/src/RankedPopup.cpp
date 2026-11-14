@@ -1886,11 +1886,16 @@ class CorumRankedLayer final : public CCLayerColor {
         CCPoint center,
         float spacing = 13.0f,
         float scale = 0.24f,
-        std::vector<int> const* ranks = nullptr
+        std::vector<int> const* ranks = nullptr,
+        int winsRequired = 0
     ) {
         slots = std::clamp(slots, 1, 9);
         auto const totalWidth = spacing * static_cast<float>(slots - 1);
+        // Solo: the games still needed as wins carry a green outline.
+        auto const marks = corum::ranked::seriesMarks(slots, ranks ? 0 : winsRequired, results);
         for (int index = 0; index < slots; ++index) {
+            if (marks[static_cast<std::size_t>(index)] == corum::ranked::SeriesMark::NeedWin)
+                addOutlineBox(m_root, {center.x - totalWidth / 2.0f + spacing * static_cast<float>(index), center.y}, {spacing - 2.0f, 14.0f}, kGreen, 5);
             std::string text = "-";
             ccColor3B color = ccc3(145, 151, 166);
             if (index < static_cast<int>(results.size())) {
@@ -2087,7 +2092,7 @@ class CorumRankedLayer final : public CCLayerColor {
         if (placement) {
             addPlacementProgress(profile.placementGames, std::max(1, profile.placementGamesRequired), {center.x, valueY});
         } else if (profile.promotion.active) {
-            addRatingMarks(profile.promotion.results, profile.promotion.gamesRequired, {center.x, valueY});
+            addRatingMarks(profile.promotion.results, profile.promotion.gamesRequired, {center.x, valueY}, 13.0f, 0.24f, nullptr, profile.promotion.winsRequired);
         } else {
             auto* lpLabel = makeLabel(
                 combineTierAndScore
@@ -2580,6 +2585,24 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     // Skewed progress bar (.bar / .ladder segment): track and fill.
+    // Ladder rules, the same on every screen that shows a tier bar:
+    // Solo MASTER fills shine in the Legendary gold sweep, CHAMPION in the
+    // Mythic rainbow (the achievement bars IV and V).
+    static void styleTierBarFill(CCLayerColor* fill, std::string const& tier, bool survival) {
+        if (!fill || survival || (tier != "MASTER" && tier != "CHAMPION")) return;
+        corum::ranked::ui::styleAchievementFill(fill, tier == "CHAMPION" ? 5 : 4, true, true);
+    }
+    // A thin open frame (four 1 pt edges), e.g. the green "win still needed"
+    // outline around a text series mark on any background.
+    static void addOutlineBox(CCNode* parent, CCPoint center, CCSize size, ccColor3B color, int z) {
+        auto const edge = [&](float x, float y, float w, float h) {
+            auto* line = CCLayerColor::create({color.r, color.g, color.b, 255}, w, h);
+            line->setPosition({center.x - size.width / 2.0f + x, center.y - size.height / 2.0f + y}); parent->addChild(line, z);
+        };
+        edge(0, 0, size.width, 1); edge(0, size.height - 1, size.width, 1);
+        edge(0, 0, 1, size.height); edge(size.width - 1, 0, 1, size.height);
+    }
+
     // Returns the fill (nullptr when empty) so a caller can restyle it.
     CCLayerColor* addSkewBar(CCNode* parent, CCPoint leftCenter, float width, float height, float fill, ccColor3B color, int z = 6) {
         auto* track = CCLayerColor::create({32, 35, 46, 255}, width, height);
@@ -2742,7 +2765,7 @@ class CorumRankedLayer final : public CCLayerColor {
                     : fmt::format(fmt::runtime(tr("lp-to-next-tier", "{} LP TO NEXT TIER")), progress.remaining);
                 m_root->addChild(makeLabel(caption, fontScale(13.0f), {cx, y + 16.0f}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f}), 6);
                 if (view.demotionWarning) addChip(m_root, tr("demotion-warning", "DEMOTION WARNING"), {cx + blockW - 52.0f, y + 16.0f}, kRed, corum::ranked::ui::AccentInk);
-                addSkewBar(m_root, {cx, y + 6.0f}, blockW, px(12.0f), progress.fill, tone);
+                styleTierBarFill(addSkewBar(m_root, {cx, y + 6.0f}, blockW, px(12.0f), progress.fill, tone), nowTier, survival);
                 if (survival && source.survival.warningRecoveryLp)
                     m_root->addChild(makeLabel(fmt::format(fmt::runtime(tr("lp-warning-recovery","Clears at {} LP")), *source.survival.warningRecoveryLp),
                         fontScale(13.0f), {cx, y - 4.0f}, kRed, "semibold", {0.0f, 0.5f}), 6);
@@ -3048,14 +3071,7 @@ class CorumRankedLayer final : public CCLayerColor {
                     survival ? 0 : series.winsRequired, series.results));
             }
             else if (division) addDivisionLadder(m_root, {ladderX, ladderTop - 19.0f}, ladderW, division, progress.fill, tierColor(nowTier), true);
-            else if (auto* bar = addSkewBar(m_root, {ladderX, ladderTop - 19.0f}, ladderW, px(12.0f), progress.fill, tierColor(nowTier))) {
-                // Solo ladder titles shine like the achievement bars: MASTER in
-                // the Legendary gold sweep (IV), CHAMPION in the Mythic rainbow (V).
-                if (!survival && (nowTier == "MASTER" || nowTier == "CHAMPION")) {
-                    bar->setID("ranked-panel-ladder-title-bar"_spr);
-                    corum::ranked::ui::styleAchievementFill(bar, nowTier == "CHAMPION" ? 5 : 4, true, true);
-                }
-            }
+            else styleTierBarFill(addSkewBar(m_root, {ladderX, ladderTop - 19.0f}, ladderW, px(12.0f), progress.fill, tierColor(nowTier)), nowTier, survival);
         }
 
         // Row 3: the hero START slab and its line.
@@ -3633,7 +3649,10 @@ class CorumRankedLayer final : public CCLayerColor {
             }
             auto const cx = px(28.0f);
             float y = bottom + px(24.0f) + 6.0f;
-            m_queueContents->addChild(makeLabel(fmt::format("{}", live.profileScore), fontScale(24.0f), {cx, y}, corum::ranked::ui::Text, "black", {0.0f, 0.5f}), 5);
+            auto* queueLp = makeLabel(fmt::format("{}", live.profileScore), fontScale(24.0f), {cx, y}, corum::ranked::ui::Text, "black", {0.0f, 0.5f});
+            // A promotion series: the LP in the gold title shimmer.
+            if (live.promotion.active) corum::ranked::ui::styleAchievementText(queueLp, 4);
+            m_queueContents->addChild(queueLp, 5);
             m_queueContents->addChild(makeLabel("LP", fontScale(14.0f), {cx + 44.0f, y - 1.0f}, corum::ranked::ui::TextMuted, "extrabold", {0.0f, 0.5f}), 5);
             y += 16.0f;
             auto* tierLabel = makeLabel(corum::ranked::rankTierDisplay(upper(tier)), fontScale(24.0f), {cx, y}, tierColor(upper(tier)), "black", {0.0f, 0.5f});
@@ -4761,7 +4780,10 @@ class CorumRankedLayer final : public CCLayerColor {
             auto const placement = profile.placementGames < profile.placementGamesRequired;
             auto const rating = placement ? tr("placement", "PLACEMENT")
                 : fmt::format("{}  {} LP", corum::ranked::rankTierDisplay(upper(profile.displayedTier)), profile.visibleRankedScore.value_or(0));
-            auto* ratingPlate = makeTextPlate(rating, {122.0f, 20.0f}, {cx, lineY}, tierAccent, 0.22f, ccc3(240, 244, 250), "black");
+            CCLabelBMFont* ratingText = nullptr;
+            auto* ratingPlate = makeTextPlate(rating, {122.0f, 20.0f}, {cx, lineY}, tierAccent, 0.22f, ccc3(240, 244, 250), "black", &ratingText);
+            // A promotion series: tier and LP in the gold title shimmer.
+            if (!placement && profile.promotion.active && ratingText) corum::ranked::ui::styleAchievementText(ratingText, 4);
             ratingPlate->setVisible(false);
             ratingPlate->runAction(CCSequence::create(CCDelayTime::create(0.88f), CCShow::create(), nullptr));
             intro->addChild(ratingPlate, 6);
@@ -4850,6 +4872,7 @@ class CorumRankedLayer final : public CCLayerColor {
             auto const chipText = profile.visibleRankedScore ? fmt::format("{}  {} LP", corum::ranked::rankTierDisplay(tier), *profile.visibleRankedScore)
                 : corum::ranked::rankTierDisplay(tier);
             auto* chipLabel = makeLabel(chipText, fontScale(15.0f), {cx, cy - 38.0f}, tierColor(tier), "black");
+            if (profile.visibleRankedScore && profile.promotion.active) corum::ranked::ui::styleAchievementText(chipLabel, 4);
             auto const chipW = chipLabel->getScaledContentSize().width + px(24.0f);
             auto* chip = CCLayerColor::create({32, 35, 46, 255}, chipW, px(26.0f)); chip->setPosition({cx - chipW / 2.0f, cy - 38.0f - px(13.0f)}); chip->setSkewX(8.0f);
             m_root->addChild(chip, 4); m_root->addChild(chipLabel, 5);

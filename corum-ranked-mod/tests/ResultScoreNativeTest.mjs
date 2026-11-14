@@ -182,10 +182,15 @@ const scoreNative=`
 #include "${join(root,'tests/helpers/ResultPresentationNativeDouble.hpp')}"
 #include <cctype>
 ${model}
+inline constexpr char const* kCCShader_PositionLengthTexureColor="ShaderPositionLengthTextureColor";
 namespace cocos2d { using ::CCSize; using ::ccColor3B; }
 ${strip(read('src/ui/RankBadgeAssets.hpp'))}
 namespace corum::ranked::ui {
-inline constexpr ccColor3B Text{230,235,244},TextMuted{147,155,172},Gold{255,207,74},Red{255,93,113},SurfaceRaised{16,28,45};
+inline constexpr ccColor3B Text{230,235,244},TextMuted{147,155,172},Gold{255,207,74},Red{255,93,113},SurfaceRaised{16,28,45},Green{90,238,151};
+// Achievement shine: record the requested tiers (gold LP, MASTER / CHAMPION fill).
+inline std::vector<int> shineRequests,textShineRequests;
+inline void styleAchievementShine(CCNode*,int tier,char const*){shineRequests.push_back(tier);}
+inline void styleAchievementText(CCLabelBMFont*,int tier,bool=true){textShineRequests.push_back(tier);}
 enum class FontWeight {Regular,Medium,SemiBold,ExtraBold,Black};
 CCLabelBMFont* menuLabel(std::string text,float scale,CCPoint position,ccColor3B color,FontWeight) {
     auto* label=new CCLabelBMFont; label->setString(text.c_str()); label->setScale(scale+0.18f);
@@ -225,6 +230,7 @@ struct PlayerIcon : CCNode {
 CCSprite* captureBlurredResult(CCNode*,CCSize) { return new CCSprite; }
 }
 ${strip(read('src/ui/StandingVisuals.hpp'))}
+${strip(read('src/domain/PromotionMarks.hpp'))}
 ${strip(read('src/ui/ResultScoreLayer.hpp')).replace('private:','public:')}
 ${strip(read('src/ui/ResultScoreLayer.cpp'))}
 `;

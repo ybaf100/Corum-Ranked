@@ -82,8 +82,7 @@ test('whole leaderboard popup validates pages, aligns statuses and icons, lazily
         .replace('from=a;to=b;radius=r;segmentColor=c;++segments;return true;',`assert(a.x!=b.x||a.y!=b.y);assert(std::abs(a.x-b.x)<.001||std::abs(a.y-b.y)<.001);
         lines.push_back({a,b,r});from=a;to=b;radius=r;segmentColor=c;++segments;return true;`)
         .replace('bool enabled=true; void setEnabled','void setNormalImage(CCNode*face){removeAllChildrenWithCleanup(true);addChild(face);} bool enabled=true; bool isEnabled()const{return enabled;} void setEnabled')
-        .replace('static CCLayerColor* create(ccColor4B c)',`static CCLayerColor* create(ccColor4B c,float w,float h){auto* n=create(c);n->size={w,h};return n;}
-        static CCLayerColor* create(ccColor4B c)`);
+        ;
     const viewer=read('tests/SpectatorLiveViewerNativeTest.mjs');
     const json=viewer.slice(viewer.indexOf('namespace matjson {'),viewer.indexOf('${readFileSync(join(root,'))
         .replace('bool isErr()const','bool isOk()const{return value.has_value();} bool isErr()const')
@@ -145,6 +144,7 @@ CCNode* createAnimatedRankBadge(std::string const&,CCSize s,RankBadgeDisplay dis
  if(auto hook=std::exchange(duringBadge,{})){hook();}auto* n=CCNode::create();n->size=s;return n;}
 class PlayerIcon:public CCNode{public:int account=0;bool local=false;static PlayerIcon* createBot(int n){return createRemote(-n);}static PlayerIcon* createLocal(){++iconCreates;auto* n=new PlayerIcon;n->local=true;return n;}static PlayerIcon* createRemote(int account){++iconCreates;auto* n=new PlayerIcon;n->account=account;return n;}void onExit()override{++iconExits;CCNode::onExit();}};
 }}
+${strip(read('src/domain/PromotionMarks.hpp'))}
 ${header}
 ${strip(read('src/ui/RankedLeaderboardPopup.cpp'))}
 matjson::Value page(){using V=matjson::Value;V data;V::Array rows;

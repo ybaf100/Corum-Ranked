@@ -8,6 +8,7 @@
 #include "RankedTranslations.hpp"
 #include "RankedVisuals.hpp"
 #include "StandingVisuals.hpp"
+#include "../domain/PromotionMarks.hpp"
 #include "SurvivalPlayerInfoPopup.hpp"
 #include <cmath>
 #include <functional>
@@ -302,8 +303,18 @@ void RankedLeaderboardPopup::showRows(matjson::Value const& data) {
         if(columns.tierWidth>0)leftCaption(row,rankTierDisplay(entry.tier),{columns.tierName,24},columns.tierWidth,0.31f,color);
         if (entry.promotion) {
             auto const count = std::clamp(entry.promotionGames,1,8);
+            // Solo: the games still needed as wins in a green frame, as in the lobby.
+            auto const needed = m_mode == RankedMode::SoloRanked
+                ? seriesMarks(count,static_cast<int>(player["promotion"]["winsRequired"].asInt().unwrapOr(0)),entry.marks) : std::vector<SeriesMark>{};
             for (int mark = 0; mark < count; ++mark) {
                 auto const result = static_cast<std::size_t>(mark) < entry.marks.size() ? entry.marks[mark] : "";
+                if (static_cast<std::size_t>(mark) < needed.size() && needed[static_cast<std::size_t>(mark)] == SeriesMark::NeedWin) {
+                    auto const x = columns.value + mark * columns.valueWidth / count;
+                    for (auto const& [ex, ey, ew, eh] : {std::array<float,4>{0,0,12,1},{0,15,12,1},{0,0,1,16},{11,0,1,16}}) {
+                        auto* edge = CCLayerColor::create({Green.r,Green.g,Green.b,255},ew,eh);
+                        edge->setPosition({x - 2 + ex,24 - 8 + ey}); row->addChild(edge,5);
+                    }
+                }
                 leftCaption(row,result == "WIN" ? "O" : result == "LOSS" ? "X" : "_",
                     {columns.value + mark * columns.valueWidth / count,24},columns.valueWidth / count,
                     0.31f,result == "WIN" ? Green : result == "LOSS" ? Red : TextMuted);
