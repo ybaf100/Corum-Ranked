@@ -97,3 +97,15 @@ int main(){
  assert.match(popup,/input\.promotionWins = view\.promotion\.winsRequired;/);
  assert.match(read('src/ui/TierProgressBar.cpp'),/seriesMarks\(view\.promotionGames, view\.promotionWins, view\.promotionResults\)/);
 });
+
+test('during a promotion series the LP shows in the gold title shimmer',()=>{
+ const card=method(read('src/RankedPopup.cpp'),'    void renderModeCard(RuntimeView const& source, corum::ranked::RankedMode mode, CCLayerColor* group) {');
+ const at=card.indexOf('auto const addLp = [&](CCPoint at, float scale, CCPoint anchor) {');assert(at>=0);
+ const lp=card.slice(at,card.indexOf('};',at));
+ const gold=lp.indexOf('if (view.promotion.active) {');
+ assert(gold>=0&&lp.indexOf('styleAchievementText(lp, 4); m_root->addChild(lp, 6); return;',gold)>gold);
+ // Before the rolling number: one label, so the sweep crosses the whole value.
+ assert(lp.indexOf('view.promotion.active')<lp.indexOf('RollingNumber::create'));
+ // Survival's card reads the Survival series.
+ assert.match(card,/view\.promotion = profile\.promotion;/);
+});

@@ -2671,6 +2671,13 @@ class CorumRankedLayer final : public CCLayerColor {
             if (!view.profileScoreVisible || placement) {
                 m_root->addChild(makeLabel("-", scale, at, corum::ranked::ui::TextMuted, "black", anchor), 6); return;
             }
+            // A promotion series: the LP in the gold title's shimmer (achievement
+            // tier IV sweep). One label, so the shine runs across the whole number.
+            if (view.promotion.active) {
+                auto* lp = makeLabel(fmt::format("{}", view.profileScore), scale, at, corum::ranked::ui::Text, "black", anchor);
+                lp->setID("ranked-profile-lp-promotion"_spr);
+                corum::ranked::ui::styleAchievementText(lp, 4); m_root->addChild(lp, 6); return;
+            }
             if (lpShift) if (auto* rolling = corum::ranked::ui::RollingNumber::create(seen.lp, view.profileScore, "", scale, corum::ranked::ui::Text)) {
                 rolling->setPosition({at.x + rolling->getContentSize().width * (0.5f - anchor.x), at.y}); m_root->addChild(rolling, 6); return;
             }
