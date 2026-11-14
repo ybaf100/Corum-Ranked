@@ -819,6 +819,7 @@ test('actual result handoff separates Esc dispatches, never replays polling resu
     run(scoreNative+runtimeDouble+`
 using corum::ranked::RankedRuntime;using corum::ranked::RankedProfileView;
 namespace corum::ranked::ui {
+inline void writeTierAck(char const*,std::string const&){}
 enum class RankTransitionType {Placement,Promotion,Demotion};
 struct RankTransitionLayer : CCLayerColor {
     bool m_finished=false,m_chainToResult=false,m_skipAllowed=false,m_finalShown=false;

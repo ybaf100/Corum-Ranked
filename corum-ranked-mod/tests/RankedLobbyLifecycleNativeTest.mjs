@@ -335,7 +335,7 @@ struct RankedRuntime {RuntimeView state;int dismissals=0,fetches=0;bool acknowle
 struct Layer {
  corum::ranked::ModeLobbyTransition m_modeTransition;
  enum class Page {Live,History,PlacementPoolSelection};Page m_page=Page::Live;bool m_placementPoolStep=false;int stepBacks=0;void onPlacementStepBack(CCObject*){++stepBacks;m_placementPoolStep=false;}
- bool m_rankTransitionLayer=false,m_resultScoreLayer=false,m_resultScorePending=false,m_modeNoticeOpen=false;std::string m_localMessage;
+ bool m_rankTransitionLayer=false,m_gradeUpLayer=false,m_resultScoreLayer=false,m_resultScorePending=false,m_modeNoticeOpen=false;std::string m_localMessage;
  int noticeCloses=0,inputSyncs=0;void closeModeNotice(){m_modeNoticeOpen=false;++noticeCloses;}void syncLobbyInput(){++inputSyncs;}
  int exits=0,historyBacks=0;void onCloseLayer(CCObject*){++exits;}void onHistoryBack(CCObject*){++historyBacks;m_page=Page::Live;}
 ${method(source, '    void onResultClose(')}

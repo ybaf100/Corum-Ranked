@@ -109,7 +109,7 @@ struct CorumRankedLayer: CCLayerColor {
  int modeReturns=0;
  void animateModeLobby(corum::ranked::RankedMode,bool opening){assert(!opening);++modeReturns;m_modeTransition.finish();}
  void* m_rankTransitionLayer=nullptr;
- void* m_resultScoreLayer=nullptr;bool m_resultScorePending=false;bool m_modalActive=false;bool modalAbove(){return false;}template<class T>void suspendMenusUnderModal(T*){}void syncModalInput(){}
+ void* m_resultScoreLayer=nullptr;bool m_resultScorePending=false;bool m_modalActive=false;bool modalAbove(){return false;}template<class T>void suspendMenusUnderModal(T*){}void syncModalInput(){}void* m_gradeUpLayer=nullptr;void maybePlayUnseenTierChange(){}void maybePlayAchievementGradeUp(){}
  std::string m_stageResultAudioPlayedKey;Menu* m_menu=nullptr;
  Menu* m_settingsMenu=nullptr;unsigned long m_volumeSession=0;
  void setKeypadEnabled(bool){}void schedule(int,float){}

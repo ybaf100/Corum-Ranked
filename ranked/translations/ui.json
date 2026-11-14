@@ -4138,5 +4138,17 @@
   "tier-bar-standing": {
     "en": "#{} ON THE LADDER",
     "ko": "현재 {}위"
+  },
+  "achievement-grade-up": {
+    "en": "ACHIEVEMENT GRADE UP",
+    "ko": "도전과제 등급 상승"
+  },
+  "ladder-promoted": {
+    "en": "LADDER PROMOTION",
+    "ko": "순위 변동으로 승급"
+  },
+  "ladder-demoted": {
+    "en": "LADDER DEMOTION",
+    "ko": "순위 변동으로 강등"
   }
 }

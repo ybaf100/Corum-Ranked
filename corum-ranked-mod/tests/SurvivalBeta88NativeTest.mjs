@@ -105,7 +105,7 @@ struct Mod{std::string saved;static Mod*get(){static Mod m;return &m;}template<c
 template<class T>struct WeakRef{T*p;WeakRef(T*p):p(p){}struct Lock{T*p;explicit operator bool()const{return p;}T*operator->(){return p;}};Lock lock()const{return {p};}};
 std::string text(char const*,char const*s){return s;}
 namespace ui{enum class RankTransitionType{Promotion,Demotion};struct RankTransitionLayer{static RankTransitionLayer*create(std::string,std::string,RankTransitionType,std::string,std::string,std::string,std::function<void()>,bool){return nullptr;}};}
-struct Layer{using SurvivalGameLayer=Layer;std::string m_resultMotion;bool m_motion=false,keypad=true;int scores=0;void setKeypadEnabled(bool b){keypad=b;}void addChild(ui::RankTransitionLayer*,int){}void scoreMotion(ScoreAnimationInput,std::string){++scores;}
+struct Layer{using SurvivalGameLayer=Layer;static void ackSurvivalTier(std::string){}std::string m_resultMotion;bool m_motion=false,keypad=true;int scores=0;void setKeypadEnabled(bool b){keypad=b;}void addChild(ui::RankTransitionLayer*,int){}void scoreMotion(ScoreAnimationInput,std::string){++scores;}
 ${method(src,'void beginResultMotion()')}
 };
 int main(){Layer l;auto&r=SurvivalRuntime::get();l.beginResultMotion();assert(l.scores==0);

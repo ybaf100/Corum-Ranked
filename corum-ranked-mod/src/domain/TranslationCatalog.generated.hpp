@@ -3,7 +3,7 @@
 #include <array>
 namespace corum::ranked {
 struct CatalogTranslation {char const* key;char const* english;char const* korean;};
-inline constexpr std::array<CatalogTranslation, 1133> kTranslations {{
+inline constexpr std::array<CatalogTranslation, 1136> kTranslations {{
     CatalogTranslation{"A logged-in Geometry Dash account is required.", "A logged-in Geometry Dash account is required.", "로그인된 Geometry Dash 계정이 필요합니다."},
     CatalogTranslation{"A mod update is required before entering Ranked.", "A mod update is required before entering Ranked.", "랭크에 입장하려면 모드를 업데이트하세요."},
     CatalogTranslation{"AUDIO_CACHE_INVALID", "Audio file is missing or empty · retry required", "음원 파일이 없거나 비어 있음 · 재시도 필요"},
@@ -98,6 +98,7 @@ inline constexpr std::array<CatalogTranslation, 1133> kTranslations {{
     CatalogTranslation{"achievement-grade-title", "ACHIEVEMENT GRADE", "도전과제 등급"},
     CatalogTranslation{"achievement-grade-top", "Highest grade reached", "최고 등급 달성"},
     CatalogTranslation{"achievement-grade-unlock", "Unlocks {}", "해금: {}"},
+    CatalogTranslation{"achievement-grade-up", "ACHIEVEMENT GRADE UP", "도전과제 등급 상승"},
     CatalogTranslation{"achievement-hidden", "HIDDEN", "Hidden"},
     CatalogTranslation{"achievement-holders", "{} players ({}%)", "{}명이 달성 ({}%)"},
     CatalogTranslation{"achievement-max-stage", "MAX STAGE", "최고 단계"},
@@ -574,6 +575,8 @@ inline constexpr std::array<CatalogTranslation, 1133> kTranslations {{
     CatalogTranslation{"jukebox-song-scope", "Change the song used for this map", "이 맵에서 사용할 곡을 변경합니다"},
     CatalogTranslation{"jukebox-waiting", "PREPARING JUKEBOX SONG DATA...", "Jukebox 곡 정보 준비 중..."},
     CatalogTranslation{"keep-open", "Keep this screen open until the download is complete.", "다운로드가 끝날 때까지 이 화면을 유지하세요."},
+    CatalogTranslation{"ladder-demoted", "LADDER DEMOTION", "순위 변동으로 강등"},
+    CatalogTranslation{"ladder-promoted", "LADDER PROMOTION", "순위 변동으로 승급"},
     CatalogTranslation{"language-korean", "한국어", "한국어"},
     CatalogTranslation{"last-attempt-hint", "OPPONENT HAS TO START THE LAST ATTEMPT", "상대의 마지막 시도 시작까지"},
     CatalogTranslation{"last-attempt-seconds", "OPPONENT HAS {}s TO START THE LAST ATTEMPT", "상대방은 마지막 시도를 시작해야 합니다. {}초"},

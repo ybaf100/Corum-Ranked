@@ -38,6 +38,8 @@
 #include "domain/TransitionTrace.hpp"
 #include "ui/RankBadgeAssets.hpp"
 #include "ui/RankTransitionLayer.hpp"
+#include "ui/AchievementGradeUpLayer.hpp"
+#include "ui/TierAck.hpp"
 #include "ui/ResultScoreLayer.hpp"
 #include "ui/StandingVisuals.hpp"
 #include "ui/RankedLeaderboardPopup.hpp"
@@ -625,6 +627,7 @@ class CorumRankedLayer final : public CCLayerColor {
     std::string m_rankTransitionPlayedKey;
     std::string m_stageResultAudioPlayedKey;
     RankTransitionLayer* m_rankTransitionLayer = nullptr;
+    corum::ranked::ui::AchievementGradeUpLayer* m_gradeUpLayer = nullptr;
     corum::ranked::ui::ResultScoreLayer* m_resultScoreLayer = nullptr;
     corum::ranked::ResultPresentationGate m_resultPresentationGate;
     bool m_resultScorePending = false;
@@ -833,7 +836,7 @@ class CorumRankedLayer final : public CCLayerColor {
         resumeModeSelectionAfterQueue(runtime.view());
         leaveMapPoolOnMatch(runtime.view());
 
-        if (m_rankTransitionLayer || m_resultScoreLayer || m_resultScorePending) {
+        if (m_rankTransitionLayer || m_gradeUpLayer || m_resultScoreLayer || m_resultScorePending) {
             updateDynamicUi(); syncAudioMode(); return;
         }
 
@@ -845,6 +848,8 @@ class CorumRankedLayer final : public CCLayerColor {
             applyFadeInIfNeeded();
         }
         updateDynamicUi();
+        maybePlayUnseenTierChange();
+        maybePlayAchievementGradeUp();
         syncQueuePresentation();
         updateHistoryThumbnail();
         updateSoloThumbnails();
@@ -2450,18 +2455,24 @@ class CorumRankedLayer final : public CCLayerColor {
     // re-enabled - lands above the popup and its buttons answer taps through
     // it. While any popup is up, every lobby menu stays switched off; they are
     // switched back on once the last popup closes.
+    // Popups and the full-screen rank / grade motions own every touch.
+    static bool fullScreenOverlay(CCNode* node) {
+        return typeinfo_cast<FLAlertLayer*>(node) || typeinfo_cast<RankTransitionLayer*>(node) ||
+            typeinfo_cast<corum::ranked::ui::AchievementGradeUpLayer*>(node);
+    }
+
     bool modalAbove() {
         auto covers = [this](CCNode* parent) {
             if (!parent) return false;
             for (auto* child : CCArrayExt<CCNode*>(parent->getChildren()))
-                if (child != this && child->isVisible() && typeinfo_cast<FLAlertLayer*>(child)) return true;
+                if (child != this && child->isVisible() && fullScreenOverlay(child)) return true;
             return false;
         };
         return covers(getParent()) || covers(this);
     }
 
     void suspendMenusUnderModal(CCNode* node) {
-        if (!node || typeinfo_cast<FLAlertLayer*>(node)) return;
+        if (!node || fullScreenOverlay(node)) return;
         if (auto* menu = typeinfo_cast<CCMenu*>(node); menu && menu->isTouchEnabled()) {
             corum::ranked::ui::cancelMenuTouch(menu);
             menu->setTouchEnabled(false);
@@ -5809,6 +5820,9 @@ class CorumRankedLayer final : public CCLayerColor {
         RankedProfileView const& after,
         std::function<void()> afterReveal = {}
     ) {
+        // The own result shows this tier: the lobby must not replay it as a
+        // ladder change on the next visit.
+        if (!after.displayedTier.empty()) corum::ranked::ui::writeTierAck("tier-solo", upper(after.displayedTier));
         auto const transition = authoritativeTransitionType(event, before, after);
         if (!transition || m_rankTransitionLayer) return false;
 
@@ -5848,6 +5862,87 @@ class CorumRankedLayer final : public CCLayerColor {
         m_renderedUiKey = presentationKey(); m_pendingUiKey.clear(); m_stableKeyCandidate.clear();
         if (m_uiFadingOut && m_fadeRoot) { m_fadeRoot->stopAllActions(); m_fadeRoot->setOpacity(255); }
         m_uiFadingOut = false;
+    }
+
+    // A tier the player has not been shown yet - another player's result moved
+    // the ladder (GOLD <-> MASTER / CHAMPION), or the own result screen was
+    // missed - plays the full promotion / demotion motion once in the lobby.
+    void maybePlayUnseenTierChange() {
+        if (m_rankTransitionLayer || m_gradeUpLayer || m_resultScoreLayer || m_resultScorePending || m_uiFadingOut ||
+            m_modeTransition.moving() || m_modalActive || modalAbove() || m_page != Page::Live || !isRunning() ||
+            CCDirector::sharedDirector()->getNextScene()) return;
+        auto const& view = RankedRuntime::get().view();
+        if (view.stage != RuntimeStage::Ready || corum::ranked::SurvivalRuntime::get().queueing()) return;
+        for (auto const survival : {false, true}) {
+            std::string now;
+            auto known = false;
+            if (survival) {
+                known = view.survival.loaded && view.survival.profile.visibleRankedScore.has_value();
+                now = upper(view.survival.profile.displayedTier);
+            } else {
+                // Ladder titles arrive with the standing; until then GOLD is not final.
+                known = view.profileScoreVisible && view.standing.loaded && view.placementGames >= view.placementGamesRequired;
+                now = upper(view.profileTier);
+            }
+            if (!known || now.empty() || now == "UNRANKED" || !corum::ranked::ui::isKnownRankName(now)) continue;
+            auto const* what = survival ? "tier-survival" : "tier-solo";
+            auto const seen = corum::ranked::ui::readTierAck(what);
+            corum::ranked::ui::writeTierAck(what, now);
+            // First visit records the tier silently; placement results show their own reveal.
+            if (!seen || *seen == now || seen->empty() || *seen == "UNRANKED" || !corum::ranked::ui::isKnownRankName(*seen)) continue;
+            auto const up = corum::ranked::rankTierOrder(now) > corum::ranked::rankTierOrder(*seen);
+            if (playUnseenTierTransition(*seen, now, up)) return;
+        }
+    }
+
+    bool playUnseenTierTransition(std::string const& before, std::string const& after, bool up) {
+        auto const weak = WeakRef<CorumRankedLayer>(this);
+        auto* layer = RankTransitionLayer::create(before, after, up ? RankTransitionType::Promotion : RankTransitionType::Demotion,
+            up ? tr("ladder-promoted", "LADDER PROMOTION") : tr("ladder-demoted", "LADDER DEMOTION"),
+            tr("tap-to-skip", "TAP TO SKIP"), tr("continue", "CONTINUE"),
+            [weak] {
+                if (auto layer = weak.lock()) {
+                    layer->m_rankTransitionLayer = nullptr;
+                    if (layer->isRunning()) { layer->setKeypadEnabled(true); layer->syncModalInput(); }
+                }
+            });
+        if (!layer) return false;
+        m_rankTransitionLayer = layer;
+        setKeypadEnabled(false);
+        addChild(layer, 1000);
+        syncModalInput();
+        return true;
+    }
+
+    // Claiming AP across a grade threshold: the old grade's core breaks into
+    // the new one. The first grade seen on this account is recorded silently.
+    void maybePlayAchievementGradeUp() {
+        if (m_gradeUpLayer || m_rankTransitionLayer || m_resultScoreLayer || m_resultScorePending || m_uiFadingOut ||
+            m_modalActive || modalAbove() || !isRunning() || CCDirector::sharedDirector()->getNextScene()) return;
+        auto const& achievements = RankedRuntime::get().view().achievements;
+        if (!achievements.loaded || achievements.loading) return;
+        auto const grade = std::string(corum::ranked::achievementApGrade(achievements.totalAp).tier);
+        auto const seen = corum::ranked::ui::readTierAck("achievement-grade");
+        corum::ranked::ui::writeTierAck("achievement-grade", grade);
+        if (!seen || *seen == grade) return;
+        auto const order = [](std::string const& value) {
+            for (std::size_t i = 0; i < corum::ranked::kAchievementApGrades.size(); ++i)
+                if (corum::ranked::kAchievementApGrades[i].first == value) return static_cast<int>(i);
+            return -1;
+        };
+        if (order(grade) <= order(*seen)) return;
+        auto const weak = WeakRef<CorumRankedLayer>(this);
+        auto* layer = corum::ranked::ui::AchievementGradeUpLayer::create(*seen, grade, [weak] {
+            if (auto layer = weak.lock()) {
+                layer->m_gradeUpLayer = nullptr;
+                if (layer->isRunning()) { layer->setKeypadEnabled(true); layer->syncModalInput(); }
+            }
+        });
+        if (!layer) return;
+        m_gradeUpLayer = layer;
+        setKeypadEnabled(false);
+        addChild(layer, 1000);
+        syncModalInput();
     }
 
     void restoreResultInput() {
@@ -7935,7 +8030,7 @@ class CorumRankedLayer final : public CCLayerColor {
     void keyBackClicked() override {
         if (m_modeNoticeOpen) { closeModeNotice(); syncLobbyInput(); return; }
         if (m_modeTransition.moving()) return;
-        if (m_rankTransitionLayer || m_resultScoreLayer || m_resultScorePending) return;
+        if (m_rankTransitionLayer || m_gradeUpLayer || m_resultScoreLayer || m_resultScorePending) return;
         if (m_page != Page::Live) {
             stepBack();
             return;

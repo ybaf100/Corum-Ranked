@@ -16,6 +16,7 @@
 #include "ModeLobbyMotion.hpp"
 #include "ModeLobbySurfaceFade.hpp"
 #include "RankBadgeAssets.hpp"
+#include "TierAck.hpp"
 #include "SurvivalEliminationFx.hpp"
 #include "../domain/SurvivalEliminationEffects.hpp"
 #include "../domain/SurvivalSlicePlan.hpp"
@@ -28,6 +29,7 @@
 #include "SurvivalMapSelectionLayer.hpp"
 #include "SurvivalDifficultyVote.hpp"
 #include <unordered_set>
+#include <cctype>
 #include <algorithm>
 #include <array>
 #include "../RankedMapDetails.hpp"
@@ -595,10 +597,16 @@ class SurvivalGameLayer final : public CCLayerColor {
         });
     }
     // Promotion: the tier motion comes first (then podium, score, result).
+    // The own result shows this tier; the lobby must not replay it later.
+    static void ackSurvivalTier(std::string tier) {
+        std::transform(tier.begin(),tier.end(),tier.begin(),[](unsigned char c){return static_cast<char>(std::toupper(c));});
+        if(!tier.empty())ui::writeTierAck("tier-survival",tier);
+    }
     void beginPromotionMotion() {
         auto& runtime=SurvivalRuntime::get();auto const key=runtime.resultFlowKey();
         if(m_promotionMotion==key || m_motion)return;
         auto const input=runtime.scoreAnimation();if(!input)return;
+        ackSurvivalTier(input->afterTier);
         m_promotionMotion=key;m_motion=true;setKeypadEnabled(false);
         auto const weak=WeakRef<SurvivalGameLayer>(this);
         auto done=[weak,key]{
@@ -612,7 +620,7 @@ class SurvivalGameLayer final : public CCLayerColor {
     void beginResultMotion() {
         auto& runtime=SurvivalRuntime::get();auto const& view=runtime.view();
         if(!view.result.isObject() || m_resultMotion==runtime.resultFlowKey())return;
-        auto input=runtime.scoreAnimation();if(!input)return;m_resultMotion=runtime.resultFlowKey();m_motion=true;setKeypadEnabled(false);
+        auto input=runtime.scoreAnimation();if(!input)return;ackSurvivalTier(input->afterTier);m_resultMotion=runtime.resultFlowKey();m_motion=true;setKeypadEnabled(false);
         auto const weak=WeakRef<SurvivalGameLayer>(this);auto const context=runtime.resultFlowKey();auto finish=[weak,context,input=*input]{if(auto owner=weak.lock())owner->scoreMotion(input,context);};
         // A promotion already played its motion before the podium.
         if((input->promoted || input->demoted) && input->beforeTier!=input->afterTier && !(input->promoted && runtime.promotionMotionShown())){
