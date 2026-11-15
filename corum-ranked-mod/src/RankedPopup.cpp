@@ -13,6 +13,7 @@
 #include "ui/RankedGuideCarousel.hpp"
 #include "SurvivalThumbnailProvider.hpp"
 #include "ui/ModeLobbyMotion.hpp"
+#include "ui/ModeSweepMotion.hpp"
 #include "ui/SoloRoundIntro.hpp"
 #include "ui/ModeLobbySurfaceFade.hpp"
 #include "ui/LobbyHover.hpp"
@@ -2563,6 +2564,14 @@ class CorumRankedLayer final : public CCLayerColor {
     // font size of N px is label scale N / 64. Lobby groups sit at the origin
     // at scale 1 and draw in screen points.
     static constexpr float kLobbyHeader = 36.0f, kLobbyFooter = 38.0f;
+    // Trophy boxes: the main menu half's (sized for a 568-point screen;
+    // narrower iPad halves shrink it) and the mode lobby card's. Its emblem
+    // draws at 0.82 / 0.8 of the box.
+    static constexpr float kLobbyTrophy = 125.0f;
+    static float menuTrophySize(float width) {
+        auto const halfW = (width + px(56.0f)) / 2.0f;
+        return px(190.0f) * std::min(1.0f, halfW / ((568.0f + px(56.0f)) / 2.0f));
+    }
     /** Gap between the header and a mode card's tap area, so header buttons never share a touch with it. */
     static constexpr float kModeCardHitTopInset = 14.0f;
     // Floating SETTINGS button outside the page tree: 92 x 26 centred at
@@ -2721,7 +2730,7 @@ class CorumRankedLayer final : public CCLayerColor {
             band->setID("ranked-profile-tier-band"_spr); m_root->addChild(band, 2);
             // Sized for a 568-point screen; narrower (iPad) halves shrink it so
             // the trophy and its halo stay clear of the season timer.
-            auto const trophy = px(190.0f) * std::min(1.0f, halfW / ((568.0f + px(56.0f)) / 2.0f));
+            auto const trophy = menuTrophySize(size.width);
             CCPoint const emblemAt {x1 - (survival ? px(84.0f) : px(28.0f)) - trophy / 2.0f, y1 - px(14.0f) - trophy / 2.0f};
             // On a tier change since the last visit the old trophy hands over.
             auto const tierShift = seen.valid && !seen.tier.empty() && seen.tier != nowTier;
@@ -2733,7 +2742,7 @@ class CorumRankedLayer final : public CCLayerColor {
                 oldEmblem->setPosition(emblemAt); m_root->addChild(oldEmblem, 4);
             }
             auto* emblem = corum::ranked::ui::createAnimatedRankBadge(view.profileTier, {trophy * 0.82f, trophy * 0.82f}, corum::ranked::ui::RankBadgeDisplay::Large);
-            emblem->setPosition(emblemAt); m_root->addChild(emblem, 4);
+            emblem->setPosition(emblemAt); emblem->setID("ranked-card-trophy"_spr); m_root->addChild(emblem, 4);
             auto const cx = x0 + (survival ? px(28.0f) : px(96.0f));
             // Bottom up: ENTER, the bar block, the stat row, the title, the number row.
             float y = y0 + px(26.0f) + px(27.0f);
@@ -2794,8 +2803,9 @@ class CorumRankedLayer final : public CCLayerColor {
                 m_root->addChild(oldTier, 6);
                 auto* tier = tierValue;
                 auto const up = corum::ranked::rankTierOrder(nowTier) > corum::ranked::rankTierOrder(seen.tier);
-                if (auto* motion = corum::ranked::ui::LobbyTierTransition::create(group, oldEmblem, emblem, oldTier, tier, bloom, up))
-                    m_root->addChild(motion);
+                if (auto* motion = corum::ranked::ui::LobbyTierTransition::create(group, oldEmblem, emblem, oldTier, tier, bloom, up)) {
+                    motion->setID("ranked-lobby-tier-transition"_spr); m_root->addChild(motion);
+                }
             }
             y += px(48.0f) + px(10.0f);
             // The mode title (64 px, leaning), SOLO / RANKED on two lines.
@@ -2830,9 +2840,9 @@ class CorumRankedLayer final : public CCLayerColor {
             // ladder, LP, streak chip and record, from the bottom up.
             auto const x0 = 0.0f, x1 = px(420.0f), y0 = 0.0f, y1 = size.height - kLobbyHeader;
             addSlantedFill(m_root, x0, x1, y0, y1, px(64.0f), 0.0f, corum::ranked::ui::Surface);
-            auto const trophy = px(250.0f);
+            auto const trophy = kLobbyTrophy;
             if (auto* emblem = corum::ranked::ui::createAnimatedRankBadge(view.profileTier, {trophy * 0.8f, trophy * 0.8f}, corum::ranked::ui::RankBadgeDisplay::Large)) {
-                emblem->setPosition({px(64.0f) + trophy / 2.0f, y1 - px(18.0f) - trophy / 2.0f}); m_root->addChild(emblem, 4);
+                emblem->setPosition({px(64.0f) + trophy / 2.0f, y1 - px(18.0f) - trophy / 2.0f}); emblem->setID("ranked-card-trophy"_spr); m_root->addChild(emblem, 4);
             }
             auto const cx = px(28.0f);
             // Above the footer row (SETTINGS / DEBUG / FREE PLAY stay reachable).
@@ -3456,15 +3466,147 @@ class CorumRankedLayer final : public CCLayerColor {
         placeLobbyFooter();
     }
 
-    // L1 <-> L2 / L3 are separate pages: the lobby fades out, the page is
-    // rebuilt for the new selection, and it fades in.
+    // The lobby panel's rows, top to bottom, for the sweep: its pieces (menu
+    // buttons one by one) grouped by height; the START button moves alone.
+    static void collectPanelBands(CCNode* contents, std::vector<std::vector<CCNode*>>& bands, CCNode*& hero) {
+        if (!contents) return;
+        hero = contents->getChildByIDRecursive("ranked-start-button"_spr);
+        if (!hero) hero = contents->getChildByIDRecursive("survival-start-button"_spr);
+        std::vector<std::pair<float, CCNode*>> items;
+        auto const add = [&](CCNode* node) {
+            if (!node || node == hero || !node->isVisible() || !node->getParent()) return;
+            auto const box = node->boundingBox();
+            items.emplace_back(node->getParent()->convertToWorldSpace({box.getMidX(), box.getMidY()}).y, node);
+        };
+        for (auto* child : CCArrayExt<CCNode*>(contents->getChildren())) {
+            if (auto* menu = typeinfo_cast<CCMenu*>(child)) { for (auto* item : CCArrayExt<CCNode*>(menu->getChildren())) add(item); }
+            else add(child);
+        }
+        std::stable_sort(items.begin(), items.end(), [](auto const& a, auto const& b) { return a.first > b.first; });
+        float bandTop = 0.0f;
+        for (auto const& [y, node] : items) {
+            if (bands.empty() || (y < bandTop - 20.0f && bands.size() < 7)) { bands.emplace_back(); bandTop = y; }
+            bands.back().push_back(node);
+        }
+    }
+
+    // The header's title (and Korean subtitle), and its buttons.
+    void lobbyHeaderPieces(std::vector<CCNode*>& titles, std::vector<CCNode*>& pieces) {
+        auto const floor = CCDirector::sharedDirector()->getWinSize().height - kLobbyHeader;
+        for (auto* node : {m_root->getChildByID("ranked-screen-title"_spr), m_root->getChildByID("ranked-screen-subtitle"_spr)})
+            if (node) titles.push_back(node);
+        if (m_menu) for (auto* item : CCArrayExt<CCNode*>(m_menu->getChildren()))
+            if (item->isVisible() && item->getPositionY() > floor) pieces.push_back(item);
+    }
+
+    // Main menu <-> mode lobby: the seam sweep (ui/ModeSweepMotion.hpp, the
+    // timing in domain/ModeSweepTimeline.hpp). The selected half becomes the
+    // lobby's left card, the other half slides off along the seam, the trophy
+    // flies to its lobby place and the panel rows come in one by one. Leaving
+    // the lobby plays the same frames backwards. The outgoing screen's halves
+    // (or card and panel) stay alive under the motion node while the new
+    // screen is built once, right away. False when this is not the plain
+    // lobby: the dissolve covers that.
+    bool beginModeSweep(corum::ranked::RankedMode mode, bool opening) {
+        if (!m_fadeRoot || !m_root || !isRunning() || m_page != Page::Live || m_queueShown || m_queueAnimating) return false;
+        auto const survival = mode == corum::ranked::RankedMode::Survival;
+        auto* selected = survival ? m_lobbySurvival : m_lobbySolo;
+        auto* other = survival ? m_lobbySolo : m_lobbySurvival;
+        if (!selected || !other || !selected->isVisible()) return false;
+        if (opening ? !other->isVisible() : !m_lobbyContents) return false;
+        auto* motion = corum::ranked::ui::ModeSweepMotion::create();
+        if (!motion) return false;
+        auto const size = CCDirector::sharedDirector()->getWinSize();
+        using Sweep = corum::ranked::ui::ModeSweepMotion;
+        Sweep::Setup setup;
+        setup.opening = opening;
+        setup.width = size.width;
+        auto const halfW = (size.width + px(56.0f)) / 2.0f;
+        setup.selectedShift = survival ? 0.0f : -(size.width - halfW);
+        setup.otherShift = (survival ? 1.0f : -1.0f) * size.width * 0.58f;
+        setup.trophyRatio = menuTrophySize(size.width) * 0.82f / (kLobbyTrophy * 0.8f);
+        // The outgoing screen: its header, and the halves or the card and panel.
+        std::vector<CCNode*> outTitles, outHeader;
+        lobbyHeaderPieces(outTitles, outHeader);
+        if (opening) {
+            setup.menuSelected = selected; setup.menuOther = other;
+            setup.enter = selected->getChildByID("ranked-profile-enter"_spr);
+            if (!selected->getChildByID("ranked-lobby-tier-transition"_spr)) setup.menuTrophy = selected->getChildByID("ranked-card-trophy"_spr);
+        } else {
+            setup.card = selected;
+            setup.lobbyTrophy = selected->getChildByID("ranked-card-trophy"_spr);
+            collectPanelBands(m_lobbyContents, setup.bands, setup.hero);
+        }
+        m_fadeRoot->addChild(motion, 2);
+        if (opening) { motion->adopt(selected); motion->adopt(other); }
+        else { motion->adopt(selected); motion->adopt(m_lobbyPanel); }
+        for (auto* node : outTitles) motion->adopt(node);
+        for (auto* node : outHeader) motion->adopt(node);
+
+        // The new screen, built once.
+        m_modeTransition.finish();
+        m_renderedUiKey.clear();
+        render();
+        m_renderedUiKey = presentationKey();
+        m_renderedLocalUi = localUiSignature();
+        m_modeTransition.hold();
+        if (m_lobbyHover) m_lobbyHover->setActive(false);
+        setLobbyNodeInput(m_lobbySurvival,false); setLobbyNodeInput(m_lobbySolo,false); setLobbyNodeInput(m_lobbyPanel,false);
+        setLobbyNodeInput(m_lobbyToolbar,false);
+        if (m_menu) { corum::ranked::ui::cancelMenuTouch(m_menu); m_menu->setTouchEnabled(false); }
+
+        auto* inSelected = survival ? m_lobbySurvival : m_lobbySolo;
+        auto* inOther = survival ? m_lobbySolo : m_lobbySurvival;
+        std::vector<CCNode*> inTitles, inHeader;
+        lobbyHeaderPieces(inTitles, inHeader);
+        // Header buttons on both screens (same ID) stay as they are.
+        auto const shared = [](std::vector<CCNode*> const& in, CCNode* node) {
+            return !node->getID().empty() && std::any_of(in.begin(), in.end(), [&](CCNode* n) { return n->getID() == node->getID(); });
+        };
+        // The new screen is not the lobby (a stage change): no motion.
+        auto const abandon = [&] {
+            motion->finish();
+            m_modeTransition.finish();
+            syncLobbyInput(); refreshLobbyHover();
+            return true;
+        };
+        std::vector<CCNode*> outOnly, inOnly;
+        for (auto* node : outHeader) { if (shared(inHeader, node)) node->setVisible(false); else outOnly.push_back(node); }
+        for (auto* node : inHeader) if (!shared(outHeader, node)) inOnly.push_back(node);
+        if (opening) {
+            if (!inSelected || !m_lobbyContents) return abandon();
+            setup.card = inSelected;
+            setup.lobbyTrophy = inSelected->getChildByID("ranked-card-trophy"_spr);
+            collectPanelBands(m_lobbyContents, setup.bands, setup.hero);
+            setup.menuTitles = outTitles; setup.menuHeader = outOnly;
+            setup.lobbyTitles = inTitles; setup.lobbyHeader = inOnly;
+        } else {
+            if (!inSelected || !inOther || !inOther->isVisible()) return abandon();
+            setup.menuSelected = inSelected; setup.menuOther = inOther;
+            if (!inSelected->getChildByID("ranked-lobby-tier-transition"_spr)) setup.menuTrophy = inSelected->getChildByID("ranked-card-trophy"_spr);
+            setup.menuTitles = inTitles; setup.menuHeader = inOnly;
+            setup.lobbyTitles = outTitles; setup.lobbyHeader = outOnly;
+        }
+        setup.done = [weak = WeakRef(this)] {
+            auto self = weak.lock();
+            if (!self) return;
+            self->m_modeTransition.finish();
+            self->syncLobbyInput(); self->refreshLobbyHover();
+        };
+        motion->start(std::move(setup));
+        return true;
+    }
+
+    // L1 <-> L2 / L3: the seam sweep (both ways); where it cannot run, the
+    // page is rebuilt for the new selection under a dissolve.
     void animateModeLobby(corum::ranked::RankedMode mode, bool opening) {
-        (void)mode; (void)opening;
         if(m_lobbyHover)m_lobbyHover->setActive(false);
         setLobbyNodeInput(m_lobbySurvival,false); setLobbyNodeInput(m_lobbySolo,false); setLobbyNodeInput(m_lobbyPanel,false);
         if (m_menu) { corum::ranked::ui::cancelMenuTouch(m_menu); m_menu->setTouchEnabled(false); }
         if (m_settingsMenu) { corum::ranked::ui::cancelMenuTouch(m_settingsMenu); m_settingsMenu->setTouchEnabled(false); }
         setLobbyNodeInput(m_lobbyToolbar,false);
+        // Main menu <-> mode lobby: the seam sweep, backwards when leaving.
+        if (beginModeSweep(mode, opening)) return;
         // Dissolve: the current lobby is captured and fades out over the new
         // one, which is built once, right away (no dark gap, no second build).
         if (beginCrossfade(0.32f)) {

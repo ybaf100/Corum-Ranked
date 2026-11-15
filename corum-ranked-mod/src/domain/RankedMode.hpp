@@ -25,6 +25,12 @@ public:
         m_selected.reset(); m_moving = true; return true;
     }
     void finish() { m_moving = false; }
+    // A motion that has rebuilt the screen for the new selection keeps the
+    // transition (input and rebuilds wait) until it ends with finish().
+    bool hold() {
+        if (m_moving) return false;
+        m_moving = true; return true;
+    }
     void recoverSolo() { if (!m_moving) m_selected = RankedMode::SoloRanked; }
     void recoverSurvival() { if (!m_moving) m_selected = RankedMode::Survival; }
     [[nodiscard]] bool moving() const { return m_moving; }

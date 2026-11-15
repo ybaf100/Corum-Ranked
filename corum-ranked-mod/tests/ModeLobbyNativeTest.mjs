@@ -139,7 +139,7 @@ test('L1 <-> L2/L3 are separate pages: fade out, rebuild for the selection, fade
  assert.match(card,/select->setEnabled\(source.stage == RuntimeStage::Ready && !selected\)/);
  assert.match(card,/survival-card-select/);assert.match(card,/solo-ranked-card-select/);
  assert.match(card,/addSlantedFill\(m_root, x0, x1, y0, y1, survival \? px\(64\.0f\) : 0\.0f, survival \? 0\.0f : px\(64\.0f\)/);
- assert.match(card,/fontScale\(64\.0f\)/);assert.match(card,/px\(190\.0f\)/);
+ assert.match(card,/fontScale\(64\.0f\)/);assert.match(card,/menuTrophySize\(size\.width\)/);assert.match(popup,/return px\(190\.0f\) \*/);
  const panel=method(popup,'    void renderModePanel(');
  assert.match(panel,/heroSlab\(heroSize, playLive/);
  assert.match(panel,/queue->setEnabled\(online\)/);
