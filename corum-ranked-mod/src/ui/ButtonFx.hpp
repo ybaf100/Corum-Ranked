@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../domain/SlantGeometry.hpp"
+
 #include <Geode/Geode.hpp>
 
 #include <algorithm>
@@ -86,13 +88,22 @@ class ButtonFx final : public CCNode {
         if (m_kind == ButtonFxKind::Standard && m_skew == 0.0f && face->getSkewX() == 0.0f && !keepsUpright(face) &&
             size.height <= 40.0f && size.width <= 200.0f && size.width >= size.height * 1.6f) {
             // Only the chrome leans; captions and icons stay upright to read.
-            for (auto* child : CCArrayExt<CCNode*>(face->getChildren()))
-                if (typeinfo_cast<CCLayerColor*>(child)) child->setSkewX(SlabSkew);
+            // Each layer leans about the face's centre, not its own, so the
+            // top rule stays on the slanted top edge (it drifted left by
+            // about half the lean before).
+            for (auto* child : CCArrayExt<CCNode*>(face->getChildren())) {
+                auto* layer = typeinfo_cast<CCLayerColor*>(child);
+                if (!layer || layer->getSkewX() != 0.0f) continue;
+                layer->setSkewX(SlabSkew);
+                layer->setPositionX(layer->getPositionX() + corum::ranked::leanAboutFaceCentre(
+                    layer->getPositionY(), layer->getContentSize().height, size.height, SlabSkew));
+            }
             leaned = true;
         }
         m_glow = CCLayerColor::create({255, 255, 255, 0});
         m_glow->setContentSize(size);
-        m_glow->setSkewX(m_skew);
+        // The highlight covers the face, so it takes the face's lean.
+        m_glow->setSkewX(leaned ? SlabSkew : m_skew);
         this->addChild(m_glow, 1);
         // The shine leans with a slab; on a rectangle it cuts across at an angle.
         auto const lean = m_skew > 0.0f ? m_skew : leaned ? SlabSkew : 16.0f;
