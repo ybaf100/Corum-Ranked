@@ -13,10 +13,11 @@ import { MatchService } from "./match.service.js";
 import { SpectatorLiveController } from "./spectator-live.controller.js";
 import { SPECTATOR_AUTHORITY_CACHE_MS, SpectatorLiveService } from "./spectator-live.service.js";
 import { ForumRecordsModule } from "../forum/forum-records.module.js";
+import { RankedConfigModule } from "../config/ranked-config.module.js";
 import { MatchPlayerInfoController } from "../forum/match-player-info.controller.js";
 
 @Module({
-  imports: [SessionModule, RelayModule, AchievementModule, ForumRecordsModule],
+  imports: [SessionModule, RelayModule, AchievementModule, ForumRecordsModule, RankedConfigModule],
   controllers: [MatchController, SpectatorLiveController, MatchPlayerInfoController],
   providers: [
     MatchAccessService,

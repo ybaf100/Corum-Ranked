@@ -16,6 +16,7 @@ test('actual Survival custom popup resolves exact stats/forum identity, never lo
 #include <cassert>
 #include <chrono>
 #include <functional>
+#include <optional>
 #include <vector>
 #include <string>
 using namespace corum::ranked;
@@ -56,7 +57,10 @@ void fitSingleLineMenuLabel(CCLabelBMFont*,float,float,float){}
 struct Layout{CCSize size;};Layout rankedPopupLayout(CCSize canvas,CCSize){return {canvas};}
 CCNode*rankedPopupContent(CCNode*,CCMenu*,Layout){return new CCNode;}
 CCLabelBMFont*publicPlayerTitle(CCNode*,matjson::Value const&,CCPoint,float,float){return nullptr;}
-void publicTierPanel(CCNode*,std::string const&,matjson::Value const&,std::string const& record,CCPoint,CCSize){if(!record.empty())CCLabelBMFont::labels.push_back(record);}
+enum class PublicTierMissing{Unavailable,Loading,Unranked};
+struct PanelCall{std::string caption,tier;PublicTierMissing missing;};inline std::vector<PanelCall> panels;
+matjson::Value publicModeOr(matjson::Value const& mode,std::string const& shown,std::optional<int>){if(!mode["tier"].asString().unwrapOr("").empty()||shown.empty())return mode;auto f=matjson::Value::object();f["tier"]=shown;return f;}
+void publicTierPanel(CCNode*,std::string const& caption,matjson::Value const& mode,std::string const& record,CCPoint,CCSize,PublicTierMissing missing){panels.push_back({caption,mode["tier"].asString().unwrapOr(""),missing});if(!record.empty())CCLabelBMFont::labels.push_back(record);}
 CCNode* publicCloseFace(){return new CCNode;}
 
 enum class RankBadgeDisplay{Compact};CCNode*createAnimatedRankBadge(std::string const&,CCSize,RankBadgeDisplay){return new CCNode;}
@@ -64,7 +68,12 @@ enum class RankBadgeDisplay{Compact};CCNode*createAnimatedRankBadge(std::string 
 `+source+String.raw`
 int main(){using namespace corum::ranked;using ui::SurvivalPlayerInfoPopup;auto*manager=GameLevelManager::sharedState();UserInfoDelegate foreign;
  SurvivalStanding human;human.id="human";human.accountId=123;human.name="Player";human.tier="GOLD";human.rank=1;
- manager->m_userInfoDelegate=&foreign;auto*p=SurvivalPlayerInfoPopup::create(human,"match");assert(p);p->refresh(0);assert(manager->requests==0&&manager->m_userInfoDelegate==&foreign);
+ manager->m_userInfoDelegate=&foreign;auto*p=SurvivalPlayerInfoPopup::create(human,"match");assert(p);
+ // Before the read: "Loading...", with this match's Survival tier already shown (no Solo tier here).
+ {auto const& solo=ui::panels[ui::panels.size()-2];auto const& survival=ui::panels.back();
+  assert(solo.caption=="SOLO RANKED"&&solo.tier.empty()&&solo.missing==ui::PublicTierMissing::Loading);
+  assert(survival.caption=="SURVIVAL"&&survival.tier=="GOLD"&&survival.missing==ui::PublicTierMissing::Loading);}
+ p->refresh(0);assert(manager->requests==0&&manager->m_userInfoDelegate==&foreign);
  assert(geode::async::paths.back().ends_with("/match/player-info/human"));
  manager->m_userInfoDelegate=nullptr;p->refresh(0);assert(manager->requests==1&&manager->account==123);
  GJUserScore wrong;wrong.m_accountID=999;p->getUserInfoFinished(&wrong);assert(!p->m_statistics&&manager->m_userInfoDelegate==p);
@@ -72,12 +81,28 @@ int main(){using namespace corum::ranked;using ui::SurvivalPlayerInfoPopup;auto*
  matjson::Value forum;forum["participantId"]="human";forum["gdAccountId"]="123";matjson::Value record;record["provider"]="GDKF";record["rank"]=7;record["status"]="RANKED";forum["records"]=std::vector<matjson::Value>{record};
  auto callback=geode::async::callbacks.front();callback({200,forum});assert(!p->m_forumFailed&&p->m_forum["gdAccountId"].asString().unwrapOr("")=="123");
  for(auto const* label:{"Stars","Moons","Demons","Extreme Demons","GDKF","Pointercrate","#7","42","12","8","5"})assert(std::find(CCLabelBMFont::labels.begin(),CCLabelBMFont::labels.end(),label)!=CCLabelBMFont::labels.end());
+ // A loaded profile: its tiers, and a mode without a rating reads UNRANKED.
+ {auto profile=matjson::Value::object();profile["gdAccountId"]="123";auto solo=matjson::Value::object();solo["tier"]="MASTER";solo["lp"]=1500;profile["solo"]=solo;profile["survival"]=nullptr;
+  forum["profile"]=profile;p->m_forum=forum;p->render();
+  assert(ui::panels[ui::panels.size()-2].tier=="MASTER"&&ui::panels.back().tier=="GOLD"&&ui::panels.back().missing==ui::PublicTierMissing::Unranked);forum.erase("profile");}
  p->dismiss();auto count=CCLabelBMFont::labels.size();callback({200,forum});p->getUserInfoFinished(&score);assert(CCLabelBMFont::labels.size()==count&&manager->m_userInfoDelegate==nullptr);delete p;
  SurvivalStanding bot=human;bot.bot=true;bot.accountId=999;auto requests=manager->requests;auto reads=geode::async::paths.size();auto*b=SurvivalPlayerInfoPopup::create(bot,"match");b->refresh(0);assert(manager->requests==requests&&geode::async::paths.size()==reads&&b->m_player.accountId==0);b->dismiss();delete b;
  auto*q=SurvivalPlayerInfoPopup::create(human,"match");q->refresh(0);assert(manager->m_userInfoDelegate==q);manager->m_userInfoDelegate=&foreign;SurvivalRuntime::get().id="other";q->refresh(0);assert(q->m_closed&&manager->m_userInfoDelegate==&foreign);delete q;
+ // A failed read is retried twice, 2 s apart, before the info shows as unavailable.
+ {SurvivalRuntime::get().id="match";auto*r=SurvivalPlayerInfoPopup::create(human,"match");r->refresh(0);auto first=geode::async::paths.size();assert(geode::async::paths.back().ends_with("/match/player-info/human"));
+  for(int failure=1;failure<=3;++failure){
+   geode::async::callbacks.back()({503,matjson::Value()});
+   if(failure<3){assert(!r->m_forumFailed&&r->m_forumFailures==failure&&r->m_nextForumRead>steady_clock::now());
+    assert(ui::panels.back().missing==ui::PublicTierMissing::Loading);
+    r->refresh(0);assert(geode::async::paths.size()==first+static_cast<std::size_t>(failure)-1);r->m_nextForumRead={};r->refresh(0);assert(geode::async::paths.size()==first+static_cast<std::size_t>(failure));}
+  }
+  assert(r->m_forumFailed&&ui::panels.back().missing==ui::PublicTierMissing::Unavailable&&ui::panels.back().tier=="GOLD");
+  r->m_nextForumRead={};r->refresh(0);assert(geode::async::paths.size()==first+2);r->dismiss();delete r;}
  // History popups are owned by the visible record screen, not an active game.
  SurvivalRuntime::get().live=false;CCNode owner;
- auto*h=SurvivalPlayerInfoPopup::createForHistory(human,&owner,"old-match",true);assert(h&&h->m_history&&h->m_historySurvival);h->refresh(0);
+ auto*h=SurvivalPlayerInfoPopup::createForHistory(human,&owner,"old-match",true);assert(h&&h->m_history&&h->m_historySurvival);
+ // A history entry's tier is from that match: not shown as the current one.
+ assert(ui::panels.back().tier.empty());h->refresh(0);
  assert(!h->m_closed&&geode::async::paths.back().ends_with("/old-match/player-info/human"));
  auto late=geode::async::callbacks.back();owner.parent=false;h->refresh(0);assert(h->m_closed);auto labels=CCLabelBMFont::labels.size();late({200,forum});assert(CCLabelBMFont::labels.size()==labels);delete h;
  owner.parent=true;auto*solo=SurvivalPlayerInfoPopup::createForHistory(human,&owner,"solo-match",false);solo->refresh(0);

@@ -5,6 +5,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ACHIEVEMENT_DEFINITIONS, type RankedRatingProfile, type TierBand } from "@corum-ranked/rules";
 import { readStandings } from "../src/leaderboard/standing.js";
+import { readPublicPlayerProfiles } from "../src/forum/public-player-profiles.js";
 import { buildScorePresentation, resultPromotionSeries } from "../src/match/score-presentation.js";
 import { PgliteDatabase } from "./pglite-database.js";
 import { DATABASE } from "../src/database/database.port.js";
@@ -343,6 +344,16 @@ describe("exact Gold title slots",()=>{
       if(player.tier==="CHAMPION")expect(standing.goldTier?.nextTier).toBeNull();
     }
     expect((await service.list()).players).toEqual(ladder);
+  });
+  it("player info shows the same Gold title as the leaderboard (real SQL)",async()=>{
+    for(let n=1;n<=8;n++)await add(n,1500-n*10,1000,"GOLD");
+    await add(9,900,1000,"SILVER2");
+    await client.exec("CREATE TABLE IF NOT EXISTS sur_profiles (player_id uuid PRIMARY KEY, displayed_tier text NOT NULL, lp integer NOT NULL)");
+    const ladder=(await new LeaderboardService(database,{getSnapshotOrNull:()=>null} as RankedConfigService).list()).players;
+    const profiles=await readPublicPlayerProfiles(database,["1","4","5","9"],false);
+    for(const account of ["1","4","5"])expect(profiles[account]!.solo.tier).toBe(ladder.find(p=>p.gdAccountId===account)!.tier);
+    expect([profiles["1"]!.solo.tier,profiles["4"]!.solo.tier,profiles["5"]!.solo.tier]).toEqual(["CHAMPION","MASTER","GOLD"]);
+    expect(profiles["9"]!.solo.tier).toBe("SILVER2");expect(profiles["9"]!.survival).toBeNull();
   });
   it("reclassifies every affected player immediately after an LP change",async()=>{
     for(let n=1;n<=8;n++)await add(n,1500-n*10,1000,"GOLD",n===8);

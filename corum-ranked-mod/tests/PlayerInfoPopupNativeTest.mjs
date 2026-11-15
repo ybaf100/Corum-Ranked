@@ -40,8 +40,8 @@ struct GameLevelManager{UserInfoDelegate* m_userInfoDelegate=nullptr;int request
 std::string operator""_spr(char const* s,std::size_t n){return std::string(s,n);}
 namespace geode::prelude{}
 namespace fmt{template<class T>std::string format(char const* pattern,T value){std::string s(pattern);auto p=s.find("{}");if(p!=std::string::npos)s.replace(p,2,std::to_string(value));return s;}}
-namespace corum::ranked{enum class RuntimeStage{Idle,Matched};struct ForumRankView{std::string provider,externalName,status="PENDING",lastSuccessAt;std::optional<int> rank;};struct ForumRecordsView{bool loaded=false,loading=false;std::string error;std::vector<ForumRankView> records;};struct Json{Json operator[](char const*)const{return {};}};struct PlayerInfoView{Json publicProfile;int accountId=123;std::string username="Human",side="A";bool botReference=false;ForumRecordsView forum;};
-struct RankedRuntime{struct View{RuntimeStage stage=RuntimeStage::Matched;std::uint64_t revision=0;struct {std::string matchId="m",state="ROUND_PREPARE"; struct Profile{std::string displayedTier="RED";int wins=8,losses=2;} playerAProfile,playerBProfile;}match;PlayerInfoView playerInfo;}v;int infoReads=0;static RankedRuntime& get(){static RankedRuntime r;return r;}auto const& view()const{return v;}void fetchPlayerInfo(std::string const& side){++infoReads;v.playerInfo.side=side;}};
+namespace corum::ranked{enum class RuntimeStage{Idle,Matched};struct ForumRankView{std::string provider,externalName,status="PENDING",lastSuccessAt;std::optional<int> rank;};struct ForumRecordsView{bool loaded=false,loading=false;std::string error;std::vector<ForumRankView> records;};struct Json{std::string account,tier;Json operator[](char const* key)const{Json j;if(std::string(key)=="gdAccountId")j.account=account;return j;}struct S{std::string v;std::string unwrapOr(char const* d)const{return v.empty()?d:v;}};S asString()const{return {account};}};struct PlayerInfoView{Json publicProfile;int accountId=123;std::string username="Human",side="A";bool botReference=false;ForumRecordsView forum;};
+struct RankedRuntime{struct View{RuntimeStage stage=RuntimeStage::Matched;std::uint64_t revision=0;struct {std::string matchId="m",state="ROUND_PREPARE"; struct Profile{std::string displayedTier="RED";std::optional<int> visibleRankedScore;int wins=8,losses=2;} playerAProfile,playerBProfile;}match;PlayerInfoView playerInfo;}v;int infoReads=0;static RankedRuntime& get(){static RankedRuntime r;return r;}auto const& view()const{return v;}void fetchPlayerInfo(std::string const& side){++infoReads;v.playerInfo.side=side;}};
 namespace i18n{bool isKorean(){return false;}std::string text(char const*,char const* fallback){return fallback;}}
 namespace ui{enum class FontWeight{SemiBold,ExtraBold,Black};constexpr ccColor3B Accent{1,2,3},Steel{1,2,3},Surface{1,2,3},SurfaceRaised{1,2,3},Text{1,2,3},TextMuted{1,2,3},Gold{1,2,3};
 CCNode* surface(CCPoint,CCPoint,ccColor3B,ccColor3B,int,bool){return new CCNode;}
@@ -51,7 +51,10 @@ void fitSingleLineMenuLabel(CCLabelBMFont*,float,float,float){}
 struct Layout{struct Size{float width,height;}size;};Layout rankedPopupLayout(CCPoint canvas,CCPoint){return {{canvas.x,canvas.y}};}
 CCNode*rankedPopupContent(CCNode*,CCMenu*,Layout){return new CCNode;}
 CCLabelBMFont*publicPlayerTitle(CCNode*,Json const&,CCPoint,float,float){return nullptr;}
-inline int publicRankCalls=0;void publicTierPanel(CCNode*,std::string const&,Json const&,std::string const& record,CCPoint,CCPoint){++publicRankCalls;if(!record.empty())CCLabelBMFont::labels.push_back(record);}
+enum class PublicTierMissing{Unavailable,Loading,Unranked};
+struct PanelCall{std::string caption,tier;PublicTierMissing missing;};inline std::vector<PanelCall> panels;
+Json publicModeOr(Json const& mode,std::string const& shown,std::optional<int>){auto f=mode;if(f.tier.empty())f.tier=shown;return f;}
+inline int publicRankCalls=0;void publicTierPanel(CCNode*,std::string const& caption,Json const& mode,std::string const& record,CCPoint,CCPoint,PublicTierMissing missing){++publicRankCalls;panels.push_back({caption,mode.tier,missing});if(!record.empty())CCLabelBMFont::labels.push_back(record);}
 CCNode* publicCloseFace(){return new CCNode;}
 
 enum class RankBadgeDisplay{Compact};inline int haloBadges=0;
@@ -62,6 +65,9 @@ CCNode* createAnimatedRankBadge(std::string const&,CCPoint,RankBadgeDisplay){++h
 ${source}
 int main(){using namespace corum::ranked;using ui::RankedPlayerInfoPopup;auto* manager=GameLevelManager::sharedState();auto& runtime=RankedRuntime::get();UserInfoDelegate foreign;
  manager->m_userInfoDelegate=&foreign;auto* p=RankedPlayerInfoPopup::create("A");assert(p&&manager->requests==0&&manager->m_userInfoDelegate==&foreign);
+ // Before the profile arrives: the match's own Solo tier, and "Loading..." (not "Unavailable").
+ assert(ui::panels.size()>=2&&ui::panels[ui::panels.size()-2].caption=="SOLO RANKED"&&ui::panels[ui::panels.size()-2].tier=="RED");
+ assert(ui::panels.back().caption=="SURVIVAL"&&ui::panels.back().tier.empty()&&ui::panels.back().missing==ui::PublicTierMissing::Loading);
  assert(std::find(CCLabelBMFont::labels.begin(),CCLabelBMFont::labels.end(),"8W / 2L (80%)")!=CCLabelBMFont::labels.end());
  manager->m_userInfoDelegate=nullptr;p->refresh(0);assert(manager->requests==1&&manager->account==123&&manager->m_userInfoDelegate==p);
  GJUserScore wrong;wrong.m_accountID=456;p->getUserInfoFinished(&wrong);assert(!p->m_statistics&&manager->m_userInfoDelegate==p);
@@ -70,6 +76,16 @@ int main(){using namespace corum::ranked;using ui::RankedPlayerInfoPopup;auto* m
  score.m_globalRank=10;p->getUserInfoFinished(&score);assert(CCLabelBMFont::labels.end()!=std::find(CCLabelBMFont::labels.begin(),CCLabelBMFont::labels.end(),"#10"));
  runtime.v.playerInfo.forum.loaded=true;runtime.v.playerInfo.forum.records.push_back({"GDKF","","PENDING","",{}});
  auto reads=runtime.infoReads;for(int i=0;i<10;++i)p->refresh(0);assert(runtime.infoReads==reads+1&&manager->requests==1);
+ // A failed read is retried 3 times, 2 s apart; only then does the info read "Unavailable".
+ runtime.v.playerInfo.forum={};runtime.v.playerInfo.forum.error="timeout";p->m_nextForumRead={};
+ for(int retry=1;retry<=3;++retry){reads=runtime.infoReads;p->refresh(0);assert(runtime.infoReads==reads+1&&p->m_failedReads==retry);
+  ++runtime.v.revision;p->refresh(0);assert(runtime.infoReads==reads+1);
+  assert(ui::panels.back().missing==(retry<3?ui::PublicTierMissing::Loading:ui::PublicTierMissing::Unavailable));p->m_nextForumRead={};}
+ reads=runtime.infoReads;p->refresh(0);assert(runtime.infoReads==reads);
+ assert(ui::panels[ui::panels.size()-2].tier=="RED");
+ // A loaded profile: a mode without a rating reads UNRANKED.
+ runtime.v.playerInfo.publicProfile.account="123";runtime.v.playerInfo.forum.error.clear();runtime.v.playerInfo.forum.loaded=true;
+ ++runtime.v.revision;p->refresh(0);assert(ui::panels.back().missing==ui::PublicTierMissing::Unranked);
  runtime.v.match.state="ROUND_ENTERING";p->refresh(0);assert(p->m_closed&&!p->parent&&CCTouchDispatcher::get()->releases==1);delete p;
  runtime.v.match.state="ROUND_PREPARE";runtime.v.match.playerBProfile.displayedTier="GOLD";auto* second=RankedPlayerInfoPopup::create("B");assert(second&&manager->m_userInfoDelegate==second&&ui::publicRankCalls>=2);
  manager->m_userInfoDelegate=&foreign;second->onExit();assert(manager->m_userInfoDelegate==&foreign);delete second;

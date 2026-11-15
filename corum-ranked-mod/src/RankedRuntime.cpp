@@ -2959,8 +2959,12 @@ void RankedRuntime::fetchPlayerInfo(std::string const& side) {
     auto const generation = ++m_playerInfoGeneration;
     auto const matchId = m_view.match.matchId;
     auto const session = m_sessionToken;
-    m_view.playerInfo = {};
+    // A re-read of the same player (records still PENDING, or a retry after a
+    // failed read) keeps what is on screen until the answer arrives; a failed
+    // re-read leaves it in place, so the tiers never blank out.
+    if (m_view.playerInfo.matchId != matchId || m_view.playerInfo.side != side) m_view.playerInfo = {};
     auto& info = m_view.playerInfo;
+    info.matchId = matchId;
     info.side = side;
     info.accountId = side == "A" ? m_view.match.playerAAccountId : m_view.match.playerBAccountId;
     info.username = side == "A" ? m_view.match.playerAName : m_view.match.playerBName;
@@ -2968,6 +2972,7 @@ void RankedRuntime::fetchPlayerInfo(std::string const& side) {
         info.accountId = 16792985; info.username = "CoJong"; info.botReference = true;
     }
     info.forum.loading = true;
+    info.forum.error.clear();
     ++m_view.revision;
     auto request = baseRequest(session, m_matchToken);
     m_playerInfoRequest.spawn(request.get(endpoint("/api/ranked/matches/" + matchId + "/player-info/" + side)),

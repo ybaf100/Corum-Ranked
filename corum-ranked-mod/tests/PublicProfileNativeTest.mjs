@@ -54,6 +54,7 @@ test('actual public profile helpers retain scoped titles/effects, current badges
 #include <cassert>
 #include <string>
 #include <vector>
+#include <optional>
 struct CCPoint{float x,y;};struct CCSize{float width,height;};struct CCNode{virtual ~CCNode()=default;std::vector<CCNode*>children;void addChild(CCNode*p,int){children.push_back(p);}void setPosition(CCPoint){}};
 struct CCLabelBMFont:CCNode{std::string text;int effect=0;bool unlocked=false;float fitted=0;void setAnchorPoint(CCPoint){}};
 namespace geode::prelude{}
@@ -86,7 +87,17 @@ int main(){using namespace corum::ranked::ui;
  {CCNode panel;matjson::Value gold;gold["tier"]="GOLD";gold["lp"]=900;publicTierPanel(&panel,"SURVIVAL",gold,"8W",{100,100},{180,50});
   std::vector<std::string> texts;for(auto* c:panel.children)if(auto* l=dynamic_cast<CCLabelBMFont*>(c))texts.push_back(l->text);
   assert((texts==std::vector<std::string>{"SURVIVAL","GOLD","900 LP · 8W"})&&ambientBadges.back()=="GOLD");
-  CCNode empty;publicTierPanel(&empty,"SOLO",matjson::Value(),"",{100,100},{180,50});assert(dynamic_cast<CCLabelBMFont*>(empty.children.back())->text=="Unavailable");}
+  CCNode empty;publicTierPanel(&empty,"SOLO",matjson::Value(),"",{100,100},{180,50});assert(dynamic_cast<CCLabelBMFont*>(empty.children.back())->text=="Unavailable");
+  // Still loading: "Loading...", no badge. A loaded profile without the mode's rating: UNRANKED with its badge.
+  auto badges=ambientBadges.size();CCNode loading;publicTierPanel(&loading,"SOLO",matjson::Value(),"",{100,100},{180,50},PublicTierMissing::Loading);
+  assert(dynamic_cast<CCLabelBMFont*>(loading.children.back())->text=="Loading..."&&ambientBadges.size()==badges);
+  CCNode unranked;publicTierPanel(&unranked,"SURVIVAL",matjson::Value(nullptr),"",{100,100},{180,50},PublicTierMissing::Unranked);
+  assert(dynamic_cast<CCLabelBMFont*>(unranked.children.back())->text=="UNRANKED"&&ambientBadges.back()=="UNRANKED");
+  // The tier the opening screen shows fills in until (or unless) the profile has one, without LP when unknown.
+  auto shown=publicModeOr(matjson::Value(nullptr),"MASTER",1500);assert(shown["tier"].asString().unwrapOr("")=="MASTER"&&shown["lp"].asInt().unwrapOr(0)==1500);
+  assert(publicModeOr(gold,"RED",std::nullopt)["tier"].asString().unwrapOr("")=="GOLD");
+  assert(!publicModeOr(matjson::Value(nullptr),"RED",std::nullopt)["lp"].asInt().isOk());
+  assert(publicModeOr(matjson::Value(nullptr),"",std::nullopt).isNull());}
  auto before=ambientBadges.size();publicRankLine(&parent,"SURVIVAL",matjson::Value(),140);assert(ambientBadges.size()==before&&static_cast<CCLabelBMFont*>(parent.children.back())->text=="Unavailable");
 }
 `);

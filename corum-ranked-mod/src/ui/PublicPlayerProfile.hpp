@@ -6,6 +6,7 @@
 #include "../domain/AchievementStyle.hpp"
 #include "../domain/RankTierPresentation.hpp"
 #include <matjson.hpp>
+#include <optional>
 namespace corum::ranked::ui {
 using namespace geode::prelude;
 inline std::string publicTitleText(matjson::Value const& title){
@@ -33,12 +34,27 @@ inline void publicRankLine(CCNode* parent,std::string const& caption,matjson::Va
     }else if(auto lp=profile["lp"].asInt();lp.isOk())value=std::to_string(lp.unwrap())+" LP";
     auto* score=menuLabel(value,.30f,{282,y},profile["promotion"].isObject()?Green:Text,FontWeight::ExtraBold);score->setAnchorPoint({1,.5f});fitSingleLineMenuLabel(score,112,20,.30f);parent->addChild(score,5);
 }
+// A mode's public rating, or, until the public profile arrives (or when it
+// cannot be read, or for a bot, which has none), the tier and LP the screen
+// that opened the info already shows for that player in that mode.
+inline matjson::Value publicModeOr(matjson::Value const& mode,std::string const& shownTier,std::optional<int> shownLp){
+    if(!mode["tier"].asString().unwrapOr("").empty()||shownTier.empty())return mode;
+    auto fallback=matjson::Value::object();fallback["tier"]=shownTier;
+    if(shownLp)fallback["lp"]=*shownLp;
+    return fallback;
+}
+// What a tier panel shows when its mode has no tier: the player info is still
+// loading, the player has no rating in that mode yet (UNRANKED, from a loaded
+// profile), or the profile could not be read.
+enum class PublicTierMissing { Unavailable, Loading, Unranked };
 // Q2 tier panel (.panel #20232E): the mode's trophy, then the mode caption,
 // the tier in its colour and "LP · record" (or the promotion marks).
-inline void publicTierPanel(CCNode* parent,std::string const& caption,matjson::Value const& profile,std::string const& record,CCPoint center,CCSize size){
+inline void publicTierPanel(CCNode* parent,std::string const& caption,matjson::Value const& profile,std::string const& record,CCPoint center,CCSize size,
+    PublicTierMissing missing=PublicTierMissing::Unavailable){
     parent->addChild(surface(size,center,SurfaceRaised,SurfaceRaised,255,false),1);
     auto const left=center.x-size.width/2,right=center.x+size.width/2;
-    auto const tier=profile["tier"].asString().unwrapOr("");
+    auto tier=profile["tier"].asString().unwrapOr("");
+    if(tier.empty()&&missing==PublicTierMissing::Unranked)tier="UNRANKED";
     auto textX=left+10;
     if(!tier.empty()){
         auto* badge=createAnimatedRankBadge(tier,{38,38},RankBadgeDisplay::Leaderboard);badge->setPosition({left+27,center.y});parent->addChild(badge,5);textX=left+52;
@@ -48,7 +64,8 @@ inline void publicTierPanel(CCNode* parent,std::string const& caption,matjson::V
         auto* label=menuLabel(text,scale,{textX,y},color,weight);label->setAnchorPoint({0,.5f});fitSingleLineMenuLabel(label,width,scale*48,scale);parent->addChild(label,5);return label;
     };
     put(caption,center.y+15,.19f,TextMuted,FontWeight::SemiBold);
-    put(tier.empty()?i18n::text("info-unavailable","Unavailable"):rankTierDisplay(tier),center.y+1,.34f,tier.empty()?TextMuted:tierColor(tier),FontWeight::Black);
+    auto const empty=missing==PublicTierMissing::Loading?i18n::text("loading","Loading..."):i18n::text("info-unavailable","Unavailable");
+    put(tier.empty()?empty:rankTierDisplay(tier),center.y+1,.34f,tier.empty()||tier=="UNRANKED"?TextMuted:tierColor(tier),FontWeight::Black);
     std::string detail;
     if(profile["promotion"].isObject()){
         detail=i18n::text("promotion-match","PROMOTION MATCH");

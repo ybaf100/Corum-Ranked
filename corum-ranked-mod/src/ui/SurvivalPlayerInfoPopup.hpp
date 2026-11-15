@@ -23,7 +23,7 @@ class SurvivalPlayerInfoPopup final:public Popup,public UserInfoDelegate {
     bool m_leaderboard=false,m_survivalLeaderboard=true,m_historySurvival=false,m_history=false;
     std::string m_matchId,m_session;
     bool m_closed=false,m_exited=false,m_inFlight=false,m_lookupFailed=false,m_forumBusy=false,m_forumFailed=false;
-    int m_requests=0,m_forumReads=0;
+    int m_requests=0,m_forumReads=0,m_forumFailures=0;
     std::optional<Statistics> m_statistics;
     matjson::Value m_forum=nullptr;
     std::chrono::steady_clock::time_point m_deadline{},m_requestedAt{},m_nextRequest{},m_nextForumRead{};
@@ -65,9 +65,12 @@ class SurvivalPlayerInfoPopup final:public Popup,public UserInfoDelegate {
             owner->m_forumBusy=false;
             auto root=response.json().unwrapOr(matjson::Value());
             auto const account=numFromString<int>(root["gdAccountId"].asString().unwrapOr("0")).unwrapOr(0);
-            if(response.code()<200 || response.code()>=300 || account!=owner->m_player.accountId ||
-                ((!owner->m_leaderboard||owner->m_historySurvival) && root["participantId"].asString().unwrapOr("")!=owner->m_player.id))owner->m_forumFailed=true;
-            else owner->m_forum=std::move(root);
+            if(response.code()>=200 && response.code()<300 && account==owner->m_player.accountId &&
+                ((owner->m_leaderboard&&!owner->m_historySurvival) || root["participantId"].asString().unwrapOr("")==owner->m_player.id))owner->m_forum=std::move(root);
+            // A failed first read (a timeout, a server hiccup) is retried twice,
+            // 2 s apart, before the info shows as unavailable.
+            else if(owner->m_forum.isNull() && ++owner->m_forumFailures<3)owner->m_nextForumRead=std::chrono::steady_clock::now()+std::chrono::seconds(2);
+            else owner->m_forumFailed=true;
             owner->render();
         });
     }
@@ -87,14 +90,22 @@ class SurvivalPlayerInfoPopup final:public Popup,public UserInfoDelegate {
         auto const& payload=std::as_const(m_forum)["profile"];
         auto const profile=payload["gdAccountId"].asString().unwrapOr("")==std::to_string(m_player.accountId)?payload:matjson::Value();
         publicPlayerTitle(m_contents,profile["equippedTitle"],{130,203},232,.25f);
+        // A loaded profile without a mode's rating is UNRANKED there; "Loading..."
+        // until the read (and its retries) finish, "Unavailable" only after.
+        auto const missing=!profile["gdAccountId"].asString().unwrapOr("").empty()?PublicTierMissing::Unranked:
+            !m_player.bot&&!m_forumFailed&&m_forum.isNull()?PublicTierMissing::Loading:PublicTierMissing::Unavailable;
         auto const record=profile["survival"]["recordSummary"];
         auto line=survivalRecordText(static_cast<int>(record["wins"].asInt().unwrapOr(0)),static_cast<int>(record["losses"].asInt().unwrapOr(0)),i18n::isKorean());
         auto const streak=static_cast<int>(record["winStreak"].asInt().unwrapOr(0));if(streak>0)line+=" · "+i18n::streak(streak,true);
         if(m_player.bot)line="BOT";
-        else if(!record.isObject())line=i18n::text("info-unavailable","Unavailable");
+        else if(!record.isObject())line=missing==PublicTierMissing::Unavailable?i18n::text("info-unavailable","Unavailable"):"";
+        // The tier the opening screen shows (the Survival match, or the
+        // leaderboard's mode) until the profile arrives, and for a bot. A
+        // history entry's tier is from that match, so it is not reused.
+        auto const shown=[&](bool survival){return !m_history&&survival==m_survivalLeaderboard&&m_player.tier!="UNRANKED"?m_player.tier:std::string();};
         // Q2 tier panels: Solo, then Survival with its record and streak.
-        publicTierPanel(m_contents,i18n::text("solo-ranked","SOLO RANKED"),profile["solo"],"",{106.5f,162},{185,52});
-        publicTierPanel(m_contents,i18n::text("survival","SURVIVAL"),profile["survival"],line,{293.5f,162},{185,52});
+        publicTierPanel(m_contents,i18n::text("solo-ranked","SOLO RANKED"),publicModeOr(profile["solo"],shown(false),std::nullopt),"",{106.5f,162},{185,52},missing);
+        publicTierPanel(m_contents,i18n::text("survival","SURVIVAL"),publicModeOr(profile["survival"],shown(true),std::nullopt),line,{293.5f,162},{185,52},missing);
         auto const unavailable=i18n::text("info-unavailable","Unavailable");auto const waiting=m_lookupFailed?unavailable:i18n::text("loading","Loading...");
         auto stat=[&](std::optional<int> value){return m_player.bot?std::string("BOT"):value?std::to_string(*value):waiting;};
         tile(i18n::text("info-stars","Stars"),stat(m_statistics?std::optional(m_statistics->stars):std::nullopt),0);

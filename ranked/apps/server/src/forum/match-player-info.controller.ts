@@ -1,4 +1,5 @@
-import { BadRequestException, Controller, Get, Headers, Inject, Param, UseGuards } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Headers, Inject, Optional, Param, UseGuards } from '@nestjs/common';
+import { SurvivalConfigService } from '../config/survival-config.service.js';
 import { DATABASE, type DatabasePort } from '../database/database.port.js';
 import { MatchAccessService } from '../match/match-access.service.js';
 import { CurrentSession } from '../session/current-session.decorator.js';
@@ -6,13 +7,14 @@ import { SessionGuard } from '../session/session.guard.js';
 import type { RankedSessionContext } from '../session/session.types.js';
 import { ForumRecordsService } from './forum-records.service.js';
 import { COJONG } from './forum-records.source.js';
-import {readPublicPlayerProfiles} from './public-player-profiles.js';
+import {liveSurvivalBands,readPublicPlayerProfiles} from './public-player-profiles.js';
 
 @Controller('api/ranked/matches')
 @UseGuards(SessionGuard)
 export class MatchPlayerInfoController {
   public constructor(@Inject(DATABASE) private readonly database: DatabasePort,
-    private readonly access: MatchAccessService, private readonly records: ForumRecordsService) {}
+    private readonly access: MatchAccessService, private readonly records: ForumRecordsService,
+    @Optional() @Inject(SurvivalConfigService) private readonly survivalConfig?: SurvivalConfigService) {}
   @Get(':id/player-info/:side')
   public async read(@Param('id') id: string, @Param('side') side: string,
     @Headers('x-match-token') token: string, @CurrentSession() session: RankedSessionContext) {
@@ -29,6 +31,6 @@ export class MatchPlayerInfoController {
     const accountId = botReference ? COJONG.accountId : side === 'A' ? row.account_a : row.account_b;
     const username = botReference ? COJONG.username : side === 'A' ? row.name_a : row.name_b;
     return { ...(await this.records.read(accountId)), gdUsername: username, botReference,
-      profile:botReference?null:(await readPublicPlayerProfiles(this.database,[accountId]))[accountId]??null };
+      profile:botReference?null:(await readPublicPlayerProfiles(this.database,[accountId],true,liveSurvivalBands(this.survivalConfig)))[accountId]??null };
   }
 }

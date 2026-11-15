@@ -1,6 +1,7 @@
 import {Controller,Get,Header,Inject,Optional,Param,ParseUUIDPipe,UseGuards,ForbiddenException,NotFoundException} from '@nestjs/common';
 import {DATABASE,type DatabasePort} from '../database/database.port.js';
-import {readPublicPlayerProfiles} from '../forum/public-player-profiles.js';
+import {liveSurvivalBands,readPublicPlayerProfiles} from '../forum/public-player-profiles.js';
+import {SurvivalConfigService} from '../config/survival-config.service.js';
 import {CurrentSession} from '../session/current-session.decorator.js';
 import {SessionGuard} from '../session/session.guard.js';
 import type {RankedSessionContext} from '../session/session.types.js';
@@ -15,7 +16,8 @@ export class SurvivalPlayerInfoController {
  constructor(@Inject(SurvivalEngineService)private readonly engine:SurvivalEngineService,
   @Inject(SurvivalRateService)private readonly rates:SurvivalRateService,
   @Inject(ForumRecordsService)private readonly records:ForumRecordsService,
-  @Optional() @Inject(DATABASE)private readonly database?:DatabasePort){}
+  @Optional() @Inject(DATABASE)private readonly database?:DatabasePort,
+  @Optional() @Inject(SurvivalConfigService)private readonly survivalConfig?:SurvivalConfigService){}
  @Get(':matchId/player-info/:participantId') @Header('Cache-Control','no-store')
  async read(@Param('matchId',new ParseUUIDPipe()) matchId:string,@Param('participantId') participantId:string,@CurrentSession() session:RankedSessionContext){
   await this.rates.check(session.playerId,'state');
@@ -25,6 +27,6 @@ export class SurvivalPlayerInfoController {
   if(!player)throw new NotFoundException('Survival participant not found');
   if(player.kind==='BOT' || !player.gdAccountId)return {participantId,gdAccountId:null,gdUsername:player.name,bot:true,records:[]};
   return {...await this.records.read(player.gdAccountId),participantId,gdUsername:player.name,bot:false,
-   profile:this.database?(await readPublicPlayerProfiles(this.database,[player.gdAccountId]))[player.gdAccountId]??null:null};
+   profile:this.database?(await readPublicPlayerProfiles(this.database,[player.gdAccountId],true,liveSurvivalBands(this.survivalConfig)))[player.gdAccountId]??null:null};
  }
 }

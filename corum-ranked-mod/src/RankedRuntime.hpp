@@ -180,7 +180,7 @@ struct ForumRecordsView {
 struct PlayerInfoView {
     matjson::Value publicProfile;
     int accountId = 0;
-    std::string username, side;
+    std::string username, side, matchId;
     bool botReference = false;
     ForumRecordsView forum;
 };

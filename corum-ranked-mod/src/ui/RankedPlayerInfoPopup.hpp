@@ -25,7 +25,8 @@ class RankedPlayerInfoPopup final : public Popup, public UserInfoDelegate {
     std::chrono::steady_clock::time_point m_requestedAt {}, m_nextRequest {};
     std::chrono::steady_clock::time_point m_nextForumRead {};
     std::chrono::steady_clock::time_point m_lookupDeadline {};
-    int m_forumReads = 0;
+    int m_forumReads = 0, m_failedReads = 0;
+    static constexpr int MaxFailedReads = 3;
     struct Statistics { int globalRank, stars, moons, demons; std::optional<int> extreme; };
     std::optional<Statistics> m_statistics;
     CCNode* m_contents = nullptr;
@@ -59,6 +60,13 @@ class RankedPlayerInfoPopup final : public Popup, public UserInfoDelegate {
         profile->setPosition({338, 54}); menu->addChild(profile);
         schedule(schedule_selector(RankedPlayerInfoPopup::refresh), 0.1f); render(); refresh(0);
         return true;
+    }
+    // The read finished without a public profile: it failed past the retries,
+    // or the server has none for this player (Debug's bot reference).
+    bool profileUnavailable(PlayerInfoView const& info) const {
+        if (info.forum.loading) return false;
+        if (info.forum.loaded) return true;
+        return !info.forum.error.empty() && m_failedReads >= MaxFailedReads;
     }
     void releaseDelegate() {
         auto* manager = GameLevelManager::sharedState();
@@ -109,10 +117,16 @@ class RankedPlayerInfoPopup final : public Popup, public UserInfoDelegate {
         auto* name=menuLabel(info.username,36.f/64.f,{14,224},Text,FontWeight::Black);name->setAnchorPoint({0,.5f});
         fitSingleLineMenuLabel(name,230,24,36.f/64.f);m_contents->addChild(name);
         publicPlayerTitle(m_contents,info.publicProfile["equippedTitle"],{130,203},232,.25f);
-        // Q2 tier panels: Solo with this match's record, then Survival.
-        publicTierPanel(m_contents,i18n::text("solo-ranked","SOLO RANKED"),info.publicProfile["solo"],
-            matchRecordText(profile.wins,profile.losses,i18n::isKorean()),{106.5f,162},{185,52});
-        publicTierPanel(m_contents,i18n::text("survival","SURVIVAL"),info.publicProfile["survival"],"",{293.5f,162},{185,52});
+        // A loaded profile without a mode's rating is UNRANKED there; "Loading..."
+        // until the read (and its retries) finish, "Unavailable" only after.
+        auto const missing = !info.publicProfile["gdAccountId"].asString().unwrapOr("").empty() ? PublicTierMissing::Unranked
+            : profileUnavailable(info) ? PublicTierMissing::Unavailable : PublicTierMissing::Loading;
+        // Q2 tier panels: Solo with this match's record (the match's own tier
+        // until the profile arrives, and for a bot), then Survival.
+        publicTierPanel(m_contents,i18n::text("solo-ranked","SOLO RANKED"),
+            publicModeOr(info.publicProfile["solo"],profile.displayedTier,profile.visibleRankedScore),
+            matchRecordText(profile.wins,profile.losses,i18n::isKorean()),{106.5f,162},{185,52},missing);
+        publicTierPanel(m_contents,i18n::text("survival","SURVIVAL"),info.publicProfile["survival"],"",{293.5f,162},{185,52},missing);
         auto const unavailable = i18n::text("info-unavailable", "Unavailable");
         auto const waiting = m_lookupFailed ? unavailable : i18n::text("loading", "Loading...");
         tile(i18n::text("info-stars", "Stars"), m_statistics ? fmt::format("{}", m_statistics->stars) : waiting, 0);
@@ -158,9 +172,14 @@ class RankedPlayerInfoPopup final : public Popup, public UserInfoDelegate {
         resolveStatistics();
         auto const now = std::chrono::steady_clock::now();
         auto const& forum = view.playerInfo.forum;
-        if (forum.loaded && !forum.loading && m_forumReads < 12 && now >= m_nextForumRead &&
-            std::any_of(forum.records.begin(), forum.records.end(), [](auto const& record) { return record.status == "PENDING"; })) {
-            ++m_forumReads; m_nextForumRead = now + std::chrono::seconds(1);
+        auto const pending = forum.loaded &&
+            std::any_of(forum.records.begin(), forum.records.end(), [](auto const& record) { return record.status == "PENDING"; });
+        // A failed read (a timeout, a server hiccup) is retried, 2 s apart, so
+        // the tiers still arrive; what is already on screen stays meanwhile.
+        auto const failed = !forum.error.empty() && m_failedReads < MaxFailedReads;
+        if (!forum.loading && (pending || failed) && m_forumReads < 12 && now >= m_nextForumRead) {
+            ++m_forumReads; if (failed) ++m_failedReads;
+            m_nextForumRead = now + std::chrono::seconds(failed ? 2 : 1);
             // Poll only the database while the one-time creation job finishes.
             // This endpoint never performs an external API refresh.
             RankedRuntime::get().fetchPlayerInfo(m_side);

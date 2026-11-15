@@ -1,7 +1,8 @@
 import type { HistoryOptions } from "./history-options.js";
 import { Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import {DATABASE,type DatabasePort} from '../database/database.port.js';
-import {readPublicPlayerProfiles} from '../forum/public-player-profiles.js';
+import {liveSurvivalBands,readPublicPlayerProfiles} from '../forum/public-player-profiles.js';
+import { SurvivalConfigService } from "../config/survival-config.service.js";
 import { SERVER_CLOCK, type ServerClock } from "../common/runtime.module.js";
 import { MatchService } from "../match/match.service.js";
 import type { RankedSessionContext } from "../session/session.types.js";
@@ -22,6 +23,7 @@ export class HistoryService {
     private readonly survival: SurvivalService,
     @Inject(SERVER_CLOCK) private readonly clock: ServerClock,
     @Optional() @Inject(DATABASE) private readonly database?:DatabasePort,
+    @Optional() @Inject(SurvivalConfigService) private readonly survivalConfig?:SurvivalConfigService,
   ) {}
 
   public async history(session: RankedSessionContext, scope: HistoryScope, options:HistoryOptions={}) {
@@ -55,7 +57,7 @@ export class HistoryService {
       for(const player of Object.values(record.players??{}) as any[])if(typeof player?.gdAccountId==='string')accounts.push(player.gdAccountId);
       for(const round of record.rounds??[])for(const player of round.standings??[])if(typeof player.gdAccountId==='string')accounts.push(player.gdAccountId);
     }
-    return readPublicPlayerProfiles(this.database,accounts,false);
+    return readPublicPlayerProfiles(this.database,accounts,false,liveSurvivalBands(this.survivalConfig));
   }
 
 }
