@@ -7,7 +7,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   SeededRandom,
-  calculateMmrUpdate,
+  calculatePerformanceMmrUpdate,
   type CsmpTier,
   type DisplayTier,
 } from "@corum-ranked/rules";
@@ -497,20 +497,18 @@ describe("development-only Bot Match using the production Ranked engine", () => 
        FROM ranked_matches WHERE id = $1`,
       [creation.matchId],
     );
-    const expected = calculateMmrUpdate({
+    // Rating V2: the bot matches end in a perfect three-Clear sweep (total dominance).
+    const expected = calculatePerformanceMmrUpdate({
       ratingA: player.hiddenMmr,
       ratingB: creation.botContext.hiddenMmr,
       placementGamesA: player.placementGames,
       placementGamesB: creation.botContext.placementGames,
+      placementGames: document.operational.mmrPolicy!.placementGames,
       winner: playerWins ? "A" : "B",
-      scoreA: playerWins ? 1_500 : 0,
-      scoreB: playerWins ? 0 : 1_500,
-      clearsA: playerWins ? 6 : 0,
-      clearsB: playerWins ? 0 : 6,
+      dominance: 1,
       resultStreakA: 0,
       resultStreakB: 0,
-      maximumGainSide: playerWins ? "A" : "B",
-    }, document.operational.mmrPolicy!);
+    });
     return {
       before: player.hiddenMmr,
       after: profile.rows[0]!,
@@ -680,15 +678,15 @@ describe("development-only Bot Match using the production Ranked engine", () => 
     expect(outbox.rows[0]?.count).toBe(0);
   });
 
-  it("awards the existing normal LP maximum to the PERFECT WIN winner", async () => {
+  it("awards the LP maximum (20 x 1.6) to the PERFECT WIN winner", async () => {
     const result = await runRatedMatch("9306", true, {
       hiddenMmr: 2_500,
       placementGames: 5,
       displayedTier: "BRONZE",
     });
     expect(result.state.result.perfectWinSide).toBe("A");
-    expect(result.state.result.rankedScoreDelta.A).toBe(38);
-    expect(Number(result.after.visible_ranked_score)).toBe(2_538);
+    expect(result.state.result.rankedScoreDelta.A).toBe(32);
+    expect(Number(result.after.visible_ranked_score)).toBe(2_532);
   });
 
   it("starts a promotion series at cutoff-1 without counting the trigger win", async () => {

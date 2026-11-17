@@ -10,6 +10,7 @@ export * from "./mmr.js";
 export * from "./pool.js";
 export * from "./placement.js";
 export * from "./rating.js";
+export * from "./performance-rating.js";
 export * from "./random.js";
 export * from "./round.js";
 export * from "./scoring.js";

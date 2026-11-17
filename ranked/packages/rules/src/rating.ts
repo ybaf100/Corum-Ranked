@@ -1,5 +1,6 @@
 import { RankedDomainError } from "./errors.js";
 import { expectedScoreAgainst } from "./mmr.js";
+import type { VisiblePerformance } from "./performance-rating.js";
 import { tierForRating } from "./tier.js";
 import { baseRankedTier, soloTierOrder } from "./solo-tiers.js";
 import type { DisplayTier, MmrPolicy, PlayerSide, RankedTier, RoundResult, TierBand } from "./types.js";
@@ -43,6 +44,8 @@ export interface RankedRatingContext {
   readonly opponentHiddenMmr?: number;
   /** Forces the winner to the existing LP formula's maximum normal factor. */
   readonly maximumVisibleScoreGain?: boolean;
+  /** Rating V2: the match's content and its LP bonus (performance-rating.ts). */
+  readonly performance?: VisiblePerformance;
 }
 
 const clamp = (value: number, minimum: number, maximum: number): number =>
@@ -85,6 +88,74 @@ const promotionWins = (promotion: PromotionSeriesState): number =>
 
 const promotionLosses = (promotion: PromotionSeriesState): number =>
   promotion.results.filter((result) => result === "LOSS").length;
+
+// V1 LP: the MMR catch-up and the opponent's strength only.
+const legacyMagnitude = (
+  before: RankedRatingProfile,
+  won: boolean,
+  hiddenMmrAfter: number,
+  policy: MmrPolicy,
+  context: RankedRatingContext,
+): number => {
+  const gapCorrection = clamp(
+    1 + (hiddenMmrAfter - before.visibleRankedScore) / policy.visibleScoreGapDivisor,
+    policy.visibleScoreMinFactor,
+    policy.visibleScoreMaxFactor,
+  );
+  const gapFactor = won ? gapCorrection : 2 - gapCorrection;
+  const opponentFactor = context.opponentHiddenMmr === undefined
+    ? 1
+    : (() => {
+        const expected = expectedScoreAgainst(
+          before.hiddenMmr,
+          context.opponentHiddenMmr,
+          policy.expectedScoreDivisor,
+          policy.visibleScoreOpponentStrengthWeight,
+        );
+        return won ? 2 * (1 - expected) : 2 * expected;
+      })();
+  const movementFactor = context.maximumVisibleScoreGain && won
+    ? policy.visibleScoreMaxFactor
+    : clamp(
+        gapFactor * opponentFactor,
+        policy.visibleScoreMinFactor,
+        policy.visibleScoreMaxFactor,
+      );
+  return Math.max(1, Math.round(policy.visibleScoreBaseChange * movementFactor));
+};
+
+// V2 LP: the match's content (the winner's dominance, the same for both
+// players) times the MMR catch-up and half the opponent-strength weight,
+// within 0.5-1.6 of the base; the winner adds its comeback / save bonus.
+const performanceMagnitude = (
+  before: RankedRatingProfile,
+  won: boolean,
+  hiddenMmrAfter: number,
+  context: RankedRatingContext,
+  performance: VisiblePerformance,
+): number => {
+  const policy = performance.policy;
+  const gapCorrection = clamp(1 + (hiddenMmrAfter - before.visibleRankedScore) / policy.visibleScoreGapDivisor, 0.5, 1.5);
+  const gapFactor = won ? gapCorrection : 2 - gapCorrection;
+  const opponentFactor = context.opponentHiddenMmr === undefined
+    ? 1
+    : (() => {
+        const expected = expectedScoreAgainst(
+          before.hiddenMmr,
+          context.opponentHiddenMmr,
+          policy.expectedScoreDivisor,
+          policy.visibleOpponentStrengthWeight,
+        );
+        return won ? 2 * (1 - expected) : 2 * expected;
+      })();
+  const dominance = Number.isFinite(performance.dominance) ? clamp(performance.dominance, -1, 1) : 0;
+  const contentFactor = 1 + policy.visiblePerformanceWeight * dominance;
+  const movementFactor = context.maximumVisibleScoreGain && won
+    ? policy.visibleScoreMaxFactor
+    : clamp(contentFactor * gapFactor * opponentFactor, policy.visibleScoreMinFactor, policy.visibleScoreMaxFactor);
+  const bonus = won ? Math.max(0, Math.round(performance.bonus)) : 0;
+  return Math.max(1, Math.round(policy.visibleScoreBaseChange * movementFactor)) + bonus;
+};
 
 export const updateRankedRatingProfile = (
   before: RankedRatingProfile,
@@ -255,33 +326,9 @@ export const updateRankedRatingProfile = (
     };
   }
 
-  const gapCorrection = clamp(
-    1 + (hiddenMmrAfter - before.visibleRankedScore) / policy.visibleScoreGapDivisor,
-    policy.visibleScoreMinFactor,
-    policy.visibleScoreMaxFactor,
-  );
-  const gapFactor = won ? gapCorrection : 2 - gapCorrection;
-  const opponentFactor = context.opponentHiddenMmr === undefined
-    ? 1
-    : (() => {
-        const expected = expectedScoreAgainst(
-          before.hiddenMmr,
-          context.opponentHiddenMmr,
-          policy.expectedScoreDivisor,
-          policy.visibleScoreOpponentStrengthWeight,
-        );
-        return won ? 2 * (1 - expected) : 2 * expected;
-      })();
-  const movementFactor = context.maximumVisibleScoreGain && won
-    ? policy.visibleScoreMaxFactor
-    : clamp(
-        gapFactor * opponentFactor,
-        policy.visibleScoreMinFactor,
-        policy.visibleScoreMaxFactor,
-      );
-  const magnitude = Math.max(1, Math.round(
-    policy.visibleScoreBaseChange * movementFactor,
-  ));
+  const magnitude = context.performance
+    ? performanceMagnitude(before, won, hiddenMmrAfter, context, context.performance)
+    : legacyMagnitude(before, won, hiddenMmrAfter, policy, context);
   const projected = before.visibleRankedScore + (won ? magnitude : -magnitude);
   const currentIndex = ordered.findIndex((band) => band.tier === before.displayedTier || band.tier === `${before.displayedTier}3`);
   if (currentIndex < 0) {

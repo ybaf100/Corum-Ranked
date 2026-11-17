@@ -2,11 +2,13 @@ import { standardSpectatorEligible } from "./spectator-live.policy.js";
 import { soloHistoryDetails } from "../history/solo-history.js";
 import type { HistoryOptions } from "../history/history-options.js";
 import { readStandings } from "../leaderboard/standing.js";
+import { readRoundPace } from "./round-pace.js";
 import { recentRoundDeaths, type DeathFeedEvent } from "./death-feed.js";
 import {
   ConflictException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from "@nestjs/common";
 import {
@@ -21,7 +23,10 @@ import {
   matchFormatOf,
   roundMapCountOf,
   bannerForRound,
-  calculateMmrUpdate,
+  calculatePerformanceMmrUpdate,
+  DEFAULT_PERFORMANCE_RATING_POLICY,
+  matchDominance,
+  visiblePerformanceBonus,
   createRound,
   evaluateDeathmatch,
   endRoundAttempt,
@@ -254,6 +259,8 @@ interface AchievementDeathmatchResultRow {
   score_b: number;
   winner_id: string | null;
 }
+
+const ratingLogger = new Logger("RatingV2");
 
 interface PerfectWinRoundRow {
   result: PlayerSide | "DRAW" | null;
@@ -2543,23 +2550,38 @@ export class MatchService {
       })),
       config.operational.rules.clearTarget,
     );
-    const update = calculateMmrUpdate(
-      {
-        ratingA: beforeA.hiddenMmr,
-        ratingB: beforeB.hiddenMmr,
-        placementGamesA: beforeA.placementGames,
-        placementGamesB: beforeB.placementGames,
-        winner,
-        scoreA: Number(totals.score_a),
-        scoreB: Number(totals.score_b),
-        clearsA: Number(totals.clears_a),
-        clearsB: Number(totals.clears_b),
-        resultStreakA: beforeA.resultStreak,
-        resultStreakB: beforeB.resultStreak,
-        maximumGainSide: perfectWinSide,
-      },
-      config.operational.mmrPolicy,
-    );
+    // Rating V2: the match's content (rounds, score, Clears, how early each
+    // round's first Clear came) moves hidden MMR and, half as far, LP.
+    const pace = await readRoundPace(transaction, current.id, current.player_a_id, current.player_b_id,
+      config.operational.rules.roundSeconds);
+    const ratingPolicy = DEFAULT_PERFORMANCE_RATING_POLICY;
+    const dominance = matchDominance({
+      winner,
+      format: matchFormatOf(finalSeries),
+      roundWinsA: Number(finalSeries.roundWins?.A ?? 0),
+      roundWinsB: Number(finalSeries.roundWins?.B ?? 0),
+      scoreA: Number(totals.score_a),
+      scoreB: Number(totals.score_b),
+      clearsA: Number(totals.clears_a),
+      clearsB: Number(totals.clears_b),
+      rounds: pace.rounds,
+      perfectSide: perfectWinSide,
+    }, ratingPolicy);
+    const update = calculatePerformanceMmrUpdate({
+      ratingA: beforeA.hiddenMmr,
+      ratingB: beforeB.hiddenMmr,
+      placementGamesA: beforeA.placementGames,
+      placementGamesB: beforeB.placementGames,
+      placementGames: config.operational.mmrPolicy.placementGames,
+      winner,
+      dominance: dominance.total,
+      resultStreakA: beforeA.resultStreak,
+      resultStreakB: beforeB.resultStreak,
+    }, ratingPolicy);
+    // LP bonuses: a comeback win (the first round lost) and a round saved
+    // with a last-attempt Clear.
+    const firstRoundWinner = pace.firstRoundWinner;
+    const savedRounds = pace.savedRoundSides;
     const ratingA = updateRankedRatingProfile(
       beforeA,
       "A",
@@ -2570,6 +2592,8 @@ export class MatchService {
       {
         opponentHiddenMmr: beforeB.hiddenMmr,
         maximumVisibleScoreGain: perfectWinSide === "A",
+        performance: { dominance: dominance.total, policy: ratingPolicy,
+          bonus: visiblePerformanceBonus("A", winner, firstRoundWinner, savedRounds, ratingPolicy) },
       },
     );
     const ratingB = updateRankedRatingProfile(
@@ -2582,8 +2606,13 @@ export class MatchService {
       {
         opponentHiddenMmr: beforeA.hiddenMmr,
         maximumVisibleScoreGain: perfectWinSide === "B",
+        performance: { dominance: dominance.total, policy: ratingPolicy,
+          bonus: visiblePerformanceBonus("B", winner, firstRoundWinner, savedRounds, ratingPolicy) },
       },
     );
+    ratingLogger.log(` match=${current.id} winner=${winner} D=${dominance.total.toFixed(3)} ` +
+      `(round ${dominance.round.toFixed(2)} score ${dominance.score.toFixed(2)} clear ${dominance.clear.toFixed(2)} speed ${dominance.speed.toFixed(2)}) ` +
+      `mmr ${update.deltaA}/${update.deltaB} lp ${ratingA.visibleScoreDelta ?? "-"}/${ratingB.visibleScoreDelta ?? "-"}`);
     let achievementUnlocks: Readonly<Record<string, readonly unknown[]>> = {};
     // Debug Bot is the development harness for the production result path.
     // When explicitly enabled, it must exercise Achievement progression too so
