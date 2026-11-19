@@ -70,6 +70,11 @@ describe("Survival M1 independent profiles and LP",()=>{
     const before=(await database.query("SELECT * FROM ranked_profiles WHERE player_id=$1",[player.playerId])).rows;
     const initial=await survival.profile(player.playerId);
     expect(initial).toMatchObject({enabled:false,profile:{lp:150,tier:"RED",demotionWarning:false,warningRecoveryLp:null}});
+    // The tier guide reads each group's promotion series from the profile's tier bands.
+    expect(initial.tierBands.map(band=>[band.tier,band.promotion])).toEqual([
+      ["RED",{top16:10,top64:40,chances:3}],["AQUA",{top16:5,top64:15,chances:3}],["BRONZE",{top16:2,top64:5,chances:5}],
+      ["SILVER",{top16:1,top64:1,chances:5}],["GOLD",null]]);
+    expect(initial.promotionFailurePenaltyLp).toBe(50);
     await survival.settleLp(player.playerId,"internal-fixture-award",50);
     advance();
     const repeated=await Promise.all([survival.profile(player.playerId),survival.profile(player.playerId)]);

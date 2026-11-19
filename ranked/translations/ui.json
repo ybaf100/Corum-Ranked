@@ -4158,5 +4158,29 @@
   "loading-tip-next": {
     "en": "TAP FOR ANOTHER TIP",
     "ko": "누르면 다른 TIP"
+  },
+  "tier-guide-series-note": {
+    "en": "Series: top {} · {} tries",
+    "ko": "승격전: {}위 이내 · {}회 기회"
+  },
+  "tier-guide-elite": {
+    "en": "MASTER · CHAMPION",
+    "ko": "MASTER · CHAMPION"
+  },
+  "tier-guide-elite-detail": {
+    "en": "Among GOLD players by LP, the top 3 are CHAMPION and the upper half MASTER (7+ players). Now: CHAMPION {} LP · MASTER {} LP",
+    "ko": "GOLD LP 순위 상위 3명은 CHAMPION, 상위 절반은 MASTER입니다 (7명 이상일 때). 현재: CHAMPION {} LP · MASTER {} LP"
+  },
+  "tier-guide-survival-series": {
+    "en": "Reaching the next tier starts a series: finish within the required place once before your tries run out. If all fail, you drop {} LP below the boundary.",
+    "ko": "다음 티어에 도달하면 승격전이 시작됩니다. 기회 안에 요구 순위 이내로 한 번 들면 승격, 모두 실패하면 경계보다 {} LP 낮아집니다."
+  },
+  "result-no-achievements": {
+    "en": "NO NEW ACHIEVEMENTS",
+    "ko": "새로 달성한 도전과제 없음"
+  },
+  "mode-key-hint": {
+    "en": "KEY",
+    "ko": "KEY"
   }
 }

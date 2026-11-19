@@ -43,8 +43,10 @@ int main(){
  record(s,"wrong-map",100);r=receipt("wrong-map",100);r.mapGeneration=2;assert(!s.reconcile(r).get());
  s.begin(metadata("crash")).get();initial(s,"crash",85);Json frame;frame["kind"]="frame";frame["tick"]=1;frame["elapsed"]=.01;frame["dt"]=.01;s.append("crash",{frame}).get();
  {std::ofstream out("${dir}/replays/pending/"+corum::ranked::sha256Text("crash")+".tmp",std::ios::app);out<<"{truncated";}
- auto recovered=s.recover().get();assert(recovered.size()==1); // wrong-map is a final official mismatch: kept on disk, not re-queued
- assert(std::filesystem::exists("${dir}/replays/pending/"+corum::ranked::sha256Text("wrong-map")+".tmp"));assert(str(s.best(metadata("x")).get()->metadata,"attemptId")=="clear");
+ auto recovered=s.recover().get();assert(recovered.size()==1); // wrong-map is a final official mismatch: never re-queued,
+ // and its bytes leave the pending budget for the bounded quarantine.
+ assert(!std::filesystem::exists("${dir}/replays/pending/"+corum::ranked::sha256Text("wrong-map")+".tmp"));
+ assert(std::filesystem::exists("${dir}/replays/quarantine/"+corum::ranked::sha256Text("wrong-map")+".tmp"));assert(str(s.best(metadata("x")).get()->metadata,"attemptId")=="clear");
  bool failed=false;try{record(s,"clear",99);}catch(...){failed=true;}assert(failed);assert(str(s.best(metadata("x")).get()->metadata,"attemptId")=="clear");
  // A torn journal is promoted only after an exact official closed receipt, with a partial label.
  auto partial=metadata("partial");partial["roundKey"]="round2";s.begin(partial).get();initial(s,"partial",74);
@@ -90,7 +92,8 @@ int main(){
   s.markUnmatched("awaiting","OFFICIAL_AND_NATIVE_PROGRESS_DIFFER").get();
   v=classifyReplayQuality(s.inspectState(awaiting).get(),awaiting,"");assert(v.quality==ReplayQuality::Unavailable&&v.reason=="OFFICIAL_AND_NATIVE_PROGRESS_DIFFER"&&!v.playable);
   {auto recovered=s.recover().get();for(auto const& m:recovered)assert(str(m,"attemptId")!="awaiting");}
-  assert(std::filesystem::exists("${dir}/replays/pending/"+corum::ranked::sha256Text("awaiting")+".tmp"));
+  assert(!std::filesystem::exists("${dir}/replays/pending/"+corum::ranked::sha256Text("awaiting")+".tmp"));
+  assert(std::filesystem::exists("${dir}/replays/quarantine/"+corum::ranked::sha256Text("awaiting")+".tmp"));
   Json good=Json::object();good["best"]=cutoff;good["best"]["officialCompletion"]="FULL_CAPTURE";good["best"]["captureCompleteness"]="COMPLETE";
   v=classifyReplayQuality(good,cutoff,"");assert(v.quality==ReplayQuality::CompleteVerified&&v.playable);
   good["best"]["officialCompletion"]="OFFICIAL_PREFIX";v=classifyReplayQuality(good,cutoff,"");assert(v.quality==ReplayQuality::OfficialPrefix&&v.playable);
@@ -111,6 +114,26 @@ int main(){
   {std::ofstream out("${dir}/replays/manifest.next");out<<"{stale";}
   s.recover().get();assert(!std::filesystem::exists(bad)&&std::filesystem::exists("${dir}/replays/quarantine/"+bad.filename().string()));
   assert(!std::filesystem::exists("${dir}/replays/manifest.next")&&s.best(cutoff).get());}
+ // PC log: "Replay storage full; best preserved (pending 127 MB of 128 MB)".
+ // Journals whose receipt never came filled the pending budget and every
+ // later capture was refused. Old ones now give way; fresh ones are kept.
+ {Storage full("${dir}/full");
+  auto old=[&](std::string id,int minutes){record(full,id,10);auto path=std::filesystem::path("${dir}/full/pending/"+corum::ranked::sha256Text(id)+".tmp");
+   std::filesystem::last_write_time(path,std::filesystem::file_time_type::clock::now()-std::chrono::minutes(minutes));return path;};
+  auto stale=old("stale",120),older=old("older",240),fresh=old("fresh",1);
+  // Pad the stale journals to fill the 128 MB budget.
+  for(auto const& path:{stale,older}){auto at=std::filesystem::last_write_time(path);std::filesystem::resize_file(path,64ull*1024*1024);std::filesystem::last_write_time(path,at);}
+  full.begin(metadata("next")).get();initial(full,"next",30);
+  assert(!std::filesystem::exists(older)&&std::filesystem::exists("${dir}/full/quarantine/"+older.filename().string()));
+  assert(std::filesystem::exists(stale)&&std::filesystem::exists(fresh)); // oldest first, only as much as needed
+  // The quarantine stays bounded (64 MB; the newest file always stays).
+  std::uintmax_t held=0;for(auto const& f:std::filesystem::directory_iterator("${dir}/full/quarantine"))held+=f.file_size();assert(held<=64ull*1024*1024);
+  // Entry limit: stale entries give way to a new capture as well.
+  for(int i=0;i<70;++i){auto id="slot-"+std::to_string(i);bool ok=true;try{record(full,id,10);}catch(...){ok=false;}assert(ok&&"stale journals must give way");
+   auto path=std::filesystem::path("${dir}/full/pending/"+corum::ranked::sha256Text(id)+".tmp");
+   std::filesystem::last_write_time(path,std::filesystem::file_time_type::clock::now()-std::chrono::hours(1));}
+  assert(std::filesystem::exists(fresh)); // a journal within its receipt grace is never evicted
+ }
 }
 `;
  const file=join(dir,'test.cpp'),bin=join(dir,'test');writeFileSync(file,code);

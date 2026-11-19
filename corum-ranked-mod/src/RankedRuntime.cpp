@@ -4450,7 +4450,17 @@ void RankedRuntime::fetchSurvivalProfile() {
         auto const recovery = profile["warningRecoveryLp"].asInt();
         sur.warningRecoveryLp = recovery.isOk() ? std::optional<int>(static_cast<int>(recovery.unwrap())) : std::nullopt;
         sur.standing = parseStanding(root["standing"]);
-        if (root["tierBands"].isArray()) sur.tierBands = parseTierBands(root["tierBands"]);
+        if (root["tierBands"].isArray()) {
+            sur.tierBands = parseTierBands(root["tierBands"]);
+            sur.promotionRules.clear();
+            for (auto const& band : root["tierBands"].asArray().unwrapOr(std::vector<matjson::Value>{})) {
+                auto const& rule = band["promotion"];
+                if (!rule.isObject()) continue;
+                sur.promotionRules.push_back({band["tier"].asString().unwrapOr(""), static_cast<int>(rule["top16"].asInt().unwrapOr(0)),
+                    static_cast<int>(rule["top64"].asInt().unwrapOr(0)), static_cast<int>(rule["chances"].asInt().unwrapOr(0))});
+            }
+        }
+        sur.promotionFailurePenaltyLp = static_cast<int>(root["promotionFailurePenaltyLp"].asInt().unwrapOr(0));
         observeServerNow(root); ++m_view.revision;
     });
 }

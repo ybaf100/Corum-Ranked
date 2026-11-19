@@ -3,7 +3,7 @@
 #include <array>
 namespace corum::ranked {
 struct CatalogTranslation {char const* key;char const* english;char const* korean;};
-inline constexpr std::array<CatalogTranslation, 1138> kTranslations {{
+inline constexpr std::array<CatalogTranslation, 1144> kTranslations {{
     CatalogTranslation{"A logged-in Geometry Dash account is required.", "A logged-in Geometry Dash account is required.", "로그인된 Geometry Dash 계정이 필요합니다."},
     CatalogTranslation{"A mod update is required before entering Ranked.", "A mod update is required before entering Ranked.", "랭크에 입장하려면 모드를 업데이트하세요."},
     CatalogTranslation{"AUDIO_CACHE_INVALID", "Audio file is missing or empty · retry required", "음원 파일이 없거나 비어 있음 · 재시도 필요"},
@@ -700,6 +700,7 @@ inline constexpr std::array<CatalogTranslation, 1138> kTranslations {{
     CatalogTranslation{"mode-disabled", "MODE DISABLED", "운영 중지"},
     CatalogTranslation{"mode-disabled-notice", "This mode is currently disabled.\nContinue to the view-only lobby.", "이 모드는 운영 중지 상태입니다.\n확인을 누르면 조회 화면으로 이동합니다."},
     CatalogTranslation{"mode-enter", "ENTER", "입장"},
+    CatalogTranslation{"mode-key-hint", "KEY", "KEY"},
     CatalogTranslation{"mode-off-browse", "MODE DISABLED. HISTORY, LEADERBOARD AND ACHIEVEMENTS ARE AVAILABLE.", "운영 중지 상태입니다. 기록, 리더보드, 도전과제를 조회할 수 있습니다."},
     CatalogTranslation{"my-pick", "MY PICK", "내 선택"},
     CatalogTranslation{"next", "NEXT", "다음"},
@@ -842,6 +843,7 @@ inline constexpr std::array<CatalogTranslation, 1138> kTranslations {{
     CatalogTranslation{"resources-required", "DOWNLOAD REQUIRED", "추가 리소스가 필요합니다."},
     CatalogTranslation{"restart", "RESTART", "재시작"},
     CatalogTranslation{"result", "RESULT", "결과"},
+    CatalogTranslation{"result-no-achievements", "NO NEW ACHIEVEMENTS", "새로 달성한 도전과제 없음"},
     CatalogTranslation{"result-sync", "RESULT SYNC", "결과 동기화"},
     CatalogTranslation{"retry", "RETRY", "다시 시도"},
     CatalogTranslation{"retry-before-continuing", "Retry the failed download before continuing.", "계속하기 전에 실패한 다운로드를 다시 시도하세요."},
@@ -1101,12 +1103,16 @@ inline constexpr std::array<CatalogTranslation, 1138> kTranslations {{
     CatalogTranslation{"tier-guide-current", "CURRENT {}", "현재 {}"},
     CatalogTranslation{"tier-guide-demotion", "DEMOTION WARNING", "강등 경고"},
     CatalogTranslation{"tier-guide-demotion-detail", "Shown near a tier's lower bound; it clears once you recover the required LP.", "티어 하한 근처에서 표시되며, 기준 LP 이상 회복하면 해제됩니다."},
+    CatalogTranslation{"tier-guide-elite", "MASTER · CHAMPION", "MASTER · CHAMPION"},
+    CatalogTranslation{"tier-guide-elite-detail", "Among GOLD players by LP, the top 3 are CHAMPION and the upper half MASTER (7+ players). Now: CHAMPION {} LP · MASTER {} LP", "GOLD LP 순위 상위 3명은 CHAMPION, 상위 절반은 MASTER입니다 (7명 이상일 때). 현재: CHAMPION {} LP · MASTER {} LP"},
     CatalogTranslation{"tier-guide-ladder", "Season ladder position", "시즌 래더 순위"},
     CatalogTranslation{"tier-guide-promotion", "PROMOTION SERIES", "승격전"},
     CatalogTranslation{"tier-guide-promotion-detail", "Reaching a tier boundary starts a promotion series; win the required games to promote.", "티어 경계에 도달하면 승격전이 시작되고, 필요한 승리를 거두면 승급합니다."},
+    CatalogTranslation{"tier-guide-series-note", "Series: top {} · {} tries", "승격전: {}위 이내 · {}회 기회"},
     CatalogTranslation{"tier-guide-short", "TIERS", "티어"},
     CatalogTranslation{"tier-guide-start", "Starting tier", "시작 티어"},
     CatalogTranslation{"tier-guide-survival-promotion", "You promote as soon as your LP reaches the next tier's lower bound.", "LP가 다음 티어 하한에 도달하면 승급합니다."},
+    CatalogTranslation{"tier-guide-survival-series", "Reaching the next tier starts a series: finish within the required place once before your tries run out. If all fail, you drop {} LP below the boundary.", "다음 티어에 도달하면 승격전이 시작됩니다. 기회 안에 요구 순위 이내로 한 번 들면 승격, 모두 실패하면 경계보다 {} LP 낮아집니다."},
     CatalogTranslation{"tier-promoted-to", "Promoted to {}!", "{} 승격"},
     CatalogTranslation{"time-left", "TIME LEFT", "남은 시간"},
     CatalogTranslation{"title-equipped-chip", "EQUIPPED", "장착 중"},

@@ -16,6 +16,20 @@ struct TierGuideBand {
     int promotionGames = 0, promotionWins = 0;
 };
 
+// Survival promotion series out of one tier group: one finish within the
+// required place (16- or 64-player matches) in `chances` settled matches.
+struct SurvivalSeriesRuleView {
+    std::string tier;
+    int top16 = 0, top64 = 0, chances = 0;
+};
+inline std::optional<SurvivalSeriesRuleView> survivalSeriesRule(std::vector<SurvivalSeriesRuleView> const& rules, std::string const& tier) {
+    for (auto const& rule : rules) if (rule.tier == tier && rule.chances > 0) return rule;
+    return std::nullopt;
+}
+inline int survivalSeriesRequiredRank(SurvivalSeriesRuleView const& rule, int playerCount) {
+    return playerCount == 64 ? rule.top64 : rule.top16;
+}
+
 // Q3 column: one base tier with its divisions folded together.
 struct TierGuideColumn {
     std::string base;

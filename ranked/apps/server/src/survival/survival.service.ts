@@ -4,7 +4,7 @@ import {publicAchievementTitle} from "../achievement/public-title.js";
 import type { HistoryOptions } from "../history/history-options.js";
 import { survivalHistoryProjection } from "../history/survival-history.js";
 import { BadRequestException, ConflictException, Inject, Injectable, NotImplementedException, ServiceUnavailableException } from "@nestjs/common";
-import { survivalPromotionRequiredRank, survivalTierForLp, updateSurvivalRating, type SurvivalConfig, type SurvivalMatchOutcome, type SurvivalPromotionSeries, type SurvivalRatingUpdate } from "@corum-ranked/rules";
+import { SURVIVAL_PROMOTION_FAILURE_PENALTY, SURVIVAL_PROMOTION_RULES, survivalPromotionRequiredRank, survivalTierForLp, updateSurvivalRating, type SurvivalConfig, type SurvivalMatchOutcome, type SurvivalPromotionSeries, type SurvivalRatingUpdate } from "@corum-ranked/rules";
 import type { SurvivalConfigDocument } from "../config/survival-config.service.js";
 import { AchievementService } from "../achievement/achievement.service.js";
 import { ID_GENERATOR, SERVER_CLOCK, type IdGenerator, type ServerClock } from "../common/runtime.module.js";
@@ -48,9 +48,12 @@ export class SurvivalService {
     const recordSummary=(await readSurvivalRecords(this.database,[playerId]))[playerId]!;
     return {onlineAvailable:true,serverNow:now.toISOString(),enabled:snapshot.config.enabled,
       profile:this.project(row,snapshot.config),standing,recordSummary,
-      // Tier bar under the start button: each displayed tier group's lower LP bound.
+      // Tier bar under the start button: each displayed tier group's lower LP bound,
+      // and the promotion series out of that group (tier guide).
       tierBands:snapshot.config.tierBands.filter((band,index,all)=>all.findIndex(other=>other.group===band.group)===index)
-        .map(band=>({tier:band.group,minInclusive:band.minimumLp}))};
+        .map(band=>{const rule=SURVIVAL_PROMOTION_RULES[band.group];
+          return {tier:band.group,minInclusive:band.minimumLp,promotion:rule?{top16:rule.top16,top64:rule.top64,chances:rule.chances}:null};}),
+      promotionFailurePenaltyLp:SURVIVAL_PROMOTION_FAILURE_PENALTY};
   }
 
   private async ensureProfile(transaction: SqlExecutor, playerId: string, config: SurvivalConfig, now: Date): Promise<void> {

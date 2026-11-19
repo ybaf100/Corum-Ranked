@@ -30,14 +30,71 @@ void Storage::safeDirectories(fs::path const& dir){
 }
 void Storage::diskBudget(std::uintmax_t additional){
     constexpr std::uintmax_t PendingLimit=128*1024*1024,Reserve=16*1024*1024;
-    safeDirectories(m_root/"pending");std::uintmax_t bytes=0;
-    for(auto const& f:fs::directory_iterator(m_root/"pending"))if(f.is_regular_file()&&!f.is_symlink()){
-        auto size=f.file_size();if(size>PendingLimit-bytes)throw std::runtime_error("Replay pending capacity reached; best preserved");bytes+=size;
-    }
+    auto bytes=pendingBytes();
+    // Journals whose receipt never came (an unsettled or abandoned round) or
+    // can never match used to fill this budget for good: every later capture
+    // was refused ("storage full"). Make room from them first.
+    if(additional<=PendingLimit&&bytes>PendingLimit-additional)bytes=evictPending(bytes,PendingLimit-additional);
     auto const available=fs::space(m_root).available;
     if(additional>PendingLimit-bytes||available<additional+Reserve)
         // The sizes say which limit was hit (the pending budget or the disk).
         throw std::runtime_error("Replay storage full; best preserved (pending "+std::to_string(bytes>>20)+" MB of "+std::to_string(PendingLimit>>20)+" MB, disk free "+std::to_string(available>>20)+" MB)");
+}
+std::uintmax_t Storage::pendingBytes(){
+    safeDirectories(m_root/"pending");std::uintmax_t bytes=0;
+    for(auto const& f:fs::directory_iterator(m_root/"pending"))if(f.is_regular_file()&&!f.is_symlink())bytes+=f.file_size();
+    return bytes;
+}
+std::uintmax_t Storage::evictPending(std::uintmax_t bytes,std::uintmax_t target,std::size_t entryLimit){
+    struct Candidate{fs::path path;std::string key;fs::file_time_type at;std::uintmax_t size=0;bool final=false;};
+    auto m=manifest();std::vector<Candidate> candidates;bool changed=false;
+    // Entries whose journal is gone hold a MaxPending slot for nothing.
+    if(m["pending"].isObject()){
+        std::vector<std::string> gone;
+        for(auto const& metadata:m["pending"]){auto const id=str(metadata,"attemptId");if(!id.empty()&&!fs::exists(pending(id))&&!m_pending.contains(id))gone.push_back(sha256Text(id));}
+        for(auto const& key:gone)if(m["pending"].erase(key))changed=true;
+    }
+    auto const entries=[&]{return m["pending"].isObject()?m["pending"].size():std::size_t{0};};
+    auto const graceStart=fs::file_time_type::clock::now()-PendingGrace;
+    for(auto const& f:fs::directory_iterator(m_root/"pending")){
+        if(!f.is_regular_file()||f.is_symlink())continue;
+        // Never an Attempt this session is still writing, nor a fresh one.
+        if(std::any_of(m_pending.begin(),m_pending.end(),[&](auto const& p){return pending(p.first)==f.path();}))continue;
+        auto const at=f.last_write_time();if(at>graceStart)continue;
+        auto const key=f.path().stem().string();
+        auto const status=m["pending"].isObject()&&m["pending"].contains(key)?str(m["pending"][key],"replayValidationStatus"):std::string();
+        candidates.push_back({f.path(),key,at,f.file_size(),finalPendingStatus(status)});
+    }
+    std::sort(candidates.begin(),candidates.end(),[](auto const& a,auto const& b){return a.final!=b.final?a.final:a.at<b.at;});
+    for(auto const& c:candidates){
+        if(bytes<=target&&entries()<entryLimit)break;
+        try{quarantine(c.path);}catch(...){continue;}
+        bytes-=std::min(bytes,c.size);
+        if(m["pending"].isObject()&&m["pending"].erase(c.key))changed=true;
+    }
+    if(changed)saveManifest(m);
+    pruneQuarantine();
+    return bytes;
+}
+// Evidence that can no longer become a replay is kept for reports, bounded.
+void Storage::quarantine(fs::path const& path){
+    auto q=m_root/"quarantine";safeDirectories(q);auto dest=q/path.filename();
+    if(fs::exists(dest)){std::error_code ec;fs::remove(path,ec);return;}
+    replace(path,dest);
+}
+// Only the newest MaxQuarantine files are kept past 14 days, and all of them
+// within QuarantineLimit bytes (the newest file always stays).
+void Storage::pruneQuarantine(){
+    auto q=m_root/"quarantine";std::error_code ec;if(!fs::exists(q,ec))return;
+    std::vector<fs::directory_entry> held;for(auto const& f:fs::directory_iterator(q))if(f.is_regular_file()&&!f.is_symlink())held.push_back(f);
+    std::sort(held.begin(),held.end(),[](auto const& a,auto const& b){return a.last_write_time()>b.last_write_time();});
+    auto const cutoff=fs::file_time_type::clock::now()-std::chrono::hours(24*14);
+    std::uintmax_t total=0;
+    for(std::size_t i=0;i<held.size();++i){
+        auto const size=held[i].file_size(ec);
+        if(i>0&&((i>=MaxQuarantine&&held[i].last_write_time()<cutoff)||total+size>QuarantineLimit)){fs::remove(held[i].path(),ec);continue;}
+        total+=size;
+    }
 }
 void Storage::durable(fs::path const& path){
 #if defined(_WIN32)
@@ -67,7 +124,10 @@ void Storage::saveManifest(Json const& j){safeDirectories(m_root);auto next=m_ro
     {std::ofstream out(next,std::ios::binary|std::ios::trunc);out<<j.dump(matjson::NO_INDENTATION);out.flush();if(!out)throw std::runtime_error("Replay manifest write failed");}durable(next);replace(next,m_root/"manifest.json");
 }
 std::future<void> Storage::begin(Json metadata){return submit([this,metadata]{
-    if(!metadataValid(metadata)||manifest()["pending"].size()>=MaxPending)throw std::runtime_error("Replay metadata invalid or pending limit");
+    if(!metadataValid(metadata))throw std::runtime_error("Replay metadata invalid");
+    // Stale journals give way to a new capture before the entry limit refuses it.
+    if(manifest()["pending"].size()>=MaxPending)evictPending(pendingBytes(),~std::uintmax_t{0},MaxPending);
+    if(manifest()["pending"].size()>=MaxPending)throw std::runtime_error("Replay pending limit; best preserved");
     auto id=str(metadata,"attemptId");if(str(manifest()["best"][roundStorageKey(metadata)],"attemptId")==id)throw std::runtime_error("Replay Attempt already preserved");auto file=pending(id);safeDirectories(file.parent_path());
     diskBudget(metadata.dump(matjson::NO_INDENTATION).size()+1);
     if(fs::exists(file))throw std::runtime_error("Replay Attempt already journaled");
@@ -220,13 +280,14 @@ std::future<std::vector<Json>> Storage::recover(){return submit([this]{
             try{auto d=decode(orphan);if(d.metadata==metadata)replace(orphan,source);}catch(...){/* Preserve both known best and damaged orphan. */}
         }
     }
-    std::vector<fs::path> damaged;
+    std::vector<fs::path> damaged,unconfirmable;
     for(auto const& entry:fs::directory_iterator(m_root/"pending")){
       if(result.size()>=MaxPending)break;if(!entry.is_regular_file()||entry.is_symlink()||entry.path().extension()!=".tmp")continue;
       try{auto d=decode(entry.path(),true);if(entry.path()!=pending(str(d.metadata,"attemptId")))continue;
-        // A final official mismatch is preserved on disk but never re-queued for receipts.
-        if(auto status=str(m["pending"][sha256Text(str(d.metadata,"attemptId"))],"replayValidationStatus");
-           status=="OFFICIAL_EVIDENCE_MISMATCH"||status=="OFFICIAL_AND_NATIVE_PROGRESS_DIFFER"||status=="FORCE_CLEAR_HAS_NO_NATIVE_CLEAR_REPLAY")continue;
+        // A final official mismatch is never re-queued for receipts: its bytes
+        // move to the bounded quarantine instead of holding the pending budget.
+        if(auto status=str(m["pending"][sha256Text(str(d.metadata,"attemptId"))],"replayValidationStatus");finalPendingStatus(status)){
+            unconfirmable.push_back(entry.path());continue;}
         if(!d.complete){fs::resize_file(entry.path(),d.validBytes);d.metadata["captureCompleteness"]="PARTIAL_RECOVERED";}
         auto const& cm=m;if(str(cm["closing"][sha256Text(str(d.metadata,"attemptId"))]["closingEvent"],"type")=="ATTEMPT_END")d.metadata["closingEvent"]=cm["closing"][sha256Text(str(d.metadata,"attemptId"))]["closingEvent"];
         result.push_back(d.metadata);
@@ -238,13 +299,13 @@ std::future<std::vector<Json>> Storage::recover(){return submit([this]{
     // P2-E: an unrecoverable (header-damaged) journal no longer consumes the
     // pending budget forever. It moves to a quarantine; only files beyond the
     // newest MaxQuarantine AND older than 14 days are ever removed.
-    for(auto const& path:damaged){try{auto q=m_root/"quarantine";safeDirectories(q);auto dest=q/path.filename();
-        if(!fs::exists(dest)){replace(path,dest);
-          std::vector<fs::directory_entry> held;for(auto const& f:fs::directory_iterator(q))if(f.is_regular_file()&&!f.is_symlink())held.push_back(f);
-          std::sort(held.begin(),held.end(),[](auto const& a,auto const& b){return a.last_write_time()>b.last_write_time();});
-          auto const cutoff=fs::file_time_type::clock::now()-std::chrono::hours(24*14);
-          for(std::size_t i=MaxQuarantine;i<held.size();++i)if(held[i].last_write_time()<cutoff){std::error_code ec;fs::remove(held[i].path(),ec);}}
-      }catch(...){}}
+    for(auto const& path:damaged){try{auto dest=m_root/"quarantine"/path.filename();if(!fs::exists(dest))quarantine(path);}catch(...){}}
+    if(!unconfirmable.empty()){
+        auto updated=manifest();bool changed=false;
+        for(auto const& path:unconfirmable){try{quarantine(path);if(updated["pending"].isObject()&&updated["pending"].erase(path.stem().string()))changed=true;}catch(...){}}
+        if(changed)saveManifest(updated);
+    }
+    try{pruneQuarantine();}catch(...){}
     {std::error_code ec;auto stale=m_root/"manifest.next";if(fs::exists(stale,ec)&&!fs::is_symlink(fs::symlink_status(stale,ec)))fs::remove(stale,ec);}
     if(m["closing"].isObject())for(auto const& metadata:m["closing"]){if(result.size()>=MaxPending)break;if(metadataValid(metadata)&&std::none_of(result.begin(),result.end(),[&](auto const& e){return str(e,"attemptId")==str(metadata,"attemptId");}))result.push_back(metadata);}
     return result;

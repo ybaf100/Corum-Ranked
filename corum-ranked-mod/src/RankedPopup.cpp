@@ -707,6 +707,10 @@ class CorumRankedLayer final : public CCLayerColor {
         if (!CCLayerColor::initWithColor({0, 0, 0, 0})) return false;
         setID("corum-ranked-fullscreen"_spr);
         setKeypadEnabled(true);
+#if defined(GEODE_IS_DESKTOP)
+        // 1 / 2 open Survival / Solo from the main lobby (keyDown).
+        setKeyboardEnabled(true);
+#endif
 
         auto const winSize = CCDirector::sharedDirector()->getWinSize();
         corum::ranked::ui::addBackdrop(this, winSize);
@@ -2750,6 +2754,17 @@ class CorumRankedLayer final : public CCLayerColor {
             enter->setID("ranked-profile-enter"_spr); m_root->addChild(enter, 6);
             m_root->addChild(makeLabel(tr("mode-enter","ENTER"), fontScale(20.0f), {cx + px(58.0f), y}, corum::ranked::ui::AccentInk, "black"), 7);
             if (auto* arrow = corum::ranked::ui::chevron(5.0f, 2.0f, corum::ranked::ui::AccentInk)) { arrow->setPosition({cx + px(108.0f), y}); m_root->addChild(arrow, 7); }
+#if defined(GEODE_IS_DESKTOP)
+            // Keyboard: this half's key beside ENTER (keyDown).
+            if (source.stage == RuntimeStage::Ready) {
+                auto const keyX = cx + px(140.0f) + 8.0f;
+                auto* cap = corum::ranked::ui::slab({16.0f, 16.0f}, {keyX + 8.0f, y}, corum::ranked::ui::SurfaceSoft);
+                cap->setID(survival ? "survival-enter-key"_spr : "solo-enter-key"_spr); m_root->addChild(cap, 6);
+                m_root->addChild(makeLabel(survival ? "1" : "2", fontScale(15.0f), {keyX + 8.0f, y}, corum::ranked::ui::Text, "black"), 7);
+                auto* hint = makeLabel(tr("mode-key-hint", "KEY"), fontScale(12.0f), {keyX + 21.0f, y}, corum::ranked::ui::TextMuted, "semibold", {0.0f, 0.5f});
+                corum::ranked::ui::fitMenuLabelWidth(hint, 40.0f, fontScale(12.0f), 0.1f); m_root->addChild(hint, 6);
+            }
+#endif
             if (source.stage != RuntimeStage::Ready) enter->setVisible(false);
             y += px(27.0f) + px(16.0f);
             // Bar block (300 px wide): caption row, bar, warning or series line.
@@ -6454,16 +6469,28 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const draw = match.winnerSide.empty();
         auto const bandColor = ownWon ? corum::ranked::ui::AccentFill : draw ? corum::ranked::ui::SurfaceSoft : kSideRed;
         auto const bandInk = ownWon ? corum::ranked::ui::AccentInk : corum::ranked::ui::Text;
+        // Entrance motion plays once per match, after any score / tier overlay.
+        auto const resultKey = match.matchId.empty() ? fmt::format("{}:{}", match.playerAName, match.stateVersion) : match.matchId;
+        auto const presentationAhead = scoreInput && !m_resultPresentationGate.played(match.matchId);
+        auto const overlayActive = m_rankTransitionLayer || m_resultScoreLayer || m_resultScorePending || presentationAhead;
+        auto const animateRows = !overlayActive && m_resultMotionKey != resultKey;
+        if (!overlayActive) m_resultMotionKey = resultKey;
+        auto const holdRows = overlayActive && m_resultMotionKey != resultKey;
         {
-            constexpr float solid = 54.0f, slant = 20.0f, step = 2.0f;
-            auto* band = CCLayerColor::create({bandColor.r, bandColor.g, bandColor.b, 255}, size.width, solid);
-            band->setPosition({0.0f, size.height - solid}); band->setID("ranked-result-verdict-band"_spr); m_root->addChild(band, 1);
-            for (float y = 0.0f; y < slant; y += step) {
-                auto const t = 1.0f - (y + step / 2.0f) / slant;
-                auto* strip = CCLayerColor::create({bandColor.r, bandColor.g, bandColor.b, 255}, size.width * t, step);
-                strip->setPosition({size.width * (1.0f - t), size.height - solid - slant + y}); m_root->addChild(strip, 1);
+            // One polygon: the band with its slanted lower edge (deepest at the
+            // left). It draws in from the left on the entrance.
+            constexpr float solid = 54.0f, slant = 20.0f;
+            auto* band = CCDrawNode::create();
+            CCPoint shape[] = {{0.0f, size.height - solid - slant}, {size.width, size.height - solid}, {size.width, size.height}, {0.0f, size.height}};
+            band->drawPolygon(shape, 4, ccc4FFromccc3B(bandColor), 0.0f, {0, 0, 0, 0});
+            band->setID("ranked-result-verdict-band"_spr); m_root->addChild(band, 1);
+            if (animateRows) {
+                band->setScaleX(0.0f);
+                band->runAction(CCEaseExponentialOut::create(CCScaleTo::create(0.45f, 1.0f, 1.0f)));
             }
         }
+        auto* headerGroup = makeMotionGroup();
+        auto* headerRoot = m_root; m_root = headerGroup;
         auto* eyebrow = makeLabel(fmt::format("SOLO RANKED · {}", tr("match-complete", "MATCH COMPLETE")), 0.20f, {48.0f, size.height - 13.0f}, bandInk, "black", {0.0f, 0.5f});
         corum::ranked::ui::fitMenuLabelWidth(eyebrow, 200.0f, 0.20f, 0.13f); m_root->addChild(eyebrow, 4);
         auto* verdict = makeLabel(leftPerfect ? std::string("PERFECT WIN") : ownWon ? std::string("VICTORY") : draw ? std::string("DRAW") : std::string("DEFEAT"),
@@ -6473,7 +6500,11 @@ class CorumRankedLayer final : public CCLayerColor {
         auto* verdictSub = makeLabel(ownWon ? tr("win", "WIN") : draw ? tr("draw", "DRAW") : tr("lose", "LOSE"), 0.34f,
             {48.0f + verdict->getScaledContentSize().width + 12.0f, size.height - 41.0f}, bandInk, "black", {0.0f, 0.5f});
         m_root->addChild(verdictSub, 4);
+        m_root = headerRoot;
+        if (animateRows) { headerGroup->setPositionX(-28.0f); revealGroup(headerGroup, 0.18f, {28.0f, 0.0f}, 0.32f); }
         // Series plate: own name/tier, the series score, opponent name/tier.
+        auto* plateGroup = makeMotionGroup();
+        m_root = plateGroup;
         {
             constexpr float plateW = 228.0f, plateH = 38.0f;
             auto const plateX = size.width - 14.0f - plateW / 2.0f, plateY = size.height - 30.0f;
@@ -6494,6 +6525,8 @@ class CorumRankedLayer final : public CCLayerColor {
                 {plateX, plateY}, ownWon ? corum::ranked::ui::Accent : corum::ranked::ui::Text, "black");
             corum::ranked::ui::fitMenuLabelWidth(score, 56.0f, 0.62f, 0.4f); m_root->addChild(score, 4);
         }
+        m_root = headerRoot;
+        if (animateRows) { plateGroup->setPositionX(28.0f); revealGroup(plateGroup, 0.28f, {-28.0f, 0.0f}, 0.32f); }
 
         // Left: the round table. Up to 3.5 rows show; longer series scroll.
         constexpr float panelW = 176.0f, rowH = 26.0f;
@@ -6509,12 +6542,6 @@ class CorumRankedLayer final : public CCLayerColor {
         auto const rows = std::max<std::size_t>(1, match.rounds.size() + match.deathmatches.size());
         auto const visibleRows = std::min(3.5f, static_cast<float>(rows));
         auto const viewTop = headY - 9.0f, viewH = rowH * visibleRows;
-        auto const resultKey = match.matchId.empty() ? fmt::format("{}:{}", match.playerAName, match.stateVersion) : match.matchId;
-        auto const presentationAhead = scoreInput && !m_resultPresentationGate.played(match.matchId);
-        auto const overlayActive = m_rankTransitionLayer || m_resultScoreLayer || m_resultScorePending || presentationAhead;
-        auto const animateRows = !overlayActive && m_resultMotionKey != resultKey;
-        if (!overlayActive) m_resultMotionKey = resultKey;
-        auto const holdRows = overlayActive && m_resultMotionKey != resultKey;
         auto* rowsRoot = m_root;
         auto xShift = 0.0f;
         float y = viewTop - rowH / 2.0f;
@@ -6533,8 +6560,17 @@ class CorumRankedLayer final : public CCLayerColor {
         int rowIndex = 0;
         auto addRow = [&](std::string const& label, std::string const& map, double ownScore, double oppScore, int ownClears, int oppClears,
             std::string const& winner, bool deathmatch) {
-            auto* rowGroup = makeMotionGroup();
-            auto* outer = m_root; m_root = rowGroup;
+            // In the scroll, each row sits in a row-sized slot: the scroll's
+            // content layer hides children by their own box on every scroll,
+            // and a zero-size group at the origin read as out of view.
+            auto* outer = m_root;
+            if (xShift > 0.0f) {
+                auto* slot = CCNode::create();
+                slot->setContentSize({tableW, rowH}); slot->setPosition({0.0f, y - rowH / 2.0f});
+                m_root->addChild(slot, 3); m_root = slot;
+            }
+            auto* rowGroup = makeMotionGroup(xShift > 0.0f ? CCPoint{0.0f, -(y - rowH / 2.0f)} : CCPointZero);
+            m_root = rowGroup;
             auto const rowDraw = winner == "DRAW" || winner.empty();
             auto const won = !rowDraw && winner == (ownA ? "A" : "B");
             auto* stripe = CCLayerColor::create({corum::ranked::ui::SurfaceRaised.r, corum::ranked::ui::SurfaceRaised.g, corum::ranked::ui::SurfaceRaised.b, 255}, tableW, rowH - 3.0f);
@@ -6568,6 +6604,32 @@ class CorumRankedLayer final : public CCLayerColor {
             addRow("DM", deathmatch.mapTitle, ownA ? deathmatch.scoreA : deathmatch.scoreB, ownA ? deathmatch.scoreB : deathmatch.scoreA, 0, 0, deathmatch.winnerSide, true);
         m_root = rowsRoot;
         if (animateRows) holdForMotion(0.35f + 0.20f * static_cast<float>(rowIndex) + 0.3f);
+
+        // The achievements slot under the table, shown with or without new
+        // achievements. Unlock notices slide into this same place
+        // (playNextAchievementToast); afterwards it lists what was earned.
+        {
+            auto const slotX = std::min(size.width / 2.0f, 12.0f + 165.0f), slotY = 78.0f;
+            constexpr float slotW = 330.0f, slotH = 67.0f;
+            auto* slotGroup = makeMotionGroup();
+            auto* outer = m_root; m_root = slotGroup;
+            m_root->addChild(makeNeonPanel({slotW, slotH}, {slotX, slotY}, corum::ranked::ui::GhostEdge, kDeepPanel, 235), 1);
+            m_root->addChild(makeLabel(tr("achievements", "ACHIEVEMENTS"), 0.17f, {slotX - slotW / 2.0f + 10.0f, slotY + slotH / 2.0f - 11.0f},
+                corum::ranked::ui::TextMuted, "extrabold", {0.0f, 0.5f}), 4);
+            std::string earned;
+            for (auto const& notice : match.achievementUnlocks) {
+                auto const name = corum::ranked::i18n::text("achievement." + notice.achievementId + ".name", notice.nameEn);
+                if (!earned.empty()) earned += " · ";
+                earned += notice.displayLabel.empty() ? name : fmt::format("{} - {}", name, notice.displayLabel);
+            }
+            auto* body = makeLabel(earned.empty() ? tr("result-no-achievements", "NO NEW ACHIEVEMENTS") : earned, 0.24f, {slotX, slotY - 4.0f},
+                earned.empty() ? corum::ranked::ui::TextMuted : corum::ranked::ui::Text, earned.empty() ? "semibold" : "black");
+            corum::ranked::ui::fitMenuLabelWidth(body, slotW - 24.0f, 0.24f, 0.14f);
+            body->setID("ranked-result-achievements"_spr); m_root->addChild(body, 4);
+            m_root = outer;
+            if (animateRows) { slotGroup->setPositionX(-30.0f); revealGroup(slotGroup, 0.35f + 0.20f * static_cast<float>(rowIndex), {30.0f, 0}, 0.25f); }
+            if (holdRows) slotGroup->setVisible(false);
+        }
 
         // Right: the player's LP panel (tier after, change, LP before -> after, event).
         auto const& before = ownA ? match.profileBeforeA : match.profileBeforeB;
@@ -7144,11 +7206,25 @@ class CorumRankedLayer final : public CCLayerColor {
         if(survival){
             auto const total=item.record["participantCount"].asInt().unwrapOr(0);
             title=fmt::format("{} · {}",tr("survival","SURVIVAL"),fmt::format(fmt::runtime(tr("players-count-format","{} PLAYERS")),total));
+            // ALL RECORDS: name the players of a match of two or fewer (never 3+).
+            if(RankedRuntime::get().historyAllRecords()&&total>0&&total<=2){
+                std::vector<std::string> names;
+                auto const collect=[&](matjson::Value const& list){
+                    if(names.empty())for(auto const& player:list.asArray().unwrapOr(std::vector<matjson::Value>{}))
+                        if(auto name=player["name"].asString().unwrapOr("");!name.empty())names.push_back(name);};
+                collect(item.record["result"]["standings"]);collect(item.record["snapshot"]["players"]);
+                if(!names.empty()&&names.size()<=2)title=fmt::format("{} · {}",tr("survival","SURVIVAL"),names.size()==2?names[0]+" vs "+names[1]:names[0]);
+            }
             auto const rounds=corum::ranked::historyRounds(item.record,true);
             caption=fmt::format(fmt::runtime(tr("survival-rounds-count","{} ROUNDS")),rounds.size());
             if(!rounds.empty()&&!rounds.back().title.empty())caption+=" · "+rounds.back().label+" "+rounds.back().title;
         }else{
             title=fmt::format("{} · vs {}",tr("solo-ranked","SOLO RANKED"),item.opponentName);
+            // ALL RECORDS lists other players' matches too: name both sides.
+            if(RankedRuntime::get().historyAllRecords()){
+                auto const a=item.record["players"]["A"]["name"].asString().unwrapOr(""),b=item.record["players"]["B"]["name"].asString().unwrapOr("");
+                if(!a.empty()&&!b.empty())title=fmt::format("{} · {} vs {}",tr("solo-ranked","SOLO RANKED"),a,b);
+            }
             for(auto const& round:corum::ranked::historyRounds(item.record,false)){if(round.title.empty())continue;if(!caption.empty())caption+=" · ";caption+=round.deathmatch?tr("death-match","DEATH MATCH"):round.title;}
             if(auto bo=item.record["bestOf"].asInt();bo.isOk()&&caption.empty())caption=fmt::format("BO{}",bo.unwrap());
         }
@@ -8339,6 +8415,28 @@ class CorumRankedLayer final : public CCLayerColor {
         }
         CCLayerColor::onExit();
     }
+
+#if defined(GEODE_IS_DESKTOP)
+    // Main lobby (L1) shortcuts: 1 = Survival, 2 = Solo Ranked, the same as
+    // tapping that half (its ENTER shows the key). Inert under any popup or
+    // overlay, and wherever the half is not offered.
+    void keyDown(enumKeyCodes key, double timestamp) override {
+        auto const survival = key == KEY_One || key == KEY_NumPad1, solo = key == KEY_Two || key == KEY_NumPad2;
+        if ((survival || solo) && modeKeyAvailable()) {
+            if (auto* item = typeinfo_cast<CCMenuItemSpriteExtra*>(getChildByIDRecursive(survival ? "survival-card-select"_spr : "solo-ranked-card-select"_spr)))
+                if (item->isEnabled() && item->isVisible()) { onSelectMode(item); return; }
+        }
+        CCLayerColor::keyDown(key, timestamp);
+    }
+    bool modeKeyAvailable() {
+        if (!isRunning() || !isKeypadEnabled() || m_page != Page::Live || m_uiFadingOut || m_modeNoticeOpen ||
+            m_rankTransitionLayer || m_gradeUpLayer || m_resultScoreLayer || m_resultScorePending) return false;
+        if (auto* scene = CCDirector::sharedDirector()->getRunningScene())
+            for (auto* child : CCArrayExt<CCNode*>(scene->getChildren()))
+                if (child != this && child->isVisible() && typeinfo_cast<FLAlertLayer*>(child)) return false;
+        return true;
+    }
+#endif
 
     void keyBackClicked() override {
         if (m_modeNoticeOpen) { closeModeNotice(); syncLobbyInput(); return; }

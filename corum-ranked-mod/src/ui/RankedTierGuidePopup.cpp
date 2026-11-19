@@ -137,23 +137,36 @@ void RankedTierGuidePopup::render() {
             text(chip,i18n::insertValue(i18n::text("tier-guide-current","CURRENT {}"),rankTierDisplay(current)),{(columnWidth-14)/2,8},columnWidth-20,.19f,AccentInk,FontWeight::ExtraBold);
         }else{
             std::string note;
-            if(i==0)note=i18n::text("tier-guide-start","Starting tier");
+            auto const series=m_survival?survivalSeriesRule(view.survival.promotionRules,column.base):std::nullopt;
+            if(series)note=fmt::format(fmt::runtime(i18n::text("tier-guide-series-note","Series: top {} · {} tries")),
+                survivalSeriesRequiredRank(*series,view.survivalPlayerCount),series->chances);
+            else if(i==0)note=i18n::text("tier-guide-start","Starting tier");
             else if(column.promotionGames>0)note=fmt::format(fmt::runtime(corum::ranked::i18n::literal("inline.series-games-wins")),column.promotionGames,column.promotionWins);
             else if(column.base=="GOLD"&&!m_survival)note=i18n::text("tier-guide-ladder","Season ladder position");
             if(!note.empty())text(m_contents,note,{cx,bottom+14},columnWidth-8,.18f,TextMuted,FontWeight::SemiBold);
         }
     }
-    // Promotion and demotion panels.
-    auto const panelWidth=(Width-Pad*2-6)/2;
-    for(int i=0;i<2;++i){
+    // Promotion and demotion panels; Solo adds MASTER / CHAMPION (the GOLD
+    // ladder positions, with the live cutoffs).
+    auto const panels=m_survival?2:3;
+    auto const panelWidth=(Width-Pad*2-6*static_cast<float>(panels-1))/static_cast<float>(panels);
+    auto const cutoff=[&](char const* key){auto const lp=std::as_const(m_solo)["gold"][key].asInt();return lp.isOk()?fmt::format("{}",lp.unwrap()):std::string("-");};
+    for(int i=0;i<panels;++i){
         auto const left=Pad+static_cast<float>(i)*(panelWidth+6);
         auto* face=CCLayerColor::create({SurfaceRaised.r,SurfaceRaised.g,SurfaceRaised.b,255},panelWidth,58);face->setPosition({left,32});m_contents->addChild(face,1);
-        text(m_contents,i?i18n::text("tier-guide-demotion","DEMOTION WARNING"):i18n::text("tier-guide-promotion","PROMOTION SERIES"),{left+10,79},panelWidth-20,.22f,Accent,FontWeight::ExtraBold,0);
-        auto const body=i?i18n::text("tier-guide-demotion-detail","Shown near a tier's lower bound; it clears once you recover the required LP."):
-            m_survival?i18n::text("tier-guide-survival-promotion","You promote as soon as your LP reaches the next tier's lower bound."):
-            i18n::text("tier-guide-promotion-detail","Reaching a tier boundary starts a promotion series; win the required games to promote.");
-        auto* label=menuLabel(body,.19f,{left+panelWidth/2,52},TextMuted,FontWeight::SemiBold);
-        fitWrappedMenuLabel(label,body,panelWidth-20,30,.19f);m_contents->addChild(label,8);
+        auto const heading=i==2?i18n::text("tier-guide-elite","MASTER · CHAMPION"):i?i18n::text("tier-guide-demotion","DEMOTION WARNING"):i18n::text("tier-guide-promotion","PROMOTION SERIES");
+        text(m_contents,heading,{left+10,79},panelWidth-20,.22f,i==2?tierColor("CHAMPION"):Accent,FontWeight::ExtraBold,0);
+        std::string body;
+        if(i==2)body=fmt::format(fmt::runtime(i18n::text("tier-guide-elite-detail",
+            "Among GOLD players by LP, the top 3 are CHAMPION and the upper half MASTER (7+ players). Now: CHAMPION {} LP · MASTER {} LP")),
+            cutoff("championCutoffLp"),cutoff("masterCutoffLp"));
+        else if(i==1)body=i18n::text("tier-guide-demotion-detail","Shown near a tier's lower bound; it clears once you recover the required LP.");
+        else if(m_survival)body=fmt::format(fmt::runtime(i18n::text("tier-guide-survival-series",
+            "Reaching the next tier starts a series: finish within the required place once before your tries run out. If all fail, you drop {} LP below the boundary.")),
+            view.survival.promotionFailurePenaltyLp>0?view.survival.promotionFailurePenaltyLp:50);
+        else body=i18n::text("tier-guide-promotion-detail","Reaching a tier boundary starts a promotion series; win the required games to promote.");
+        auto* label=menuLabel(body,.19f,{left+panelWidth/2,51},TextMuted,FontWeight::SemiBold);
+        fitWrappedMenuLabel(label,body,panelWidth-16,34,.19f);m_contents->addChild(label,8);
     }
     // Status line: loading, failure, or the Solo GOLD population.
     std::string status;ccColor3B statusColor=TextMuted;

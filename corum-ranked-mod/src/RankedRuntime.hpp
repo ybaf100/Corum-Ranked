@@ -8,6 +8,7 @@
 #include "domain/GameplayConcession.hpp"
 #include "domain/RankAssetPolicy.hpp"
 #include "domain/ResultScorePresentation.hpp"
+#include "domain/TierGuidePresentation.hpp"
 #include "domain/MapMetadata.hpp"
 
 #include <Geode/Geode.hpp>
@@ -448,6 +449,10 @@ struct SurvivalView {
     std::vector<int> promotionRanks;
     // Tier group lower bounds, for the lobby tier bar.
     std::vector<TierCutoffView> tierBands;
+    // The promotion series out of each tier group (tier guide), and the LP
+    // lost below the boundary when every chance fails.
+    std::vector<SurvivalSeriesRuleView> promotionRules;
+    int promotionFailurePenaltyLp=0;
 };
 
 // Solo queue radar: the current rating search radius and anonymous queued

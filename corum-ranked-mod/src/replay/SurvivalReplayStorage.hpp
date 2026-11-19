@@ -1,5 +1,7 @@
 #pragma once
 #include "SurvivalReplayCodec.hpp"
+#include <chrono>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <map>
@@ -35,6 +37,13 @@ public:
      * replay, manifest or best). Keeps at most MaxDiagnostics newest files. */
     std::future<std::string> exportDiagnostics(Json report,std::string label);
     static constexpr std::size_t MaxDiagnostics=10,MaxDiagnosticBytes=256*1024,MaxQuarantine=8;
+    /** A journal younger than this may still be waiting for its receipt. */
+    static constexpr auto PendingGrace=std::chrono::minutes(10);
+    static constexpr std::uintmax_t QuarantineLimit=64ull*1024*1024;
+    /** Final receipt outcomes: such a journal is never re-queued. */
+    static bool finalPendingStatus(std::string const& status){
+        return status=="OFFICIAL_EVIDENCE_MISMATCH"||status=="OFFICIAL_AND_NATIVE_PROGRESS_DIFFER"||status=="FORCE_CLEAR_HAS_NO_NATIVE_CLEAR_REPLAY";
+    }
     std::string error()const;
 private:
     std::filesystem::path m_root;
@@ -54,6 +63,13 @@ private:
     void markPendingStatus(Json& manifest,std::string const& attempt,std::string const& reason);
     void safeDirectories(std::filesystem::path const&);
     void diskBudget(std::uintmax_t);
+    /** Moves pending journals this session is not writing to the quarantine,
+     * those that can never be confirmed first, then the oldest, until the
+     * pending folder holds at most `target` bytes. Returns the bytes left. */
+    std::uintmax_t evictPending(std::uintmax_t bytes,std::uintmax_t target,std::size_t entryLimit=MaxPending);
+    std::uintmax_t pendingBytes();
+    void quarantine(std::filesystem::path const&);
+    void pruneQuarantine();
     void durable(std::filesystem::path const&);
     void replace(std::filesystem::path const&,std::filesystem::path const&);
     template<class F> auto submit(F f,std::size_t charge=0)->std::future<decltype(f())>{
