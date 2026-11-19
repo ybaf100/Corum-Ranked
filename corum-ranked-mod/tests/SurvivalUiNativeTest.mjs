@@ -19,6 +19,7 @@ test('Solo and Survival shared HUD fonts retain native fallback, shadows, width 
 #include <cassert>
 #include <cmath>
 #include <string>
+#include <unordered_map>
 #include <vector>
 using GLubyte=unsigned char;
 namespace cocos2d {
@@ -28,6 +29,7 @@ struct CCLabelBMFont:CCNode {
  std::string value,resource;float scale=1;CCPoint position{},anchor{};ccColor3B color{};GLubyte alpha=255;inline static bool fallback=false;
  static CCLabelBMFont* create(char const* t,char const* f){if(fallback&&std::string(f).find("CorumSans")!=std::string::npos)return nullptr;auto* n=new CCLabelBMFont;n->value=t;n->resource=f;return n;}
  char const* getFntFile()const{return resource.c_str();}float getScale()const{return scale;}
+ char const* getString()const{return value.c_str();}void setFntFile(char const* f){resource=f;}
  void setString(char const* s){value=s;}void setScale(float s){scale=s;}void setColor(ccColor3B c){color=c;}void setPosition(CCPoint p){position=p;}void setAnchorPoint(CCPoint p){anchor=p;}void setOpacity(GLubyte a){alpha=a;}
  void limitLabelWidth(float w,float maximum,float minimum){scale=std::clamp(w/(resource.find("CorumSans")!=std::string::npos?480.f:240.f),minimum,maximum);}
 };
@@ -36,7 +38,10 @@ using namespace cocos2d;
 constexpr char const* operator""_spr(char const* s,std::size_t){return s;}
 namespace corum::ranked::ui {
 enum class FontWeight{Regular,Medium,SemiBold,ExtraBold,Black};
-${['inline char const* font(','inline float fontScale(','inline void smoothCorumFontTexture(','inline void setLabelScale(','inline void fitLabelWidth(','inline CCLabelBMFont* playerNameLabel(','inline CCLabelBMFont* label('].map(n=>method(visuals,n)).join('\n')}
+// A 4K window: every label here takes the 128 px atlas (FontTierNativeTest covers the others).
+inline float corumPixelsPerPoint(){return 6.75f;}
+inline float corumContentScale(){return 4.0f;}
+${['inline char const* font(','inline char const* tieredFont(','inline char const* font(FontWeight weight, float logicalScale)','inline float fontScale(','inline bool corumFontLoads(','inline void matchCorumFontTier(','inline void setLabelScale(','inline void fitLabelWidth(','inline CCLabelBMFont* playerNameLabel(','inline CCLabelBMFont* label('].map(n=>method(visuals,n)).join('\n')}
 }
 ${read('src/ui/RankedHudLabel.hpp').replace(/^#pragma once\s*|^#include .*$/gm,'')}
 int main(){using namespace corum::ranked::ui;

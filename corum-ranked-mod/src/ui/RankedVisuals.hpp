@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace corum::ranked::ui {
@@ -81,6 +82,59 @@ inline char const* font(FontWeight weight) {
     return "CorumSans.fnt"_spr;
 }
 
+// The smaller atlases of each weight (domain/FontMetrics.hpp): glyphs of 24
+// and 48 px at UHD; font(weight) is the 128 px one.
+inline char const* tieredFont(FontWeight weight, unsigned size) {
+    if (size == CorumFontSmallSize) switch (weight) {
+        case FontWeight::Medium: return "CorumSansMedium24.fnt"_spr;
+        case FontWeight::SemiBold: return "CorumSansSemiBold24.fnt"_spr;
+        case FontWeight::ExtraBold: return "CorumSansBold24.fnt"_spr;
+        case FontWeight::Black: return "CorumSansBlack24.fnt"_spr;
+        case FontWeight::Regular: return "CorumSans24.fnt"_spr;
+    }
+    if (size == CorumFontMediumSize) switch (weight) {
+        case FontWeight::Medium: return "CorumSansMedium48.fnt"_spr;
+        case FontWeight::SemiBold: return "CorumSansSemiBold48.fnt"_spr;
+        case FontWeight::ExtraBold: return "CorumSansBold48.fnt"_spr;
+        case FontWeight::Black: return "CorumSansBlack48.fnt"_spr;
+        case FontWeight::Regular: return "CorumSans48.fnt"_spr;
+    }
+    return font(weight);
+}
+
+// Screen pixels per point, and the texture quality's content scale (4 UHD,
+// 2 HD, 1 SD). Inline/virtual cocos accessors only.
+//
+// The frame size is in pixels on Windows, Android and iOS. macOS reports it
+// in points and draws a Retina backbuffer through a viewport twice as large,
+// so the larger of the two is taken (the viewport is read once per frame size).
+inline float corumPixelsPerPoint() {
+    auto* director = CCDirector::sharedDirector();
+    auto* view = director ? director->getOpenGLView() : nullptr;
+    if (!view) return 1.0f;
+    auto const win = director->getWinSize();
+    auto const frame = view->getFrameSize().height;
+    static float knownFrame = -1.0f, viewport = 0.0f;
+    if (frame != knownFrame || viewport <= 0.0f) {
+        GLint rect[4] = {0, 0, 0, 0};
+        glGetIntegerv(GL_VIEWPORT, rect);
+        knownFrame = frame;
+        viewport = static_cast<float>(rect[3]);
+    }
+    auto const pixels = std::max(frame, viewport);
+    return win.height > 0.0f && pixels > 0.0f ? pixels / win.height : 1.0f;
+}
+inline float corumContentScale() {
+    auto* director = CCDirector::sharedDirector();
+    auto const scale = director ? director->getContentScaleFactor() : 4.0f;
+    return scale > 0.0f ? scale : 4.0f;
+}
+
+// The atlas of `weight` for text drawn at `logicalScale` on this screen.
+inline char const* font(FontWeight weight, float logicalScale) {
+    return tieredFont(weight, corumFontTier(logicalScale, corumPixelsPerPoint(), corumContentScale()));
+}
+
 inline char const* bodyFont() {
     return font(FontWeight::SemiBold);
 }
@@ -100,35 +154,42 @@ inline float fontScale(CCLabelBMFont* caption, float logicalScale) {
     return corumFontScale(logicalScale, resource ? std::string_view(resource) : std::string_view{});
 }
 
-// Menu text draws the UHD atlas's 128 px glyphs at roughly 15-30 px on a
-// 1920x1080 window: sampled from the full-size atlas alone, thin strokes break
-// up and shimmer. Trilinear mipmaps keep small text smooth. Desktop GL
-// (Windows) mipmaps these non-power-of-two atlases; mobile GLES 2 cannot, so
-// it keeps plain filtering. Each atlas texture is mipmapped once.
-inline void smoothCorumFontTexture(CCLabelBMFont* caption) {
-#if defined(GEODE_IS_WINDOWS)
-    if (!caption) return;
-    auto const* resource = caption->getFntFile();
-    if (!resource || std::string_view(resource).find("CorumSans") == std::string_view::npos) return;
-    auto* texture = caption->getTexture();
-    if (!texture || texture->hasMipmaps()) return;
-    texture->generateMipmap();
-    ccTexParams params{GL_LINEAR_MIPMAP_LINEAR, GL_LINEAR, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE};
-    texture->setTexParameters(&params);
-#else
-    (void)caption;
-#endif
+// setFntFile has no failure path (a font that cannot load leaves the label
+// without a configuration), so each atlas is test-loaded once first.
+inline bool corumFontLoads(std::string const& resource) {
+    static std::unordered_map<std::string, bool> known;
+    auto [entry, added] = known.try_emplace(resource, false);
+    if (added) entry->second = CCLabelBMFont::create("", resource.c_str()) != nullptr;
+    return entry->second;
+}
+
+// A label made small and later shown larger (or the reverse) moves to the
+// atlas of its weight that suits the new size, so it is never enlarged from a
+// small atlas. The text is set again for its wrap and alignment.
+inline void matchCorumFontTier(CCLabelBMFont* caption, float logicalScale) {
+    auto const* resource = caption ? caption->getFntFile() : nullptr;
+    if (!resource || logicalScale <= 0.0f) return;
+    auto const current = std::string_view(resource);
+    if (corumFontName(current).stem.empty()) return;
+    auto const size = corumFontTier(logicalScale, corumPixelsPerPoint(), corumContentScale());
+    if (size == corumRasterSize(current)) return;
+    auto const next = corumTierResource(current, size);
+    if (!corumFontLoads(next)) return;
+    std::string const text = caption->getString() ? caption->getString() : "";
+    caption->setFntFile(next.c_str());
+    caption->setString(text.c_str());
 }
 
 inline void setLabelScale(CCLabelBMFont* caption, float logicalScale) {
     if (!caption) return;
-    smoothCorumFontTexture(caption);
+    matchCorumFontTier(caption, logicalScale);
     caption->setScale(fontScale(caption, logicalScale));
 }
 
 inline void fitLabelWidth(CCLabelBMFont* caption, float width, float maximumScale, float minimumScale) {
-    if (caption) caption->limitLabelWidth(width,
-        fontScale(caption, maximumScale), fontScale(caption, minimumScale));
+    if (!caption) return;
+    matchCorumFontTier(caption, maximumScale);
+    caption->limitLabelWidth(width, fontScale(caption, maximumScale), fontScale(caption, minimumScale));
 }
 
 inline ccColor3B tierColor(std::string tier) {
@@ -173,7 +234,7 @@ inline Frame contentFrame(CCSize const& size) {
 // load. Native gold/big fonts may substitute uppercase for missing lowercase.
 inline CCLabelBMFont* playerNameLabel(std::string const& text,float scale,CCPoint position,
     ccColor3B color,FontWeight weight) {
-    auto* result=CCLabelBMFont::create(text.c_str(),font(weight));
+    auto* result=CCLabelBMFont::create(text.c_str(),font(weight,scale));
     if(!result)result=CCLabelBMFont::create(text.c_str(),"chatFont.fnt");
     setLabelScale(result,scale);result->setColor(color);result->setPosition(position);
     return result;
@@ -186,7 +247,7 @@ inline CCLabelBMFont* label(
     FontWeight weight,
     char const* resource = nullptr
 ) {
-    auto* result = CCLabelBMFont::create(text.c_str(), resource ? resource : font(weight));
+    auto* result = CCLabelBMFont::create(text.c_str(), resource ? resource : font(weight, scale));
     // The generated resource font is the preferred path, but keep every screen
     // usable if a platform-specific font atlas ever fails to load.
     if (!result) {
@@ -241,10 +302,12 @@ inline void fitFullLabel(CCLabelBMFont* text, float width, float height, float s
     text->setAlignment(kCCTextAlignmentCenter);
     text->setLineBreakWithoutSpace(false);
     text->setWidth(-1);
+    // Glyphs are measured in label space: pick the atlas before measuring.
+    matchCorumFontTier(text, scale);
     auto const glyph = widestLabelGlyph(text) + 2.0f;
     text->setLineBreakWithoutSpace(true);
     for (int pass = 0; pass < 20; ++pass) {
-        setLabelScale(text, scale);
+        text->setScale(fontScale(text, scale));
         if (text->getScale() <= 0) return;
         if (glyph * text->getScale() > width) text->setScale(width / glyph);
         text->setWidth(std::max(width / text->getScale(), glyph));

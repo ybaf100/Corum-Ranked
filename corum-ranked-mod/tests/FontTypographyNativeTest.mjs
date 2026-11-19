@@ -27,6 +27,9 @@ test('source font generation keeps all weights and isolates large countdown digi
     for (const name of ['CorumSans', 'CorumSansMedium', 'CorumSansSemiBold', 'CorumSansBold', 'CorumSansBlack']) {
         assert.equal(fonts[name].size, 128, name);
         assert.equal(fonts[name].path, `resources/${name}.ttf`);
+        // Small text draws from 24/48 px atlases of the same weight and glyphs.
+        for (const size of [24, 48])
+            assert.deepEqual(fonts[name + size], {path: fonts[name].path, size, charset: fonts[name].charset}, name + size);
     }
     assert.deepEqual(fonts.CorumSansCountdown, {
         path: 'resources/CorumSansBlack.ttf', size: 256, charset: '32,48-57',
@@ -48,9 +51,10 @@ test('reserved Regular atlas avoids unused Korean duplicates while bilingual UI 
         const glyphs=charset(fonts[weight].charset);
         for(const letter of '승급 승격 강등 기록 서바이벌 솔로 랭크 봇 수 설정 항복')assert(glyphs.has(letter.codePointAt(0)), `${weight} missing ${letter}`);
     }
-    // The packaged SD/HD/UHD atlases of the four Hangul weights share one 96 MiB
-    // RGBA budget (verify-font-package.py). 352 Hangul glyphs fit; beta.149's
-    // 360 did not. Reword with existing syllables instead of growing the set.
+    // The packaged SD/HD/UHD atlases of the four Hangul weights (128 px plus
+    // the 24/48 px ones) share one 128 MiB RGBA budget (verify-font-package.py).
+    // 352 Hangul glyphs fit the 128 px atlas; beta.149's 360 did not. Reword
+    // with existing syllables instead of growing the set.
     for(const weight of ['CorumSansMedium','CorumSansSemiBold','CorumSansBold','CorumSansBlack']){
         const hangul=[...charset(fonts[weight].charset)].filter(n=>n>=0xac00&&n<=0xd7a3).length;
         assert(hangul<=352,`${weight} has ${hangul} Hangul glyphs; the font atlas budget allows 352`);
@@ -65,21 +69,30 @@ test('production label helpers preserve geometry, width floors, animation scales
 #include <cmath>
 #include <memory>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 #include <vector>
 struct CCPoint {float x,y;};
 struct ccColor3B {unsigned char r,g,b;};
 struct CCLabelBMFont {
     static inline bool failCustom=false;
+    static inline std::string missing;
     static inline std::vector<std::unique_ptr<CCLabelBMFont>> labels;
     std::string text, resource;int z=0;float scale=1, naturalWidth=240;ccColor3B color{};CCPoint position{};
     static CCLabelBMFont* create(char const* text,char const* resource) {
         if(failCustom&&std::string_view(resource).find("CorumSans")!=std::string_view::npos)return nullptr;
-        auto p=std::make_unique<CCLabelBMFont>();p->text=text;p->resource=resource;
-        if(p->resource.find("CorumSansCountdown")!=std::string::npos)p->naturalWidth*=4;
-        else if(p->resource.find("CorumSans")!=std::string::npos)p->naturalWidth*=2;
+        if(resource==missing)return nullptr;
+        auto p=std::make_unique<CCLabelBMFont>();p->text=text;p->setFntFile(resource);
         labels.push_back(std::move(p));return labels.back().get();
     }
+    // Glyph advances follow the atlas's glyph size.
+    void setFntFile(char const* file){
+        resource=file;naturalWidth=resource.find("CorumSans")==std::string::npos?240.0f:
+            240.0f*static_cast<float>(corum::ranked::corumRasterSize(resource))/64.0f;
+    }
     char const* getFntFile()const{return resource.c_str();}
+    char const* getString()const{return text.c_str();}
+    void setString(char const* value){text=value;}
     void setScale(float value){scale=value;}
     void setZOrder(int value){z=value;}
     float getScale()const{return scale;}
@@ -93,9 +106,22 @@ struct CCLabelBMFont {
 };
 namespace corum::ranked::ui {
 enum class FontWeight {Regular,Medium,SemiBold,ExtraBold,Black};
+// A window this large draws every label from the 128 px atlas, until main()
+// switches it to 1920x1080 (3.375 screen pixels per point).
+float pixelsPerPoint=100.0f;
+float corumPixelsPerPoint(){return pixelsPerPoint;}
+float corumContentScale(){return 4.0f;}
 char const* font(FontWeight){return "hwanhee1.corum_ranked/CorumSansBlack.fnt";}
+char const* font(FontWeight,float scale){
+    switch(corum::ranked::corumFontTier(scale,corumPixelsPerPoint(),corumContentScale())){
+        case 24:return "hwanhee1.corum_ranked/CorumSansBlack24.fnt";
+        case 48:return "hwanhee1.corum_ranked/CorumSansBlack48.fnt";
+        default:return font(FontWeight::Black);
+    }
+}
 ${method(visuals, 'inline float fontScale(')}
-${method(visuals, 'inline void smoothCorumFontTexture(')}
+${method(visuals, 'inline bool corumFontLoads(')}
+${method(visuals, 'inline void matchCorumFontTier(')}
 ${method(visuals, 'inline void setLabelScale(')}
 ${method(visuals, 'inline void fitLabelWidth(')}
 ${method(visuals, 'inline CCLabelBMFont* label(')}
@@ -138,6 +164,23 @@ int main(){
     auto* body=label("Fallback body",0.4f,{0,0},{255,255,255},FontWeight::Regular);
     assert(body->resource=="bigFont.fnt"&&same(body->scale,0.4f));
     setLabelScale(nullptr,1);fitLabelWidth(nullptr,100,1,0.1f);assert(same(fontScale(nullptr,1),1));
+    // 1920x1080: small text takes the small atlas and keeps its drawn size.
+    CCLabelBMFont::failCustom=false;pixelsPerPoint=3.375f;
+    auto* small=label("작은 글씨",0.36f,{0,0},{255,255,255},FontWeight::Black);
+    assert(small->resource=="hwanhee1.corum_ranked/CorumSansBlack24.fnt"&&same(small->displayedWidth(),240*0.36f));
+    // Shown larger later, it moves up (never enlarged from 24 px glyphs), and back.
+    setLabelScale(small,0.9f);assert(small->resource=="hwanhee1.corum_ranked/CorumSansBlack48.fnt"&&same(small->displayedWidth(),240*0.9f));
+    setLabelScale(small,1.5f);assert(small->resource=="hwanhee1.corum_ranked/CorumSansBlack.fnt"&&same(small->displayedWidth(),240*1.5f));
+    setLabelScale(small,0.3f);assert(small->resource=="hwanhee1.corum_ranked/CorumSansBlack24.fnt"&&small->text=="작은 글씨");
+    // A width fit settles the atlas for its largest scale first.
+    fitLabelWidth(small,1000,0.9f,0.3f);assert(small->resource=="hwanhee1.corum_ranked/CorumSansBlack48.fnt"&&same(small->displayedWidth(),240*0.9f));
+    // The countdown digits and GD's own fonts keep their only atlas.
+    setLabelScale(digit,0.2f);assert(digit->resource=="CorumSansCountdown.fnt");
+    setLabelScale(fallback,0.2f);assert(fallback->resource=="goldFont.fnt");
+    // An atlas that cannot load is never switched to: the label keeps its own.
+    auto* kept=label("Kept",1.5f,{0,0},{255,255,255},FontWeight::ExtraBold,"hwanhee1.corum_ranked/CorumSansBold.fnt");
+    CCLabelBMFont::missing="hwanhee1.corum_ranked/CorumSansBold48.fnt";
+    setLabelScale(kept,0.9f);assert(kept->resource=="hwanhee1.corum_ranked/CorumSansBold.fnt"&&same(kept->displayedWidth(),240*0.9f));
 }
 `;
     const temp = mkdtempSync(join(tmpdir(), 'corum-font-native-'));

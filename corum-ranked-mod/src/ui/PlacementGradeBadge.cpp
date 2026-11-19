@@ -94,7 +94,7 @@ CCNode* PlacementGradeBadge::createVisual(std::string const& input) const {
             Text,
             FontWeight::Black
         );
-        fallback->limitLabelWidth(m_extent * 0.82f, 1.0f, 0.2f);
+        fitLabelWidth(fallback, m_extent * 0.82f, 2.0f, 0.4f);
         root->addChild(fallback);
     }
     return root;

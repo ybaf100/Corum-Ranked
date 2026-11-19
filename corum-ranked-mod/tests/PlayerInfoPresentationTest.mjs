@@ -24,6 +24,8 @@ struct CCLabelBMFont{std::string original;float scale=1,width=1;bool wrap=false;
  void setLineBreakWithoutSpace(bool v){wrap=v;relayout();}void setWidth(float v){width=v;relayout();}float getScale()const{return scale;}void setScale(float v){scale=v;}
  Size getContentSize()const{int count=0;for(unsigned char c:original)if((c&0xC0)!=0x80)++count;int perLine=std::max(1,static_cast<int>(width/20));return {std::min(width,count*20.0f),40.0f*std::ceil(static_cast<float>(count)/perLine)};}};
 void setLabelScale(CCLabelBMFont* v,float scale){v->scale=scale/2;} // actual 128px Corum font factor
+float fontScale(CCLabelBMFont*,float scale){return scale/2;}
+void matchCorumFontTier(CCLabelBMFont*,float){} // FontTierNativeTest covers atlas switching.
 float widestLabelGlyph(CCLabelBMFont*){return 20.0f;}
 ${fit}
 int main(){using corum::ranked::extremeDemonCount;

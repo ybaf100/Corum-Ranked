@@ -43,6 +43,7 @@ test('actual native entry gate owns input/audio and releases once after shared s
 #include <functional>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 #include <utility>
 #include "${join(root, 'src/ui/RankedInput.hpp')}"
@@ -55,24 +56,21 @@ struct AppDelegate {bool m_gamePaused=false;static AppDelegate* get(){static App
 struct GJGameLevel {int refs=1;void retain(){++refs;}void release(){--refs;}};
 struct SceneParent:CCNode {bool running=true;std::shared_ptr<int> life=std::make_shared<int>(0);bool isRunning()const{return running;}};
 struct PlayLayer;
-// Windows mipmaps the Corum font atlas once (smoothCorumFontTexture).
-#define GL_LINEAR_MIPMAP_LINEAR 0x2703
-#define GL_LINEAR 0x2601
-#define GL_CLAMP_TO_EDGE 0x812F
-struct ccTexParams{unsigned minFilter,magFilter,wrapS,wrapT;};
-struct FakeTexture{bool mip=false;int generated=0;unsigned minFilter=0;
-    bool hasMipmaps(){return mip;}void generateMipmap(){mip=true;++generated;}void setTexParameters(ccTexParams* p){minFilter=p->minFilter;}};
 struct FakeLabel {
-    std::string text;float scale=0;unsigned char opacity=0;int writes=0;FakeTexture texture;
+    std::string text;float scale=0;unsigned char opacity=0;int writes=0;int fontSwaps=0;
     void setString(char const* s){text=s;++writes;}void setScale(float s){scale=s;}
     void setOpacity(unsigned char o){opacity=o;}
     char const* getFntFile()const{return "CorumSansCountdown.fnt";}
-    FakeTexture* getTexture(){return &texture;}
+    char const* getString()const{return text.c_str();}void setFntFile(char const*){++fontSwaps;}
+    static FakeLabel* create(char const*,char const*){return nullptr;}
 };
 namespace corum::ranked::ui {
 using CCLabelBMFont=FakeLabel;
+inline float corumPixelsPerPoint(){return 3.375f;}
+inline float corumContentScale(){return 4.0f;}
 ${method(visuals, 'inline float fontScale(')}
-${method(visuals, 'inline void smoothCorumFontTexture(')}
+${method(visuals, 'inline bool corumFontLoads(')}
+${method(visuals, 'inline void matchCorumFontTier(')}
 ${method(visuals, 'inline void setLabelScale(')}
 namespace i18n {bool korean=false;bool isKorean(){return korean;}}
 struct RankedEntryOverlay {

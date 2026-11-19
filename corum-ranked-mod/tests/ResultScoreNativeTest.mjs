@@ -665,7 +665,7 @@ test('font package contains the new Korean notices and unplaced em dash without 
             const [a,b]=range.split('-').map(Number);
             for(let p=a;p<=(b??a);++p)points.add(p);
         }
-        for(const ch of name==='CorumSans'?'—':required)assert(points.has(ch.codePointAt(0)),name+': '+ch);
+        for(const ch of /^CorumSans(24|48)?$/.test(name)?'—':required)assert(points.has(ch.codePointAt(0)),name+': '+ch);
     }
 });
 

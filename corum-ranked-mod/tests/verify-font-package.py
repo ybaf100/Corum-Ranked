@@ -21,8 +21,12 @@ def charset(spec):
 
 
 def verify(path):
-    expected = {name: 128 for name in (
-        "CorumSans", "CorumSansMedium", "CorumSansSemiBold", "CorumSansBold", "CorumSansBlack")}
+    expected = {}
+    for name in ("CorumSans", "CorumSansMedium", "CorumSansSemiBold", "CorumSansBold", "CorumSansBlack"):
+        # The 128 px atlas and the 24/48 px ones for small text (FontMetrics.hpp).
+        expected[name] = 128
+        expected[name + "24"] = 24
+        expected[name + "48"] = 48
     expected["CorumSansCountdown"] = 256
     pixels_by_tier = [0, 0, 0]
     with zipfile.ZipFile(path) as package:
@@ -37,6 +41,9 @@ def verify(path):
                 files[base] = name
         for name, size in expected.items():
             spec = fonts[name]
+            base = fonts[name[:-2]] if name.endswith(("24", "48")) else spec
+            if spec["path"] != base["path"] or spec["charset"] != base["charset"]:
+                raise ValueError(f"{name} must share the glyphs and source of its 128 px atlas")
             if spec["size"] != size:
                 raise ValueError(f"Unexpected source size for {name}: {spec['size']}")
             for index, (suffix, factor) in enumerate((("", 4), ("-hd", 2), ("-uhd", 1))):
@@ -62,10 +69,11 @@ def verify(path):
                     if min(x, y, w, h) < 0 or x + w > width or y + h > height:
                         raise ValueError(f"Invalid glyph rectangle in {stem}: {glyph['id']}")
                 pixels_by_tier[index] += width * height
-        # RGBA estimate when every UI weight is loaded at a single quality tier.
-        if max(pixels_by_tier) * 4 > 96 * 1024 * 1024:
-            raise ValueError("Combined font atlas pixels exceed the 96 MiB RGBA budget")
-    print(f"Verified 18 SD/HD/UHD font bundles in {path.name}; RGBA MiB per tier: " +
+        # RGBA estimate when every atlas is loaded at a single quality tier.
+        # The 24/48 px atlases add about a sixth to the 128 px ones (~95 MiB).
+        if max(pixels_by_tier) * 4 > 128 * 1024 * 1024:
+            raise ValueError("Combined font atlas pixels exceed the 128 MiB RGBA budget")
+    print(f"Verified {len(expected) * 3} SD/HD/UHD font bundles in {path.name}; RGBA MiB per tier: " +
           ", ".join(f"{pixels * 4 / 2**20:.2f}" for pixels in pixels_by_tier))
 
 

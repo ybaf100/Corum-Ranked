@@ -103,6 +103,7 @@ int returnRequests=0;bool requestConcededGameplayReturn(PlayLayer*){++returnRequ
 namespace ui {
 inline constexpr ccColor3B Red={255,91,111},Gold={255,207,74};
 using CCLabelBMFont=Label;
+inline void matchCorumFontTier(Label*,float){} // FontTierNativeTest covers atlas switching.
 ${body(visuals,'inline float fontScale(')}
 ${body(visuals,'inline void fitLabelWidth(')}
 struct RankedSurrenderPopup:Popup {
