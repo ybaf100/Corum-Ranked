@@ -64,13 +64,10 @@ inline ModeSweepFrame modeSweepFrame(float t) {
     return f;
 }
 
-// One row band of the lobby panel, top to bottom: slides in from the right
-// with a signal-colour line drawn under it that fades once the row settles.
+// One row band of the lobby panel, top to bottom: slides in from the right.
 struct ModeSweepBand {
     float offset = 1.0f; // remaining share of the slide in (0 = in place)
     float alpha = 0.0f;
-    float wipe = 0.0f;   // share of the row the line has drawn
-    float wipeAlpha = 0.0f;
 };
 
 inline float modeSweepBandStart(int index, int count) {
@@ -86,10 +83,6 @@ inline ModeSweepBand modeSweepBand(float t, int index, int count) {
     auto const p = outCubic(segment(t, a, a + 260.0f));
     b.offset = 1.0f - p;
     b.alpha = p;
-    auto const w = segment(t, a, a + 200.0f);
-    b.wipe = outCubic(w);
-    // The line is gone by the end, so leaving starts without it.
-    b.wipeAlpha = w > 0.0f ? 1.0f - segment(t, a + 200.0f, std::min(a + 380.0f, ModeSweepMs)) : 0.0f;
     return b;
 }
 

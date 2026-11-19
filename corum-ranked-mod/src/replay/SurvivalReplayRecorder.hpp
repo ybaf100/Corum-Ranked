@@ -2,8 +2,17 @@
 #include "SurvivalReplayStorage.hpp"
 #include <Geode/Geode.hpp>
 #include <Geode/utils/web.hpp>
+#include <chrono>
 namespace corum::ranked::replay {
 enum class ReplayNotice { None, Preparation, Data, Space, File, Receipt, Unsupported };
+// "Awaiting official replay confirmation" is a normal step after every
+// Attempt: the server settles the Attempt and confirms its replay a few
+// seconds later. It shows only once the wait has lasted long enough to mean
+// something is stuck; every other notice shows at once.
+inline constexpr auto ReceiptNoticeDelay = std::chrono::seconds(8);
+inline ReplayNotice shownReplayNotice(ReplayNotice notice, std::chrono::steady_clock::duration waited) {
+    return notice == ReplayNotice::Receipt && waited < ReceiptNoticeDelay ? ReplayNotice::None : notice;
+}
 class Recorder final {
 public:
     static Recorder& get();
@@ -32,6 +41,8 @@ public:
     void elapsed(double value){if(std::isfinite(value)&&value>=0)m_elapsed=value;}
     std::string const& error()const{return m_error;}
     ReplayNotice notice()const{return m_notice;}
+    // What the gameplay HUD shows (see shownReplayNotice).
+    ReplayNotice visibleNotice()const{return shownReplayNotice(m_notice,std::chrono::steady_clock::now()-m_noticeSince);}
     void retryPending();
     Storage& storage(){return m_storage;}
 private:
@@ -47,6 +58,7 @@ private:
     std::deque<Json> m_receipts;
     std::string m_current,m_error;
     ReplayNotice m_notice=ReplayNotice::None;
+    std::chrono::steady_clock::time_point m_noticeSince{};
     std::string m_displayAttempt,m_receiptToken;
     std::map<std::string,Json> m_deferredReceipts;
     std::map<std::string,Json> m_closing;

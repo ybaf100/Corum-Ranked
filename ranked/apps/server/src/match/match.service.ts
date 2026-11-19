@@ -3,7 +3,7 @@ import { soloHistoryDetails } from "../history/solo-history.js";
 import type { HistoryOptions } from "../history/history-options.js";
 import { readStandings } from "../leaderboard/standing.js";
 import { readRoundPace } from "./round-pace.js";
-import { recentRoundDeaths, type DeathFeedEvent } from "./death-feed.js";
+import { recentRoundDeaths, restartShowsInDeathLog, type DeathFeedEvent } from "./death-feed.js";
 import {
   ConflictException,
   Inject,
@@ -1442,6 +1442,7 @@ export class MatchService {
         );
         if (!attempt) throw new Error("Ended attempt is missing from domain state");
         attempt.nativeDeath = body.nativeDeath === true && !body.cleared;
+        attempt.restartDeath = restartShowsInDeathLog(body.restart === true && !attempt.nativeDeath, attempt.cleared, attempt.progressPercent);
         await transaction.query(
           `UPDATE ranked_attempts
            SET ended_at = $4, client_ended_at = $5, progress_percent = $6,

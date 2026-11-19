@@ -34,7 +34,10 @@ void Storage::diskBudget(std::uintmax_t additional){
     for(auto const& f:fs::directory_iterator(m_root/"pending"))if(f.is_regular_file()&&!f.is_symlink()){
         auto size=f.file_size();if(size>PendingLimit-bytes)throw std::runtime_error("Replay pending capacity reached; best preserved");bytes+=size;
     }
-    if(additional>PendingLimit-bytes||fs::space(m_root).available<additional+Reserve)throw std::runtime_error("Replay storage full; best preserved");
+    auto const available=fs::space(m_root).available;
+    if(additional>PendingLimit-bytes||available<additional+Reserve)
+        // The sizes say which limit was hit (the pending budget or the disk).
+        throw std::runtime_error("Replay storage full; best preserved (pending "+std::to_string(bytes>>20)+" MB of "+std::to_string(PendingLimit>>20)+" MB, disk free "+std::to_string(available>>20)+" MB)");
 }
 void Storage::durable(fs::path const& path){
 #if defined(_WIN32)

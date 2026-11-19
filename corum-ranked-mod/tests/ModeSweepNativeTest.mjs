@@ -29,8 +29,8 @@ int main(){
  assert(!lobby.menuTrophyHome&&lobby.lobbyTrophyHome&&!lobby.flying&&near(lobby.header,1)&&near(lobby.heroAlpha,1)&&near(lobby.heroOffset,0)&&near(lobby.press,1));
  for(int count=1;count<=7;++count)for(int i=0;i<count;++i){
   auto const before=modeSweepBand(0.0f,i,count),after=modeSweepBand(ModeSweepMs,i,count);
-  assert(near(before.alpha,0)&&near(before.offset,1)&&near(before.wipeAlpha,0));
-  assert(near(after.alpha,1)&&near(after.offset,0)&&near(after.wipeAlpha,0)&&near(after.wipe,1));
+  assert(near(before.alpha,0)&&near(before.offset,1));
+  assert(near(after.alpha,1)&&near(after.offset,0));
   // Top to bottom, one after another, every row settled before the end.
   if(i)assert(modeSweepBandStart(i,count)>modeSweepBandStart(i-1,count));
   assert(modeSweepBandStart(i,count)+260.0f<=ModeSweepMs);
@@ -85,6 +85,8 @@ test('entering a mode sweeps the main menu into the lobby; Back plays the sweep 
  assert.match(motion,/apply\(m_setup\.opening \? ModeSweepMs : 0\.0f\);/);
  // Surfaces fade from their own opacity (GD paints a CCLayerColor from it).
  assert.match(motion,/for \(auto const& \[layer, opacity\] : m_layers\) layer->setOpacity/);
+ // No line is drawn under the rows (it showed before the rows came in).
+ assert.doesNotMatch(motion,/CCLayerColor::create/);
  // The tap pulse is for opening only.
  assert.match(motion,/if \(s\.opening && s\.enter\) s\.enter->setScale\(m_enterScale \* f\.press\);/);
 });

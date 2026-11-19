@@ -95,6 +95,7 @@ namespace corum::ranked::ui {
 enum class FontWeight {Regular,Medium,SemiBold,ExtraBold,Black};
 char const* font(FontWeight){return "hwanhee1.corum_ranked/CorumSansBlack.fnt";}
 ${method(visuals, 'inline float fontScale(')}
+${method(visuals, 'inline void smoothCorumFontTexture(')}
 ${method(visuals, 'inline void setLabelScale(')}
 ${method(visuals, 'inline void fitLabelWidth(')}
 ${method(visuals, 'inline CCLabelBMFont* label(')}

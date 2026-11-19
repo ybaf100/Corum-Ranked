@@ -36,7 +36,7 @@ using namespace cocos2d;
 constexpr char const* operator""_spr(char const* s,std::size_t){return s;}
 namespace corum::ranked::ui {
 enum class FontWeight{Regular,Medium,SemiBold,ExtraBold,Black};
-${['inline char const* font(','inline float fontScale(','inline void setLabelScale(','inline void fitLabelWidth(','inline CCLabelBMFont* playerNameLabel(','inline CCLabelBMFont* label('].map(n=>method(visuals,n)).join('\n')}
+${['inline char const* font(','inline float fontScale(','inline void smoothCorumFontTexture(','inline void setLabelScale(','inline void fitLabelWidth(','inline CCLabelBMFont* playerNameLabel(','inline CCLabelBMFont* label('].map(n=>method(visuals,n)).join('\n')}
 }
 ${read('src/ui/RankedHudLabel.hpp').replace(/^#pragma once\s*|^#include .*$/gm,'')}
 int main(){using namespace corum::ranked::ui;

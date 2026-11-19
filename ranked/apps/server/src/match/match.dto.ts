@@ -102,6 +102,10 @@ export class AttemptEndDto {
   @IsOptional()
   @IsBoolean()
   public nativeDeath?: boolean;
+  /** The player restarted while alive (death log only, from 2%). */
+  @IsOptional()
+  @IsBoolean()
+  public restart?: boolean;
   @IsString()
   @Length(1, 40)
   public levelId!: string;

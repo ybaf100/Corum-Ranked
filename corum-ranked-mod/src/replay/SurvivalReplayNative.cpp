@@ -45,7 +45,10 @@ Json replayWorldReferences(PlayLayer* layer,PlayerObject* player){
     if(!player)return nullptr;auto refs=Json::object();refs["unresolved"]=false;
     auto object=[&](char const* key,GameObject* value){
         if(!value){refs[key]=nullptr;return;}
-        int index=-1;if(layer->m_objects)for(unsigned i=0;i<layer->m_objects->count();++i)if(layer->m_objects->objectAtIndex(i)==value){index=static_cast<int>(i);break;}
+        // One lookup inside the array: walking it through objectAtIndex() (a
+        // cocos call per object) for up to 11 references of each player took
+        // ~0.2 s at every Attempt start on large levels.
+        int index=-1;if(layer->m_objects){auto const found=layer->m_objects->indexOfObject(value);if(found!=CC_INVALID_INDEX)index=static_cast<int>(found);}
         if(index<0){refs["unresolved"]=true;return;}auto identity=Json::array();identity.push(index);identity.push(value->m_objectID);refs[key]=std::move(identity);
     };
     object("dashRing",player->m_dashRing);object("snapped",player->m_objectSnappedTo);
@@ -105,7 +108,7 @@ public:
    auto* playback=(m_fields->replayOwned||m_fields->liveWorldOwned)?worldPlayback():nullptr;
    corum::ranked::replay::ReplayWorldOptionsScope loadOptions(m_level,playback?playback->initial()["worldOptions"]:Json());PlayLayer::resetLevel();}
     void showCaptureError(){
-        auto& recorder=corum::ranked::replay::Recorder::get();auto state=recorder.notice();
+        auto& recorder=corum::ranked::replay::Recorder::get();auto state=recorder.visibleNotice();
         using Notice=corum::ranked::replay::ReplayNotice;
         if(state==Notice::None){if(m_fields->captureError)m_fields->captureError->setVisible(false);m_fields->captureErrorText.clear();return;}
         auto text=std::to_string(static_cast<int>(state))+recorder.error();if(text==m_fields->captureErrorText)return;m_fields->captureErrorText=text;

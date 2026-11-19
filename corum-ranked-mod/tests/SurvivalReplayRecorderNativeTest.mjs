@@ -64,6 +64,11 @@ int main(){Recorder r;r.m_recovery.get();testEnvironment["cbf"]["loaded"]=true;t
    assert(std::filesystem::exists("${dir}/replays/pending/"+corum::ranked::sha256Text("new-good")+".tmp"));
    assert(str(r.storage().best(metadata("x")).get()->metadata,"attemptId")=="lost-ack");
  }
+ // The normal wait for the official confirmation stays off the HUD; a wait
+ // that lasts past ReceiptNoticeDelay shows.
+ assert(r.notice()==ReplayNotice::Receipt&&r.visibleNotice()==ReplayNotice::None);
+ r.m_noticeSince=std::chrono::steady_clock::now()-ReceiptNoticeDelay-std::chrono::seconds(1);assert(r.visibleNotice()==ReplayNotice::Receipt);
+ assert(shownReplayNotice(ReplayNotice::Space,std::chrono::seconds(0))==ReplayNotice::Space);
  // Force Clear cannot promote nonexistent 100% native inputs over a real best.
  r.m_receipts.clear();auto forced=metadata("new-good");forced["capturedProgress"]=90.;forced["terminalReason"]="DEBUG_FORCE_CLEAR";r.m_nextReceipt={};r.queueReceipt(forced);r.pump();
  geode::utils::web::WebResponse mismatch;mismatch.value["accepted"]=true;mismatch.value["ended"]=true;mismatch.value["progress"]=100.;r.m_request.reply(mismatch);

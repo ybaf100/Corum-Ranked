@@ -1781,11 +1781,14 @@ public:
             // end event for every start even when the user restarts while alive.
             auto const cleared = m_hasCompletedLevel;
             auto const progress = cleared ? 100.0 : rankedProgressPercent(this);
+            // A restart while alive: the death log shows it from 2% on.
             m_fields->attemptEndReported = runtime.reportAttemptEnd(
                 m_fields->levelId,
                 progress,
                 cleared,
-                m_fields->qualifyingPercent
+                m_fields->qualifyingPercent,
+                false,
+                true
             );
         }
         if (resetActions.exitLocalGameplay) {

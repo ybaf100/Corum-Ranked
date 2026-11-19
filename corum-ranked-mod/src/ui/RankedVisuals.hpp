@@ -100,8 +100,30 @@ inline float fontScale(CCLabelBMFont* caption, float logicalScale) {
     return corumFontScale(logicalScale, resource ? std::string_view(resource) : std::string_view{});
 }
 
+// Menu text draws the UHD atlas's 128 px glyphs at roughly 15-30 px on a
+// 1920x1080 window: sampled from the full-size atlas alone, thin strokes break
+// up and shimmer. Trilinear mipmaps keep small text smooth. Desktop GL
+// (Windows) mipmaps these non-power-of-two atlases; mobile GLES 2 cannot, so
+// it keeps plain filtering. Each atlas texture is mipmapped once.
+inline void smoothCorumFontTexture(CCLabelBMFont* caption) {
+#if defined(GEODE_IS_WINDOWS)
+    if (!caption) return;
+    auto const* resource = caption->getFntFile();
+    if (!resource || std::string_view(resource).find("CorumSans") == std::string_view::npos) return;
+    auto* texture = caption->getTexture();
+    if (!texture || texture->hasMipmaps()) return;
+    texture->generateMipmap();
+    ccTexParams params{GL_LINEAR_MIPMAP_LINEAR, GL_LINEAR, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE};
+    texture->setTexParameters(&params);
+#else
+    (void)caption;
+#endif
+}
+
 inline void setLabelScale(CCLabelBMFont* caption, float logicalScale) {
-    if (caption) caption->setScale(fontScale(caption, logicalScale));
+    if (!caption) return;
+    smoothCorumFontTexture(caption);
+    caption->setScale(fontScale(caption, logicalScale));
 }
 
 inline void fitLabelWidth(CCLabelBMFont* caption, float width, float maximumScale, float minimumScale) {

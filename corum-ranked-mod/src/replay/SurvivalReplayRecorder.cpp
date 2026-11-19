@@ -11,6 +11,7 @@ void Recorder::note(ReplayNotice kind,std::string stage,std::string reason,Json 
     geode::log::info("[SurvivalReplay] stage={} result={} reason={} attemptId={} matchId={} roundKey={} mapGeneration={} levelId={}",stage,
         kind==ReplayNotice::None?"OK":kind==ReplayNotice::Receipt?"WAITING":kind==ReplayNotice::Unsupported?"UNAVAILABLE":"REJECTED",reason,id,str(metadata,"matchId"),str(metadata,"roundKey"),integer(metadata,"mapGeneration"),integer(metadata,"levelId"));
     if(!m_displayAttempt.empty()&&id!=m_displayAttempt)return;
+    if(kind!=m_notice)m_noticeSince=std::chrono::steady_clock::now();
     m_notice=kind;m_error=(kind==ReplayNotice::None||kind==ReplayNotice::Receipt)?"":std::move(reason);
 }
 void Recorder::queueReceipt(Json metadata){

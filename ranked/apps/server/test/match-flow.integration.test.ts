@@ -325,16 +325,24 @@ describe("two-client authoritative match flow", () => {
         scoreAttempt(livePercent, false, qualifying),
       );
       clock.advanceSeconds(1);
+      // The first attempt ends with a Restart while alive: from 2% it shows in
+      // the death log both players see, like a death (never below 2%).
       const firstEnd = await matches.endAttempt(matchId, statusA.matchToken, playerA, {
         levelId,
         attemptId: firstStart.attemptId!,
         clientEventId: `r${roundNumber}-a1-end`,
         progressPercent: livePercent,
         cleared: false,
+        restart: true,
       });
       if (!("roundSnapshot" in firstEnd)) {
         throw new Error("Expected round attempt-end acknowledgement during ROUND_PLAYING");
       }
+      const seenByB = (await matches.state(matchId, statusB.matchToken, playerB)) as Record<string, any>;
+      const restartEntry = (seenByB.deathLog as { id: string; side: string; progressPercent: number }[])
+        .find((event) => event.id === `r${roundNumber}-a1-end`);
+      if (livePercent >= 2) expect(restartEntry).toMatchObject({ side: "A", progressPercent: livePercent });
+      else expect(restartEntry).toBeUndefined();
       expect(firstEnd.roundSnapshot.clears.A).toBe(0);
       expect(firstEnd.roundSnapshot.scores.A).toBe(
         scoreAttempt(livePercent, false, qualifying),

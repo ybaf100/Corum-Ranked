@@ -133,20 +133,8 @@ public:
         }
         for (auto const& band : s.bands) {
             std::vector<SweepPiece> pieces;
-            float minX = 1e9f, maxX = -1e9f, minY = 1e9f;
-            for (auto* item : band) {
-                if (!item) continue;
-                pieces.emplace_back(item);
-                auto const box = item->boundingBox();
-                auto const origin = item->getParent() ? item->getParent()->convertToWorldSpace(box.origin) : box.origin;
-                minX = std::min(minX, origin.x); maxX = std::max(maxX, origin.x + box.size.width); minY = std::min(minY, origin.y);
-            }
-            if (pieces.empty()) continue;
-            // The signal-colour line drawn under the row as it arrives.
-            auto* line = cocos2d::CCLayerColor::create({Accent.r, Accent.g, Accent.b, 0}, 0.0f, 1.5f);
-            line->setPosition({minX, minY - 3.0f});
-            addChild(line, 40);
-            m_bands.push_back({std::move(pieces), geode::Ref<cocos2d::CCLayerColor>(line), std::max(0.0f, maxX - minX)});
+            for (auto* item : band) if (item) pieces.emplace_back(item);
+            if (!pieces.empty()) m_bands.push_back({std::move(pieces)});
         }
         for (auto* n : s.menuTitles) m_menuTitles.emplace_back(n);
         for (auto* n : s.lobbyTitles) m_lobbyTitles.emplace_back(n);
@@ -176,7 +164,7 @@ public:
     }
 
 private:
-    struct Band { std::vector<SweepPiece> pieces; geode::Ref<cocos2d::CCLayerColor> line; float width = 0.0f; };
+    struct Band { std::vector<SweepPiece> pieces; };
     Setup m_setup;
     SweepPiece m_selected, m_other, m_card, m_hero;
     std::vector<Band> m_bands;
@@ -198,8 +186,6 @@ private:
         for (int i = 0; i < count; ++i) {
             auto const b = modeSweepBand(t, i, count);
             for (auto const& piece : m_bands[i].pieces) { piece.place(m_rowShift * b.offset, 0.0f); piece.fade(b.alpha); }
-            m_bands[i].line->setContentSize({m_bands[i].width * b.wipe, 1.5f});
-            m_bands[i].line->setOpacity(static_cast<GLubyte>(std::lround(255.0f * b.wipeAlpha)));
         }
         m_hero.place(m_heroShift * f.heroOffset, 0.0f); m_hero.fade(f.heroAlpha);
         constexpr float rise = 12.0f;

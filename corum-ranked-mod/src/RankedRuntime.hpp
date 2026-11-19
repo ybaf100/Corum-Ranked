@@ -637,7 +637,8 @@ public:
     [[nodiscard]] bool reportAttemptStart(int levelId);
     void reportPracticePresence(bool practice);
     void reportAttemptProgress(int levelId, double progressPercent);
-    [[nodiscard]] bool reportAttemptEnd(int levelId, double progressPercent, bool cleared, std::optional<double> qualifyingPercentOverride = std::nullopt, bool nativeDeath = false);
+    // `restart`: the player restarted (Restart key / pause menu) while alive.
+    [[nodiscard]] bool reportAttemptEnd(int levelId, double progressPercent, bool cleared, std::optional<double> qualifyingPercentOverride = std::nullopt, bool nativeDeath = false, bool restart = false);
 
 private:
     void const* m_spectatorLocalTransportOwner = nullptr;
@@ -658,6 +659,8 @@ private:
         double optimisticScore = 0.0;
         int optimisticClear = 0;
         bool nativeDeath = false;
+        // A restart at RestartDeathMinimumPercent or more shows in the death log.
+        bool restartDeath = false;
     };
 
     // Visual attempts can finish faster than HTTP start/end acknowledgements.

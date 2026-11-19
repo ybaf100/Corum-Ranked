@@ -3844,7 +3844,7 @@ void RankedRuntime::retireDecisiveAttempt() {
     m_nextAttemptRetryAt = {}; m_nextIntentRetryAt = {};
 }
 
-bool RankedRuntime::reportAttemptEnd(int levelId, double progressPercent, bool cleared, std::optional<double> qualifyingPercentOverride, bool nativeDeath) {
+bool RankedRuntime::reportAttemptEnd(int levelId, double progressPercent, bool cleared, std::optional<double> qualifyingPercentOverride, bool nativeDeath, bool restart) {
     if (spectatorAttemptTransportBlocked(isSpectating(), m_spectatorLocalTransportOwner != nullptr)) return false;
     if (!canTrackLevel(levelId) && !canFinishTrackedLevel(levelId)) return false;
 
@@ -3902,6 +3902,8 @@ bool RankedRuntime::reportAttemptEnd(int levelId, double progressPercent, bool c
         .optimisticScore = optimisticScore,
         .optimisticClear = cleared ? 1 : 0,
         .nativeDeath = nativeDeath && !cleared,
+        // Restarts below 2% stay out of the log, so spamming Restart cannot flood it.
+        .restartDeath = corum::ranked::restartShowsInDeathLog(restart && !nativeDeath, cleared, finalProgress),
     };
 
     if (!m_attemptBacklog.empty()) {
@@ -3916,7 +3918,7 @@ bool RankedRuntime::reportAttemptEnd(int levelId, double progressPercent, bool c
         m_pendingEnd = end;
     }
 
-    if (end.nativeDeath) recordDeath({end.eventId, m_view.match.side, finalProgress, observedEndMillis}, contextKey);
+    if (end.nativeDeath || end.restartDeath) recordDeath({end.eventId, m_view.match.side, finalProgress, observedEndMillis}, contextKey);
     ++m_view.revision;
     // Do not leave a best-effort progress POST competing with the authoritative
     // End on iOS. Cancelling it is safe: End carries the exact final progress,
@@ -4169,7 +4171,10 @@ void RankedRuntime::sendAttemptEnd() {
     body["clientEventId"] = ending.eventId;
     body["progressPercent"] = ending.progressPercent;
     body["cleared"] = ending.cleared;
-    if (!isPlacement()) body["nativeDeath"] = ending.nativeDeath;
+    if (!isPlacement()) {
+        body["nativeDeath"] = ending.nativeDeath;
+        if (ending.restartDeath) body["restart"] = true;
+    }
     if (!ending.clientEndedAt.empty()) body["clientEndedAt"] = ending.clientEndedAt;
     auto const placement = isPlacement();
     auto request = baseRequest(m_sessionToken, placement ? std::string() : m_matchToken);

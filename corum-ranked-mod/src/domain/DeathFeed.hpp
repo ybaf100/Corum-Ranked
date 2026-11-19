@@ -7,6 +7,13 @@
 #include <vector>
 
 namespace corum::ranked {
+// A Restart (key or pause menu) while alive shows in the death log like a
+// death, but only from this progress on: spamming Restart at the start of a
+// map must not flood the log. The server applies the same floor.
+inline constexpr double RestartDeathMinimumPercent = 2.0;
+inline bool restartShowsInDeathLog(bool restarted, bool cleared, double progressPercent) {
+    return restarted && !cleared && std::isfinite(progressPercent) && progressPercent >= RestartDeathMinimumPercent;
+}
 struct DeathFeedEvent {
     std::string id, side;
     double progressPercent = 0;

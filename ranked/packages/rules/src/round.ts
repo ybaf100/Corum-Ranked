@@ -37,6 +37,8 @@ export interface RoundAttempt {
   valid: boolean;
   invalidReason: string | null;
   nativeDeath?: boolean;
+  /** A restart while alive at RESTART_DEATH_MINIMUM_PERCENT or more (death log only). */
+  restartDeath?: boolean;
 }
 
 export interface LastAttemptWindow {
