@@ -1,6 +1,7 @@
 #pragma once
 #include <matjson.hpp>
 #include <algorithm>
+#include <array>
 #include <string>
 #include <vector>
 
@@ -44,6 +45,41 @@ inline bool samePatchVersion(std::string a, std::string b) {
     auto const trim = [](std::string& v) { if (!v.empty() && (v[0] == 'v' || v[0] == 'V')) v.erase(0, 1); };
     trim(a); trim(b);
     return !a.empty() && a == b;
+}
+
+// Release order of "0.6.0-beta.87" (a leading v is ignored): major, minor,
+// patch, then the beta number (a release without one sorts after its betas).
+inline std::array<long,4> patchVersionOrder(std::string version) {
+    if (!version.empty() && (version[0] == 'v' || version[0] == 'V')) version.erase(0, 1);
+    std::array<long,4> order{-1, -1, -1, 1L << 30};
+    std::size_t at = 0;
+    for (int i = 0; i < 3; ++i) {
+        std::size_t used = 0;
+        try { order[static_cast<std::size_t>(i)] = std::stol(version.substr(at), &used); } catch (...) { return {-1, -1, -1, -1}; }
+        at += used;
+        if (i < 2) { if (at >= version.size() || version[at] != '.') return {-1, -1, -1, -1}; ++at; }
+    }
+    if (at < version.size()) {
+        auto const beta = version.find("beta.", at);
+        if (beta == std::string::npos) return order;
+        try { order[3] = std::stol(version.substr(beta + 5)); } catch (...) { order[3] = -1; }
+    }
+    return order;
+}
+
+// The releases after `from` up to and including `to`, newest first; only the
+// newest `limit` of them. An unknown `from` keeps everything up to `to`.
+inline std::vector<PatchNoteView> patchNotesBetween(std::vector<PatchNoteView> const& notes, std::string const& from, std::string const& to, std::size_t limit = 5) {
+    auto const low = patchVersionOrder(from), high = patchVersionOrder(to);
+    std::vector<PatchNoteView> result;
+    for (auto const& note : notes) {
+        auto const order = patchVersionOrder(note.version);
+        if (order[0] < 0 || (high[0] >= 0 && order > high) || (low[0] >= 0 && order <= low)) continue;
+        result.push_back(note);
+    }
+    std::sort(result.begin(), result.end(), [](auto const& a, auto const& b) { return patchVersionOrder(a.version) > patchVersionOrder(b.version); });
+    if (result.size() > limit) result.resize(limit);
+    return result;
 }
 
 } // namespace corum::ranked

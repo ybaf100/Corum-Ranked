@@ -34,6 +34,17 @@ int main() {
     assert(notes.size() == 30 && notes[0].en.size() == 40 && notes[0].en[0].size() == 400);
     assert(patchNotesFromJson(matjson::Value()).empty());
     assert(samePatchVersion("v0.6.0-beta.88", "0.6.0-beta.88") && !samePatchVersion("v0.6.0-beta.88", "0.6.0-beta.87") && !samePatchVersion("", ""));
+    // The update card: releases after the installed one up to the new one, newest five.
+    assert(patchVersionOrder("v0.6.0-beta.9") < patchVersionOrder("0.6.0-beta.10") && patchVersionOrder("0.6.0-beta.99") < patchVersionOrder("0.6.0"));
+    assert(patchVersionOrder("0.7.0-beta.1") > patchVersionOrder("0.6.0") && patchVersionOrder("junk")[0] == -1);
+    std::vector<PatchNoteView> all;
+    for (int n : {95, 94, 93, 92, 91, 90, 89, 88, 87}) all.push_back({"0.6.0-beta." + std::to_string(n), "", {"en"}, {"ko"}});
+    auto between = patchNotesBetween(all, "v0.6.0-beta.87", "v0.6.0-beta.90");
+    assert(between.size() == 3 && between[0].version == "0.6.0-beta.90" && between[2].version == "0.6.0-beta.88");
+    between = patchNotesBetween(all, "v0.6.0-beta.87", "v0.6.0-beta.95");
+    assert(between.size() == 5 && between[0].version == "0.6.0-beta.95" && between[4].version == "0.6.0-beta.91"); // newest five
+    assert(patchNotesBetween(all, "", "0.6.0-beta.89").size() == 3); // unknown installed version
+    assert(patchNotesBetween(all, "0.6.0-beta.95", "0.6.0-beta.95").empty());
 }
 `);
         execFileSync('g++', ['-std=c++23', '-Wall', '-Wextra', '-Werror', '-isystem', json + '/include', '-isystem', result, join(dir, 'test.cpp'),
@@ -42,21 +53,27 @@ int main() {
     } finally { rmSync(dir, {recursive: true, force: true}); }
 });
 
-test('the update screen shows the patch notes first; Settings opens them', () => {
+test('the update screen guide has 8 cards; the first is installed > new with the changes between', () => {
     const popup = read('src/RankedPopup.cpp');
     const update = popup.slice(popup.indexOf('void renderModUpdate()'), popup.indexOf('void onUpdateChannel(CCObject*)'));
-    assert.match(update, /tr\("patch-notes", "PATCH NOTES"\)[\s\S]*"ranked-update-patch-notes"_spr/);
-    // Opened once per target release, before the guide; never while it restarts.
-    assert.match(update, /!restart && !update\.targetVersion\.empty\(\) && m_patchNotesShownFor != update\.targetVersion/);
-    assert(update.indexOf('onPatchNotes(nullptr)') < update.indexOf('addGuideCarousel()'));
-    assert.match(popup, /RankedPatchNotesPopup::create\(target\)/);
+    assert.match(update, /addGuideCarousel\(corum::ranked::ui::GuidePatchCard\{update\.installedVersion, update\.targetVersion\}\);/);
+    assert.doesNotMatch(update, /RankedPatchNotesPopup/); // no popup on the update screen
+    // The resources screen keeps the 7 guide cards.
+    const resources = popup.slice(popup.indexOf('void renderResources()'), popup.indexOf('void renderPlacementPoolSelection('));
+    assert.match(resources, /addGuideCarousel\(\);/);
+    const carousel = read('src/ui/RankedGuideCarousel.hpp');
+    assert.match(carousel, /m_count = kGuideSlideCount \+ \(m_patch \? 1 : 0\);/);
+    assert.match(carousel, /kGuidePatchReleases = 5;/);
+    assert.match(carousel, /patchNotesBetween\(cache\.notes\(\), m_patch->from, m_patch->to, kGuidePatchReleases\)/);
+    assert.match(carousel, /fmt::format\("\{\}  >  \{\}", version\(patch\.from\), version\(patch\.to\)\)/);
+    assert.match(carousel, /CCLabelTTF::create\(\("\* " \+ line\)\.c_str\(\), patchNotesFont\(\)/);
+    // A new update starts on that card, which stays 12 s.
+    assert.match(carousel, /if \(m_patch && state\.patchTarget != m_patch->to\) \{ state\.patchTarget = m_patch->to; state\.index = 0; state\.elapsed = 0\.0f; \}/);
+    assert.match(carousel, /kGuidePatchSlideSeconds = 12\.0f;/);
+    // Settings still opens the full notes.
     const settings = read('src/ui/RankedSettingsPopup.hpp');
     assert.match(settings, /"ranked-settings-patch-notes"_spr/);
     assert.match(settings, /RankedPatchNotesPopup::create\(Mod::get\(\)->getVersion\(\)\.toVString\(\)\)/);
-    const notes = read('src/ui/RankedPatchNotesPopup.cpp');
-    // Any Korean: the system font, not the bundled atlas; KO / EN start in the UI language.
-    assert.match(notes, /CCLabelTTF::create\(\("- "\+line\)\.c_str\(\),noteFont\(\)/);
-    assert.match(notes, /return "Malgun Gothic";/);
-    assert.match(notes, /m_korean=corum::ranked::i18n::isKorean\(\);/);
+    assert.match(read('src/ui/RankedPatchNotesCache.hpp'), /return "Malgun Gothic";/);
     assert.match(read('src/RankedRuntime.cpp'), /patchNotesUrl\(\) const \{ return endpoint\("\/api\/ranked\/patch-notes"\); \}/);
 });

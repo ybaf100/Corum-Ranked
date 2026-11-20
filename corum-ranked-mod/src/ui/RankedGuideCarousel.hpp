@@ -3,7 +3,9 @@
 #include "RankedVisuals.hpp"
 #include "RankedTranslations.hpp"
 #include "ModeLobbyMotion.hpp"
+#include "RankedPatchNotesCache.hpp"
 #include <Geode/Geode.hpp>
+#include <optional>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -18,17 +20,26 @@ namespace corum::ranked::ui {
 inline constexpr float kGuideSlideSeconds = 5.0f;
 inline constexpr float kGuideOutSeconds = 0.25f, kGuideInSeconds = 0.30f, kGuideInDelay = 0.10f;
 inline constexpr int kGuideSlideCount = 7;
+// The update screen's first card: the installed and the new version with the
+// changes between them (the newest five releases), held longer.
+inline constexpr float kGuidePatchSlideSeconds = 12.0f;
+inline constexpr std::size_t kGuidePatchReleases = 5;
+struct GuidePatchCard { std::string from, to; };
 
 // Shared across screen rebuilds so a refresh does not restart the tour.
-struct GuideCarouselState { int index = 0; float elapsed = 0.0f; };
+struct GuideCarouselState { int index = 0; float elapsed = 0.0f; std::string patchTarget; };
 inline GuideCarouselState& guideCarouselState() { static GuideCarouselState state; return state; }
 
 class RankedGuideCarousel final : public cocos2d::CCNode {
-    std::array<cocos2d::CCNode*, kGuideSlideCount> m_slides {};
+    std::vector<cocos2d::CCNode*> m_slides;
     // One segment per slide: passed slides full, the current one fills over
     // its five seconds, the rest stay empty. Shows how many pages there are.
-    std::array<cocos2d::CCLayerColor*, kGuideSlideCount> m_tracks {};
-    std::array<cocos2d::CCLayerColor*, kGuideSlideCount> m_fills {};
+    std::vector<cocos2d::CCLayerColor*> m_tracks;
+    std::vector<cocos2d::CCLayerColor*> m_fills;
+    std::optional<GuidePatchCard> m_patch;
+    cocos2d::CCNode* m_patchBody = nullptr;
+    bool m_patchFilled = false;
+    int m_count = kGuideSlideCount;
     float m_segmentWidth = 24.0f;
     cocos2d::CCLabelBMFont* m_counter = nullptr;
     cocos2d::CCSize m_size;
@@ -164,8 +175,56 @@ class RankedGuideCarousel final : public cocos2d::CCNode {
         }
     }
 
-    bool init(cocos2d::CCSize size) {
+    // Card 1 on the update screen: "v1 > v2", then each release's changes
+    // (newest first) in the UI language, drawn with the system font.
+    void patchSlide(cocos2d::CCNode* s) {
+        auto const& patch = *m_patch;
+        auto const version = [](std::string const& v) { return v.empty() ? std::string("-") : v[0] == 'v' ? v : "v" + v; };
+        auto* title = text(s, fmt::format("{}  >  {}", version(patch.from), version(patch.to)), 30.0f, {16.0f, m_size.height - 46.0f}, Text, FontWeight::Black,
+            {0.0f, 0.5f}, m_size.width - 32.0f);
+        leanLabel(title);
+        m_patchBody = cocos2d::CCNode::create(); m_patchBody->setContentSize(m_size); s->addChild(m_patchBody, 5);
+        fillPatchSlide();
+    }
+    void fillPatchSlide() {
+        if (!m_patch || !m_patchBody || m_patchFilled) return;
+        auto& cache = RankedPatchNotesCache::get();
+        m_patchBody->removeAllChildrenWithCleanup(true);
+        if (!cache.loaded()) {
+            cache.fetch();
+            text(m_patchBody, cache.failed() ? i18n::text("patch-notes-unavailable", "PATCH NOTES UNAVAILABLE") : i18n::text("patch-notes-loading", "LOADING PATCH NOTES..."),
+                15.0f, {16.0f, m_size.height - 72.0f}, TextMuted, FontWeight::SemiBold);
+            return;
+        }
+        m_patchFilled = true;
+        auto const korean = i18n::isKorean();
+        auto const releases = patchNotesBetween(cache.notes(), m_patch->from, m_patch->to, kGuidePatchReleases);
+        auto const width = m_size.width - 40.0f, floor = 26.0f;
+        float y = m_size.height - 66.0f;
+        if (releases.empty()) { text(m_patchBody, i18n::text("patch-notes-none", "NO NOTES FOR THIS UPDATE"), 15.0f, {16.0f, y - 6.0f}, TextMuted, FontWeight::SemiBold); return; }
+        for (auto const& release : releases) {
+            if (y < floor + 12.0f) break;
+            auto* head = text(m_patchBody, "v" + release.version, 12.0f, {16.0f, y - 5.0f}, Accent, FontWeight::Black);
+            y -= head->getScaledContentSize().height + 3.0f;
+            for (auto const& line : release.lines(korean)) {
+                auto* body = cocos2d::CCLabelTTF::create(("* " + line).c_str(), patchNotesFont(), 8.0f, {width, 0}, cocos2d::kCCTextAlignmentLeft);
+                if (!body) continue;
+                auto const h = body->getContentSize().height;
+                // Whatever does not fit ends the card ("..."): the newest come first.
+                if (y - h < floor) { text(m_patchBody, "...", 13.0f, {24.0f, y - 4.0f}, TextMuted, FontWeight::Black); return; }
+                body->setAnchorPoint({0.0f, 1.0f}); body->setPosition({24.0f, y}); body->setColor({214, 218, 228});
+                m_patchBody->addChild(body, 5); y -= h + 2.0f;
+            }
+            y -= 4.0f;
+        }
+    }
+    float slideSeconds(int index) const { return m_patch && index == 0 ? kGuidePatchSlideSeconds : kGuideSlideSeconds; }
+
+    bool init(cocos2d::CCSize size, std::optional<GuidePatchCard> patch) {
         if (!CCNode::init()) return false;
+        m_patch = std::move(patch); m_count = kGuideSlideCount + (m_patch ? 1 : 0);
+        m_slides.assign(static_cast<std::size_t>(m_count), nullptr);
+        m_tracks.assign(static_cast<std::size_t>(m_count), nullptr); m_fills.assign(static_cast<std::size_t>(m_count), nullptr);
         m_size = size; setContentSize(size);
         setID("ranked-guide-carousel"_spr);
         // Panel (.panel.rule) and the HOW RANKED WORKS line with the counter.
@@ -183,18 +242,23 @@ class RankedGuideCarousel final : public cocos2d::CCNode {
             {"guide-survival-title", "SURVIVAL ROUNDS", "guide-survival-body", "Each round, players below the cut are eliminated until one remains. The round's first place finishes them with its equipped effect.", &RankedGuideCarousel::survival},
             {"guide-achievements-title", "ACHIEVEMENTS AND TITLES", "guide-achievements-body", "Achievements give AP, and an equipped title shows with your name. Survival round results become round badges.", &RankedGuideCarousel::achievements},
         }};
+        std::size_t first = 0;
+        if (m_patch) {
+            auto* slide = cocos2d::CCNode::create(); slide->setContentSize(size); slide->setID("ranked-guide-patch-notes"_spr); addChild(slide, 2);
+            patchSlide(slide); m_slides[0] = slide; first = 1;
+        }
         for (std::size_t i = 0; i < specs.size(); ++i) {
             auto* slide = cocos2d::CCNode::create();
             slide->setContentSize(size); addChild(slide, 2);
             writeCopy(slide, specs[i].titleKey, specs[i].titleFallback, specs[i].bodyKey, specs[i].bodyFallback);
             (this->*specs[i].diagram)(slide);
-            m_slides[i] = slide;
+            m_slides[first + i] = slide;
         }
         // Segmented progress bar under the text column; the arrows sit at the bottom right.
         constexpr float kGap = 4.0f;
         auto const available = std::max(70.0f, size.width - 16.0f - 84.0f);
-        m_segmentWidth = std::min(28.0f, (available - kGap * (kGuideSlideCount - 1)) / kGuideSlideCount);
-        for (int i = 0; i < kGuideSlideCount; ++i) {
+        m_segmentWidth = std::min(28.0f, (available - kGap * static_cast<float>(m_count - 1)) / static_cast<float>(m_count));
+        for (int i = 0; i < m_count; ++i) {
             auto const x = 16.0f + static_cast<float>(i) * (m_segmentWidth + kGap);
             m_tracks[static_cast<std::size_t>(i)] = box(this, x, 12.0f, m_segmentWidth, 3.0f, SurfaceSoft, 255, 3);
             m_fills[static_cast<std::size_t>(i)] = box(this, x, 12.0f, 0.0f, 3.0f, Accent, 255, 4);
@@ -209,7 +273,9 @@ class RankedGuideCarousel final : public cocos2d::CCNode {
             menu->addChild(item);
         }
         auto& state = guideCarouselState();
-        state.index = ((state.index % kGuideSlideCount) + kGuideSlideCount) % kGuideSlideCount;
+        // A new update starts on its patch notes card.
+        if (m_patch && state.patchTarget != m_patch->to) { state.patchTarget = m_patch->to; state.index = 0; state.elapsed = 0.0f; }
+        state.index = ((state.index % m_count) + m_count) % m_count;
         arrange();
         scheduleUpdate();
         return true;
@@ -218,7 +284,7 @@ class RankedGuideCarousel final : public cocos2d::CCNode {
     void go(int step) {
         auto& state = guideCarouselState();
         m_from = state.index; m_direction = step >= 0 ? 1 : -1;
-        state.index = ((state.index + step) % kGuideSlideCount + kGuideSlideCount) % kGuideSlideCount;
+        state.index = ((state.index + step) % m_count + m_count) % m_count;
         state.elapsed = 0.0f; m_switch = 0.0f;
     }
 
@@ -229,7 +295,7 @@ class RankedGuideCarousel final : public cocos2d::CCNode {
         auto const out = std::clamp(m_switch / kGuideOutSeconds, 0.0f, 1.0f);
         auto const in = std::clamp((m_switch - kGuideInDelay) / kGuideInSeconds, 0.0f, 1.0f);
         auto const inEase = 1.0f - (1.0f - in) * (1.0f - in) * (1.0f - in);
-        for (int i = 0; i < kGuideSlideCount; ++i) {
+        for (int i = 0; i < m_count; ++i) {
             auto* slide = m_slides[static_cast<std::size_t>(i)];
             float opacity = 0.0f, offset = 0.0f;
             if (i == state.index) { opacity = m_from < 0 ? 1.0f : inEase; offset = m_from < 0 ? 0.0f : 16.0f * (1.0f - inEase) * static_cast<float>(m_direction); }
@@ -238,17 +304,17 @@ class RankedGuideCarousel final : public cocos2d::CCNode {
             slide->setPositionX(offset);
             propagateModeOpacity(slide, static_cast<GLubyte>(std::lround(opacity * 255.0f)));
             auto const fill = i < state.index ? 1.0f : i > state.index ? 0.0f
-                : std::clamp(state.elapsed / kGuideSlideSeconds, 0.0f, 1.0f);
+                : std::clamp(state.elapsed / slideSeconds(i), 0.0f, 1.0f);
             m_fills[static_cast<std::size_t>(i)]->setContentSize({m_segmentWidth * fill, 3.0f});
         }
-        m_counter->setString(fmt::format("{:02} / {:02}", state.index + 1, kGuideSlideCount).c_str());
+        m_counter->setString(fmt::format("{:02} / {:02}", state.index + 1, m_count).c_str());
         if (m_from >= 0 && m_switch >= kGuideInDelay + kGuideInSeconds) m_from = -1;
     }
 
 public:
-    static RankedGuideCarousel* create(cocos2d::CCSize size) {
+    static RankedGuideCarousel* create(cocos2d::CCSize size, std::optional<GuidePatchCard> patch = std::nullopt) {
         auto* node = new RankedGuideCarousel;
-        if (node->init(size)) { node->autorelease(); return node; }
+        if (node->init(size, std::move(patch))) { node->autorelease(); return node; }
         delete node; return nullptr;
     }
     void onPrevious(cocos2d::CCObject*) { go(-1); }
@@ -257,7 +323,8 @@ public:
         auto& state = guideCarouselState();
         dt = std::min(dt, 0.1f);
         state.elapsed += dt; m_switch += dt;
-        if (state.elapsed >= kGuideSlideSeconds) go(1);
+        if (!m_patchFilled && RankedPatchNotesCache::get().loaded()) fillPatchSlide();
+        if (state.elapsed >= slideSeconds(state.index)) go(1);
         arrange();
     }
 };

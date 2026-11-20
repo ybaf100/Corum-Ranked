@@ -10,6 +10,15 @@ export interface PatchNote {
 
 export const PATCH_NOTES: readonly PatchNote[] = Object.freeze([
   {
+    version: "0.6.0-beta.89", date: "2026-11-20",
+    en: [
+      "Update screen: the guide now has 8 cards; the first shows your version > the new version with every change in between (the newest 5 releases).",
+    ],
+    ko: [
+      "업데이트 화면: 안내 카드가 8장이 되었고, 첫 카드에 현재 버전 > 새 버전과 그 사이의 변경사항을 모두 보여줍니다 (최근 5개 버전).",
+    ],
+  },
+  {
     version: "0.6.0-beta.88", date: "2026-11-20",
     en: [
       "Patch notes: open them from Settings, and they show first while an update downloads (English or Korean).",

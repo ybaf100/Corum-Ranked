@@ -3,6 +3,7 @@
 #include "RankedTranslations.hpp"
 #include "RankedPopupLayout.hpp"
 #include "../RankedRuntime.hpp"
+#include "RankedPatchNotesCache.hpp"
 #include <Geode/ui/ScrollLayer.hpp>
 #include <chrono>
 
@@ -10,17 +11,6 @@ using namespace geode::prelude;
 namespace corum::ranked::ui {
 namespace {
 constexpr float Width=460, Height=270, Pad=12;
-// Notes are any server text, so they are drawn with the system font (the
-// bundled bitmap fonts only hold the UI's own Korean syllables).
-char const* noteFont() {
-#if defined(GEODE_IS_WINDOWS)
-    return "Malgun Gothic";
-#elif defined(GEODE_IS_MACOS) || defined(GEODE_IS_IOS)
-    return "AppleSDGothicNeo-Regular";
-#else
-    return "sans-serif";
-#endif
-}
 CCNode* segmentFace(std::string const& value,float width,bool on) {
     auto* face=surface({width,18},{},on?Accent:Steel,on?Accent:SurfaceRaised,255,true);
     auto* label=menuLabel(value,.21f,{width/2,9},on?AccentInk:TextMuted,FontWeight::ExtraBold);
@@ -96,7 +86,7 @@ void RankedPatchNotesPopup::render() {
         head->setAnchorPoint({0,1});fitSingleLineMenuLabel(head,viewW-8,16,.27f);
         items.push_back(head);gaps.push_back(items.size()==1?0:10);total+=gaps.back()+head->getScaledContentSize().height;
         for(auto const& line:note.lines(m_korean)){
-            auto* text=CCLabelTTF::create(("- "+line).c_str(),noteFont(),8.5f,{viewW-16,0},kCCTextAlignmentLeft);
+            auto* text=CCLabelTTF::create(("- "+line).c_str(),patchNotesFont(),8.5f,{viewW-16,0},kCCTextAlignmentLeft);
             if(!text)continue;
             text->setAnchorPoint({0,1});text->setColor(mine?Text:ccColor3B{200,204,214});
             items.push_back(text);gaps.push_back(3);total+=3+text->getContentSize().height;

@@ -4186,5 +4186,17 @@
   "patch-notes": {
     "en": "PATCH NOTES",
     "ko": "패치 노트"
+  },
+  "patch-notes-loading": {
+    "en": "LOADING PATCH NOTES...",
+    "ko": "패치 노트를 불러오는 중..."
+  },
+  "patch-notes-unavailable": {
+    "en": "PATCH NOTES UNAVAILABLE",
+    "ko": "패치 노트를 불러오지 못했습니다"
+  },
+  "patch-notes-none": {
+    "en": "NO NOTES FOR THIS UPDATE",
+    "ko": "이번 업데이트의 패치 노트가 없습니다"
   }
 }
