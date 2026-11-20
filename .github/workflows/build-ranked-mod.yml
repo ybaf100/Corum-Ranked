@@ -61,7 +61,10 @@ jobs:
         config:
           # Windows, iOS, Android32 and Android64 only for now (macOS paused).
           - name: Windows
-            os: windows-latest
+            # windows-latest moved to an image (windows-2025-vs2026 20261116) on
+            # which the bindings codegen configure fails (PEGTL's std::filesystem
+            # check falls back to a missing Boost); builds on 20261103 passed.
+            os: windows-2022
             target: Win64
           - name: iOS
             os: macos-latest
