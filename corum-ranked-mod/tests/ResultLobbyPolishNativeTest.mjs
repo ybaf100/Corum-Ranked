@@ -130,5 +130,7 @@ test('a restarted attempt records and restores the collision state its reset kep
     // Live gameplay is never changed: the capture only reads.
     const capture = cbf.slice(cbf.indexOf('Json captureCbfInitialCollisions('), cbf.indexOf('bool cbfInitialLogsKept('));
     assert.doesNotMatch(capture, /setObject|removeAllObjects|m_lastCollision\w+\s*=/);
-    assert.match(capture, /typeinfo_cast<GameObject\*>\(element->getObject\(\)\)\)!=object\.instance\)return nullptr/);
+    assert.match(capture, /typeinfo_cast<GameObject\*>\(entryObject\)\)!=object\.instance\)return nullptr/);
+    // Geode v5 removed CCDICT_FOREACH (a static_assert): iterate with CCDictionaryExt.
+    assert.doesNotMatch(cbf, /CCDICT_FOREACH/);
 });

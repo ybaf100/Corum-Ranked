@@ -449,13 +449,13 @@ Json captureCbfInitialCollisions(PlayLayer* layer){
         }
         for(auto* log:collisionLogs(p)){
             auto entries=Json::array();
-            if(log){CCDictElement* element=nullptr;CCDICT_FOREACH(log,element){
-                auto const key=static_cast<int>(element->getIntKey());auto at=world.identities.index(key);if(!at)return nullptr;
+            if(log)for(auto [entryKey,entryObject]:CCDictionaryExt<intptr_t,CCObject*>(log)){
+                auto const key=static_cast<int>(entryKey);auto at=world.identities.index(key);if(!at)return nullptr;
                 auto const object=collisionObject(layer,*at);
                 // Only a log entry that is exactly that map object is reproducible.
-                if(reinterpret_cast<std::uintptr_t>(typeinfo_cast<GameObject*>(element->getObject()))!=object.instance)return nullptr;
+                if(reinterpret_cast<std::uintptr_t>(typeinfo_cast<GameObject*>(entryObject))!=object.instance)return nullptr;
                 auto ref=world.identities.initialReference(key,object,actor,0,false);if(!ref)return nullptr;entries.push(*ref);
-            }}
+            }
             kept.push(entries);
         }
         targets.push(sides);logs.push(kept);
