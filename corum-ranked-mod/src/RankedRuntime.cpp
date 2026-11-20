@@ -634,6 +634,7 @@ std::string RankedRuntime::leaderboardUrl(int offset, int limit, RankedMode mode
 }
 
 std::string RankedRuntime::tierGuideUrl() const { return endpoint("/api/ranked/leaderboard/tiers"); }
+std::string RankedRuntime::patchNotesUrl() const { return endpoint("/api/ranked/patch-notes"); }
 
 std::string RankedRuntime::eliminationEffectsUrl(bool equip) const {
     return endpoint(equip ? "/api/ranked/cosmetics/elimination/equip" : "/api/ranked/cosmetics/elimination");

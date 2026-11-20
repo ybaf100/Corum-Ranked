@@ -4182,5 +4182,9 @@
   "mode-key-hint": {
     "en": "KEY",
     "ko": "KEY"
+  },
+  "patch-notes": {
+    "en": "PATCH NOTES",
+    "ko": "패치 노트"
   }
 }

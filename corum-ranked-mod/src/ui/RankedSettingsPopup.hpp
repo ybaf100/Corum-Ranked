@@ -7,6 +7,7 @@
 #include "RankedTranslations.hpp"
 #include "RankedVisuals.hpp"
 #include "RankedCreditsPopup.hpp"
+#include "RankedPatchNotesPopup.hpp"
 #include "RankedPopupLayout.hpp"
 #include "RankedConfirmPopup.hpp"
 #include "RankedBoardSlider.hpp"
@@ -126,6 +127,9 @@ class RankedSettingsPopup final : public Popup {
         // Title row (44 px): .pttl and .xbtn.
         if(auto* title=add(i18n::text("settings","Settings"),{kPad,275},240,28.f/64.f,Text,FontWeight::Black))leanLabel(title);
         button(closeFace(),menu_selector(RankedSettingsPopup::onClose),{kRight-11,275})->setID("ranked-settings-close"_spr);
+        // PATCH NOTES left of X (this version's notes first, KO / EN).
+        {auto* notes=button(ghostFace(i18n::text("patch-notes","PATCH NOTES")),menu_selector(RankedSettingsPopup::onPatchNotes),{0,0});
+         notes->setPosition({kRight-22-6-notes->getContentSize().width/2,275});notes->setID("ranked-settings-patch-notes"_spr);}
         // Language row: caption column and .lang (two 48 x 44 px cells).
         add(i18n::text("settings-language","Language"),{kPad,251},200,label,Text);
         add(i18n::text("settings-language-scope","Ranked screen language"),{kPad,240},200,caption,TextMuted,FontWeight::SemiBold);
@@ -233,6 +237,10 @@ class RankedSettingsPopup final : public Popup {
         i18n::setLanguage(korean?i18n::Language::Korean:i18n::Language::English);m_dirty=true;
         [[maybe_unused]] Ref<RankedSettingsPopup> keepAlive(this);
         auto hook=m_hooks.languageChanged;dismiss();if(hook)hook();
+    }
+    void onPatchNotes(CCObject*){
+        if(m_closed)return;
+        if(auto* popup=RankedPatchNotesPopup::create(Mod::get()->getVersion().toVString()))popup->show();
     }
     void onUpdateChannel(CCObject*){
         if(m_closed)return;

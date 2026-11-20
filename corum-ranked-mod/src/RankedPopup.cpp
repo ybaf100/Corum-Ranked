@@ -50,6 +50,7 @@
 #include "ui/RankedAchievementGradePopup.hpp"
 #include "ui/RankedTapScroll.hpp"
 #include "ui/RankedTierGuidePopup.hpp"
+#include "ui/RankedPatchNotesPopup.hpp"
 #include "ui/HudEditorPopup.hpp"
 #include "ui/PlacementGradeBadge.hpp"
 #include "ui/PlayerIcon.hpp"
@@ -598,6 +599,9 @@ class CorumRankedLayer final : public CCLayerColor {
     std::optional<WeakRef<corum::ranked::ui::RankedHistoryFilterPopup>> m_historyFilterPopup;
     bool m_historyReconnectShown=false;
     std::optional<WeakRef<corum::ranked::ui::RankedUpdateChannelPopup>> m_updateChannelPopup;
+    std::optional<WeakRef<corum::ranked::ui::RankedPatchNotesPopup>> m_patchNotes;
+    // The update screen opens the patch notes once per target release.
+    std::string m_patchNotesShownFor;
     std::optional<float> m_historyListOffset;
     corum::ranked::SurvivalSelectionContext m_historyThumbnailContext;
     std::uint64_t m_historyThumbnailGeneration=0;
@@ -2190,6 +2194,16 @@ class CorumRankedLayer final : public CCLayerColor {
         addGateHeader("RANKED", "", busy ? tr("mod-updating", "UPDATING") : tr("mod-update", "MOD UPDATE"), corum::ranked::ui::AccentFill, corum::ranked::ui::AccentInk, corum::ranked::ui::Accent);
         boardButton(corum::ranked::ui::RankedModUpdateManager::get().channel() == "debug" ? "DEBUG" : "RELEASE", {72.0f, px(34.0f)},
             {size.width - px(28.0f) - 36.0f, size.height - kLobbyHeader / 2.0f}, menu_selector(CorumRankedLayer::onUpdateChannel), 13.0f, false, "ranked-update-channel"_spr, !busy && !restart);
+        // PATCH NOTES beside the channel chip; they open first, once per release.
+        boardButton(tr("patch-notes", "PATCH NOTES"), {96.0f, px(34.0f)}, {size.width - px(28.0f) - 72.0f - 8.0f - 48.0f, size.height - kLobbyHeader / 2.0f},
+            menu_selector(CorumRankedLayer::onPatchNotes), 13.0f, false, "ranked-update-patch-notes"_spr);
+        if (!restart && !update.targetVersion.empty() && m_patchNotesShownFor != update.targetVersion) {
+            m_patchNotesShownFor = update.targetVersion;
+            queueInMainThread([weak = WeakRef(this)] {
+                auto owner = weak.lock();
+                if (owner && owner->isRunning() && RankedRuntime::get().view().stage == RuntimeStage::AwaitingUpdate) owner->onPatchNotes(nullptr);
+            });
+        }
         addGuideCarousel();
         auto const message = restart ? tr("mod-restart-ready", "Update installed. Press Restart to apply it.") :
             !update.error.empty() ? update.error : busy ? tr("mod-verifying", "Downloading and verifying the mod...") :
@@ -2217,6 +2231,14 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     void onUpdateChannel(CCObject*){openUpdateChannel(true);}
+    // The update screen marks the release being installed.
+    void onPatchNotes(CCObject*) {
+        if (m_patchNotes) if (auto popup = m_patchNotes->lock(); popup && popup->getParent()) return;
+        m_patchNotes.reset();
+        auto const& update = corum::ranked::ui::RankedModUpdateManager::get().view();
+        auto const target = RankedRuntime::get().view().stage == RuntimeStage::AwaitingUpdate ? update.targetVersion : Mod::get()->getVersion().toVString();
+        if (auto* popup = corum::ranked::ui::RankedPatchNotesPopup::create(target)) { m_patchNotes.emplace(popup); popup->show(); }
+    }
     // The update screen's channel chip, or Settings' UPDATE CHANNEL button
     // (any stage): a new channel restarts the runtime, which gates entry on
     // that channel's package.

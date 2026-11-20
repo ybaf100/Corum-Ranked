@@ -13,6 +13,7 @@ import { MatchModule } from "./match/match.module.js";
 import { DebugBotModule } from "./debug-bot/debug-bot.module.js";
 import { DebugSpectateModule } from "./debug-spectate/debug-spectate.module.js";
 import { LeaderboardModule } from "./leaderboard/leaderboard.module.js";
+import { PatchNotesModule } from "./patch-notes/patch-notes.module.js";
 import { LiveModule } from "./live/live.module.js";
 import { PlacementModule } from "./placement/placement.module.js";
 import { AchievementModule } from "./achievement/achievement.module.js";
@@ -36,6 +37,7 @@ import { CosmeticsModule } from "./cosmetics/cosmetics.module.js";
     DebugLogsModule,
     DebugSpectateModule,
     LeaderboardModule,
+    PatchNotesModule,
     LiveModule,
     PlacementModule,
     AchievementModule,
