@@ -425,3 +425,74 @@ class $modify(CorumCbfReplayNativeWorld,GJBaseGameLayer){
     }
 #endif
 };
+
+// Kept collision state of a restarted attempt (outside the CBF boundary
+// fixture that compiles this file up to the hook classes).
+namespace corum::ranked::replay {
+namespace {
+std::array<CCDictionary*,4> collisionLogs(PlayerObject* p){return {p->m_collisionLogTop,p->m_collisionLogBottom,p->m_collisionLogLeft,p->m_collisionLogRight};}
+}
+// {"targets": [[bottom, top, left, right] x2], "logs": [[[ref...] top, bottom, left, right] x2]}:
+// each target and each log key (a collided object's uniqueID) by map reference.
+Json captureCbfInitialCollisions(PlayLayer* layer){
+    if(!layer)return nullptr;
+    auto& world=collisionWorld();if(world.owner!=layer||!world.error.empty())return nullptr;
+    auto targets=Json::array(),logs=Json::array();
+    for(int actor=0;actor<2;++actor){
+        auto* p=actor?layer->m_player2:layer->m_player1;auto sides=Json::array(),kept=Json::array();
+        if(!p){for(int side=0;side<4;++side){sides.push(-1);kept.push(Json::array());}targets.push(sides);logs.push(kept);continue;}
+        auto raw=collisionRaw(p);
+        for(int side=0;side<4;++side){
+            auto at=raw[side]==-1?std::nullopt:world.identities.index(raw[side]);
+            auto ref=world.identities.initialReference(raw[side],at?collisionObject(layer,*at):ReplayCollisionIdentity::Object{},actor,side);
+            if(!ref)return nullptr;sides.push(*ref);
+        }
+        for(auto* log:collisionLogs(p)){
+            auto entries=Json::array();
+            if(log){CCDictElement* element=nullptr;CCDICT_FOREACH(log,element){
+                auto const key=static_cast<int>(element->getIntKey());auto at=world.identities.index(key);if(!at)return nullptr;
+                auto const object=collisionObject(layer,*at);
+                // Only a log entry that is exactly that map object is reproducible.
+                if(reinterpret_cast<std::uintptr_t>(typeinfo_cast<GameObject*>(element->getObject()))!=object.instance)return nullptr;
+                auto ref=world.identities.initialReference(key,object,actor,0,false);if(!ref)return nullptr;entries.push(*ref);
+            }}
+            kept.push(entries);
+        }
+        targets.push(sides);logs.push(kept);
+    }
+    Json result;result["targets"]=targets;result["logs"]=logs;return result;
+}
+bool cbfInitialLogsKept(Json const& cbfInitial){
+    for(auto const& player:cbfInitial["players"].asArray().unwrapOr(std::vector<Json>{}))
+        for(auto const& count:player["collisionLogs"].asArray().unwrapOr(std::vector<Json>{}))if(count.asInt().unwrapOr(0)>0)return true;
+    return false;
+}
+std::string restoreCbfInitialCollisions(PlayLayer* layer,Json const& value){
+    constexpr char const* Unavailable="INITIAL_COLLISION_IDENTITY_UNAVAILABLE";
+    if(!layer||!value["targets"].isArray()||value["targets"].size()!=2||!value["logs"].isArray()||value["logs"].size()!=2)return Unavailable;
+    auto& world=collisionWorld();if(world.owner!=layer||!world.error.empty())return Unavailable;
+    auto resolve=[&](Json const& ref,int actor,int side,bool witness=true)->std::optional<int>{
+        auto const target=ref.isArray()?collisionObject(layer,static_cast<std::size_t>(ref[0].asInt().unwrapOr(-1))):ReplayCollisionIdentity::Object{};
+        return world.identities.initialRuntime(ref,target,actor,side,witness);
+    };
+    for(int actor=0;actor<2;++actor){
+        auto const& sides=value["targets"][static_cast<std::size_t>(actor)];auto const& kept=value["logs"][static_cast<std::size_t>(actor)];
+        if(!sides.isArray()||sides.size()!=4||!kept.isArray()||kept.size()!=4)return Unavailable;
+        auto* p=actor?layer->m_player2:layer->m_player1;
+        std::array<int,4> raw{-1,-1,-1,-1};
+        for(int side=0;side<4;++side){auto runtime=resolve(sides[static_cast<std::size_t>(side)],actor,side);if(!runtime)return Unavailable;raw[static_cast<std::size_t>(side)]=*runtime;}
+        if(!p){if(raw!=std::array<int,4>{-1,-1,-1,-1})return Unavailable;for(auto const& entries:kept)if(entries.size())return Unavailable;continue;}
+        auto logs=collisionLogs(p);
+        for(std::size_t side=0;side<4;++side){
+            if(!kept[side].isArray()||(kept[side].size()&&!logs[side]))return Unavailable;
+            for(auto const& ref:kept[side]){
+                auto runtime=resolve(ref,actor,0,false);if(!runtime||*runtime<0)return Unavailable;
+                auto* object=reinterpret_cast<GameObject*>(collisionObject(layer,static_cast<std::size_t>(ref[0].asInt().unwrap())).instance);
+                logs[side]->setObject(object,*runtime);
+            }
+        }
+        p->m_lastCollisionBottom=raw[0];p->m_lastCollisionTop=raw[1];p->m_lastCollisionLeft=raw[2];p->m_lastCollisionRight=raw[3];
+    }
+    return {};
+}
+} // namespace corum::ranked::replay

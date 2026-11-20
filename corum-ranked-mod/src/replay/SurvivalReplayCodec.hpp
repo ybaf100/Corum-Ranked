@@ -87,6 +87,12 @@ inline std::string replayInitialDataProblem(Json const& initial){
     if(number(initial,"timeWarp")<=0||number(initial,"attemptTime")<0||number(initial,"levelTime")<0)return "INITIAL_CLOCK_INVALID";
     return {};
 }
+// A Native reset keeps the previous attempt's collision targets.
+inline bool replayInitialKeepsCollisions(Json const& initial){
+    for(auto actor:{"player1","player2"})if(!initial[actor].isNull())
+        for(auto key:{"m_lastCollisionBottom","m_lastCollisionTop","m_lastCollisionLeft","m_lastCollisionRight"})if(integer(initial[actor],key)!=-1)return true;
+    return false;
+}
 inline bool cbfInitialDataValid(Json const& value){
     if(!value["objects"].isNull()&&!replayCollisionManifestValid(value["objects"]))return false;
     if(integer(value,"schema")!=CbfBoundarySchema||!value["players"].isArray()||value["players"].size()!=2)return false;

@@ -11,6 +11,7 @@
 #include <vector>
 namespace corum::ranked::replay {
 using CollisionJson=matjson::Value;
+inline bool replayCollisionReferenceValid(CollisionJson const& value);
 // Runtime integers are never interpreted from their magnitude. The adapter
 // must observe a real Native collision candidate AND its collision dictionary
 // key matching that candidate's uniqueID before a reference is usable.
@@ -83,6 +84,27 @@ public:
         if(player<0||player>1||side<0||side>3||raw<0||!at||!m_witnessed.contains(witnessKey(raw,player,side))){m_error="CBF_COLLISION_IDENTITY_UNPROVEN";return std::nullopt;}
         if(!current(*at,actual)){m_error="CBF_COLLISION_OBJECT_REPLACED";return std::nullopt;}
         auto result=CollisionJson::array();result.push(static_cast<std::int64_t>(*at));result.push(actual.definition[0]);return result;
+    }
+    // A Native reset keeps the last attempt's collision targets (GD does not
+    // clear them; a fresh PlayLayer starts at -1). At an attempt's initial
+    // boundary each one is recorded by its unique map index, and is witnessed
+    // for the attempt's own comparisons. Playback resolves the same index in
+    // its own world. Ambiguous or replaced objects fail closed (nullopt).
+    std::optional<CollisionJson> initialReference(int raw,Object const& actual,int player,int side,bool witness=true){
+        if(raw==-1)return CollisionJson(-1);
+        auto at=index(raw);
+        if(player<0||player>1||side<0||side>3||raw<0||!at||!current(*at,actual)||actual.runtimeId!=raw||!actual.definition.isArray()||actual.definition.size()==0)return std::nullopt;
+        if(witness)m_witnessed.insert(witnessKey(raw,player,side));
+        auto result=CollisionJson::array();result.push(static_cast<std::int64_t>(*at));result.push(actual.definition[0]);return result;
+    }
+    std::optional<int> initialRuntime(CollisionJson const& reference,Object const& actual,int player,int side,bool witness=true){
+        if(reference.isNumber()&&reference.asInt().unwrapOr(-2)==-1)return -1;
+        if(!replayCollisionReferenceValid(reference)||player<0||player>1||side<0||side>3)return std::nullopt;
+        auto const at=static_cast<std::size_t>(reference[0].asInt().unwrap());
+        if(!current(at,actual)||actual.runtimeId<0||!actual.definition.isArray()||actual.definition.size()==0||actual.definition[0]!=reference[1])return std::nullopt;
+        if(auto unique=index(actual.runtimeId);!unique||*unique!=at)return std::nullopt;
+        if(witness)m_witnessed.insert(witnessKey(actual.runtimeId,player,side));
+        return actual.runtimeId;
     }
     std::string const& error()const{return m_error;}
 private:

@@ -114,6 +114,20 @@ int main(){
    assert(dupSource.reference(2166,{11,2166,descriptor})!=dupTarget.reference(2600,{22,2600,descriptor}));}
   target.reset({{21,2599,descriptor},{22,2599,other}});assert(!target.witness(2599,0,true,true,{21,2599,descriptor}));
  }
+ // A restarted attempt keeps the last attempt's collision target: recorded by
+ // map index (and witnessed for the attempt), resolved to this world's ID.
+ {ReplayCollisionIdentity source,target;auto descriptor=Json::array();descriptor.push(1);descriptor.push(30);auto other=descriptor;other[1]=60;
+  source.reset({{11,2166,descriptor},{12,2167,other}});target.reset({{21,2599,descriptor},{22,2600,other}});
+  assert(source.initialReference(-1,{},0,0)==Json(-1));
+  auto kept=source.initialReference(2167,{12,2167,other},0,1);assert(kept&&source.reference(2167,{12,2167,other},0,1)==*kept);
+  assert(!source.initialReference(2167,{11,2166,descriptor},0,1)); // not that object
+  assert(!source.initialReference(4242,{},0,0));                    // not in the map
+  auto runtime=target.initialRuntime(*kept,{22,2600,other},0,1);assert(runtime&&*runtime==2600&&target.reference(2600,{22,2600,other},0,1)==*kept);
+  assert(target.initialRuntime(Json(-1),{},0,0)==-1);
+  assert(!target.initialRuntime(*kept,{21,2599,descriptor},0,1));   // another object at playback
+  auto noWitness=source.initialReference(2166,{11,2166,descriptor},1,2,false);assert(noWitness&&!source.reference(2166,{11,2166,descriptor},1,2));
+  ReplayCollisionIdentity ambiguous;ambiguous.reset({{31,77,descriptor},{32,77,other}});assert(!ambiguous.initialReference(77,{31,77,descriptor},0,0));
+ }
  std::ofstream("${dir}/cbf.bin")<<"CBF fixture binary, not the real GD mod";
 #if defined(GEODE_IS_WINDOWS)
  state().slerpAddress=reinterpret_cast<std::uintptr_t>(&baseSlerp);

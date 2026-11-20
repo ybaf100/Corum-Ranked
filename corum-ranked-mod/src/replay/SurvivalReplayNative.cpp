@@ -143,7 +143,8 @@ public:
         if(problem.empty()&&corum::ranked::replay::replayWorldOptionsValid(initial["worldOptions"]))m_skipCameraShake=initial["worldOptions"]["disableShake"].asBool().unwrap();
         if(problem.empty())problem=corum::ranked::replay::replayPlayerStateProblem(m_player1,initial["player1"],replayWorldReferences(this,m_player1));
         if(problem.empty())problem=corum::ranked::replay::replayPlayerStateProblem(m_player2,initial["player2"],replayWorldReferences(this,m_player2));
-        if(problem.empty()&&replay->cbf())for(auto actor:{"player1","player2"})if(!initial[actor].isNull())for(auto key:{"m_lastCollisionBottom","m_lastCollisionTop","m_lastCollisionLeft","m_lastCollisionRight"})if(corum::ranked::replay::integer(initial[actor],key)!=-1)problem="INITIAL_COLLISION_IDENTITY_UNAVAILABLE";
+        // Kept targets need their recorded map references (older captures had none).
+        if(problem.empty()&&replay->cbf()&&corum::ranked::replay::replayInitialKeepsCollisions(initial)&&!initial["initialCollisions"].isObject())problem="INITIAL_COLLISION_IDENTITY_UNAVAILABLE";
         if(problem.empty()&&replay->cbf())problem=corum::ranked::replay::prepareCbfInitialCollisionLogs(this,initial["cbfInitial"],m_fields->replayOwned||m_fields->liveWorldOwned);
         if(problem.empty()&&replay->cbf())problem=corum::ranked::replay::validateCbfInitial(this,initial["cbfInitial"]);
         if(!problem.empty()){
@@ -165,6 +166,9 @@ public:
         corum::ranked::replay::applyReplayPlayerState(m_player1,initial["player1"]);corum::ranked::replay::applyReplayPlayerState(m_player2,initial["player2"]);
         auto const queued=initial["queued"].asArray().unwrap();m_queuedButtons.clear();for(auto const& value:queued)m_queuedButtons.push_back(corum::ranked::replay::decodeReplayButton<PlayerButtonCommand>(value));
         if(replay->cbf())corum::ranked::replay::restoreCbfInitial(this,initial["cbfInitial"]);
+        // The snapshot holds the source session's runtime IDs: point them at this world's objects.
+        if(replay->cbf()&&initial["initialCollisions"].isObject())
+            if(auto collisions=corum::ranked::replay::restoreCbfInitialCollisions(this,initial["initialCollisions"]);!collisions.empty()){replay->reject(collisions);return;}
         m_fields->desyncReported=false;saveReplayCamera();
     }
     void resetReplayTrace(){m_fields->trace=Json::array();m_fields->playerUpdates={};}
@@ -382,7 +386,13 @@ public:
         initial["queued"]=corum::ranked::replay::encodeReplayButtons(m_queuedButtons);initial["timestamp"]=m_timestamp;
         initial["timeWarp"]=play->m_gameState.m_timeWarp;initial["dual"]=play->m_gameState.m_isDualMode;
         initial["clickBetweenSteps"]=m_clickBetweenSteps;initial["clickOnSteps"]=m_clickOnSteps;initial["isBetweenSteps"]=m_isBetweenSteps;
-        initial["started"]=play->m_started;initial["inResetDelay"]=play->m_inResetDelay;initial["attemptTime"]=play->m_attemptTime;initial["levelTime"]=static_cast<double>(play->m_gameState.m_levelTime);initial["extraDelta"]=m_extraDelta;initial["nativeStep"]=m_currentStep;initial["resumeTimer"]=m_resumeTimer;initial["pose"]=replayPose(play);auto problem=corum::ranked::replay::replayInitialDataProblem(initial);if(problem.empty()&&recorder.cbfCapture())for(auto actor:{"player1","player2"})if(!initial[actor].isNull())for(auto key:{"m_lastCollisionBottom","m_lastCollisionTop","m_lastCollisionLeft","m_lastCollisionRight"})if(corum::ranked::replay::integer(initial[actor],key)!=-1)problem="INITIAL_COLLISION_IDENTITY_UNAVAILABLE";if(problem.empty()&&recorder.cbfCapture()&&!corum::ranked::replay::cbfInitialDataValid(initial["cbfInitial"]))problem="CBF_INITIAL_STATE_UNAVAILABLE";if(!problem.empty())recorder.unsupported(problem);else recorder.add(initial);
+        initial["started"]=play->m_started;initial["inResetDelay"]=play->m_inResetDelay;initial["attemptTime"]=play->m_attemptTime;initial["levelTime"]=static_cast<double>(play->m_gameState.m_levelTime);initial["extraDelta"]=m_extraDelta;initial["nativeStep"]=m_currentStep;initial["resumeTimer"]=m_resumeTimer;initial["pose"]=replayPose(play);auto problem=corum::ranked::replay::replayInitialDataProblem(initial);if(problem.empty()&&recorder.cbfCapture()&&(corum::ranked::replay::replayInitialKeepsCollisions(initial)||corum::ranked::replay::cbfInitialLogsKept(initial["cbfInitial"]))){
+          // A restarted attempt starts with the collision state the reset kept (a fresh level starts
+          // empty): record it by map object; playback restores it after clearing the logs.
+          auto kept=corum::ranked::replay::captureCbfInitialCollisions(play);
+          if(kept.isNull())problem="INITIAL_COLLISION_IDENTITY_UNAVAILABLE";
+          else{initial["initialCollisions"]=kept;auto& players=initial["cbfInitial"]["players"];
+            for(std::size_t i=0;i<players.size();++i)if(players[i].isObject()){auto zeros=matjson::Value::array();for(int side=0;side<4;++side)zeros.push(0);players[i]["collisionLogs"]=zeros;}}}if(problem.empty()&&recorder.cbfCapture()&&!corum::ranked::replay::cbfInitialDataValid(initial["cbfInitial"]))problem="CBF_INITIAL_STATE_UNAVAILABLE";if(!problem.empty())recorder.unsupported(problem);else recorder.add(initial);
       }
       if(recorder.active()&&recorder.physicsEnvironmentUnchanged()){corum::ranked::replay::beginNativeInputClock(play);if(recorder.cbfCapture()){corum::ranked::replay::beginCbfNativeFrame(play);cbfFrameBegan=true;}replay->resetReplayTrace();corum::ranked::beginNativeWorldEventCapture(play);recorder.nativeFrameBegin();frameBegan=true;frameAttempt=recorder.currentAttemptId();frameClockGeneration=corum::ranked::replay::nativeInputClockGeneration();recorder.elapsed(play->m_attemptTime);matjson::Value frame;frame["kind"]="frame";frame["dt"]=static_cast<double>(dt);frame["queued"]=corum::ranked::replay::encodeReplayButtons(m_queuedButtons);frame["preInputs"]=recorder.takePreInputs();recorder.add(frame);}
     }

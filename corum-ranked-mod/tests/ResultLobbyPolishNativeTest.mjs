@@ -117,3 +117,18 @@ int main() {
     assert.match(runtime, /sur\.promotionRules\.push_back\(\{band\["tier"\]/);
     assert.match(runtime, /root\["promotionFailurePenaltyLp"\]/);
 });
+
+test('a restarted attempt records and restores the collision state its reset kept', () => {
+    const native = read('src/replay/SurvivalReplayNative.cpp'), cbf = read('src/replay/SurvivalReplayCbfNative.cpp');
+    // Source: no longer refused; the kept targets/log keys are recorded by map object.
+    assert.match(native, /replayInitialKeepsCollisions\(initial\)\|\|corum::ranked::replay::cbfInitialLogsKept\(initial\["cbfInitial"\]\)/);
+    assert.match(native, /initial\["initialCollisions"\]=kept;/);
+    // Playback: older captures without the record still fail closed; new ones are restored after the snapshot.
+    assert.match(native, /replayInitialKeepsCollisions\(initial\)&&!initial\["initialCollisions"\]\.isObject\(\)\)problem="INITIAL_COLLISION_IDENTITY_UNAVAILABLE"/);
+    const reset = native.slice(native.indexOf('void resetReplayInitial()'), native.indexOf('void resetReplayTrace()'));
+    assert(reset.indexOf('applyReplayPlayerState(m_player1') < reset.indexOf('restoreCbfInitialCollisions(this'));
+    // Live gameplay is never changed: the capture only reads.
+    const capture = cbf.slice(cbf.indexOf('Json captureCbfInitialCollisions('), cbf.indexOf('bool cbfInitialLogsKept('));
+    assert.doesNotMatch(capture, /setObject|removeAllObjects|m_lastCollision\w+\s*=/);
+    assert.match(capture, /typeinfo_cast<GameObject\*>\(element->getObject\(\)\)\)!=object\.instance\)return nullptr/);
+});
