@@ -156,9 +156,10 @@ int main() {
     assert(sampleScoreProgress(i,-1).score==100&&sampleScoreProgress(i,99).score==125);
     i.before=i.after=0; s=sampleScoreProgress(i,2); assert(s.score==0&&s.fill==0&&s.complete);
     i.before=299; i.after=350; i.afterTier="AQUA"; i.promoted=true;
-    assert(i.duration()==2&&i.after-i.before==51);
+    // A base-tier promotion plays the 4 s promotion motion (as a base-tier demotion does).
+    assert(i.duration()==4&&i.after-i.before==51);
     assert(sampleScoreProgress(i,0).tier=="RED");
-    s=sampleScoreProgress(i,1); assert(s.tier=="AQUA"&&s.minimum==300&&s.target==600&&s.score==325);
+    s=sampleScoreProgress(i,2); assert(s.tier=="AQUA"&&s.minimum==300&&s.target==600&&s.score==325);
     i=ordinary(); i.beforeTier="BRONZE"; i.afterTier="AQUA"; i.before=600; i.after=550; i.demoted=true;
     assert(i.duration()==4&&sampleScoreProgress(i,0).tier=="BRONZE");
     s=sampleScoreProgress(i,2); assert(s.tier=="AQUA"&&s.score==575&&s.fill>0.9);
@@ -463,7 +464,7 @@ int main() {
     assert(promotion->m_tier=="AQUA"&&promotion->m_targetKey=="BRONZE");
     assert(promotion->m_leftIcon!=oldLeft&&promotion->m_rightIcon!=oldRight);
     assert(oldLeft->actions.size()==1&&oldRight->actions.size()==1);
-    assert(promotion->m_leftIcon->children[0]->opacity==255); // Lower tiers reveal without promotion assembly
+    assert(promotion->m_leftIcon->children[0]->opacity==0); // RED -> AQUA assembles like any base-tier promotion
     assert(promotion->m_fill->segmentColor.r==tierColor("AQUA").r/255.0f);
     assert(promotion->m_leftIcon->children.back()->id=="halo:AQUA");
     promotion->onSkip(nullptr);promotion->onSkip(nullptr);drainMainQueue();
@@ -872,6 +873,13 @@ corum::ranked::MatchView settled(std::string id) {
     match.scorePresentation.bands=ordinary().bands;return match;
 }
 int main() {
+    {   // The full-screen promotion plays for base-tier and GOLD-family promotions, not division steps.
+        corum::ranked::RatingEventView event;RankedProfileView from,to;from.displayedTier="BRONZE1";to.displayedTier="SILVER3";
+        assert(authoritativeTransitionType(event,from,to)==RankTransitionType::Promotion);
+        from.displayedTier="SILVER1";to.displayedTier="GOLD";assert(authoritativeTransitionType(event,from,to)==RankTransitionType::Promotion);
+        from.displayedTier="RED3";to.displayedTier="RED2";assert(!authoritativeTransitionType(event,from,to));
+        from.displayedTier="UNRANKED";to.displayedTier="AQUA3";assert(!authoritativeTransitionType(event,from,to));
+    }
     auto& runtime=RankedRuntime::get();CorumRankedLayer owner;runtime.m_view.match=settled("normal");auto& match=runtime.m_view.match;
     auto input=owner.resultScoreInput(match);assert(input);
     match.profileBeforeA.visibleRankedScore=0;assert(owner.resultScoreInput(match)->before==0);
@@ -1034,6 +1042,11 @@ int main(){
   i.beforeTier="RED3";i.afterTier="RED2";i.before=99;i.after=125;i.promoted=true;assert(i.motion()==ScoreMotion::Normal);
   auto s=sampleScoreProgress(i,2);assert(s.tier=="RED2"&&s.minimum==100&&s.target==200);
   i.beforeTier="SILVER1";i.afterTier="GOLD";assert(i.motion()==ScoreMotion::Promotion);
+  // Every base-tier promotion plays the promotion motion; a division step does not.
+  i.beforeTier="BRONZE1";i.afterTier="SILVER3";assert(i.motion()==ScoreMotion::Promotion);
+  i.beforeTier="RED1";i.afterTier="AQUA3";assert(i.motion()==ScoreMotion::Promotion);
+  i.beforeTier="BRONZE3";i.afterTier="BRONZE2";assert(i.motion()==ScoreMotion::Normal);
+  assert(baseTierPromotion("BRONZE1","SILVER3")&&baseTierPromotion("SILVER1","GOLD")&&baseTierPromotion("GOLD","MASTER")&&!baseTierPromotion("RED3","RED2"));
   i.beforeTier=i.afterTier="GOLD";i.before=1300;i.after=1350;i.promoted=false;
   i.standingBefore.displayTier=i.standingAfter.displayTier="GOLD";
   i.standingBefore.nextTier=i.standingAfter.nextTier="MASTER";

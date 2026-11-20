@@ -404,7 +404,7 @@ void ResultScoreLayer::showSeries(bool entering) {
     auto* title = menuLabel(text,0.47f,{0,39},m_input.promotionFailed ? ccc3(255,93,113) : Gold,FontWeight::Black);
     fitMenuLabelWidth(title,getContentSize().width * 0.56f,0.47f,0.34f); m_seriesRoot->addChild(title,5);
     if (m_input.promoted) {
-        auto* detail = menuLabel(fmt::format(fmt::runtime(i18n::text(goldRankTier(m_input.afterTier)?"tier-promoted-to":"division-promoted-to","Promoted to {}!")),rankTierDisplay(m_input.afterTier)),0.30f,{0,22},tierColor(m_input.afterTier),FontWeight::ExtraBold);
+        auto* detail = menuLabel(fmt::format(fmt::runtime(i18n::text(baseTierPromotion(m_input.beforeTier,m_input.afterTier)?"tier-promoted-to":"division-promoted-to","Promoted to {}!")),rankTierDisplay(m_input.afterTier)),0.30f,{0,22},tierColor(m_input.afterTier),FontWeight::ExtraBold);
         fitMenuLabelWidth(detail,getContentSize().width * 0.55f,0.30f,0.24f); m_seriesRoot->addChild(detail,5);
     }
     // Wrap longer server-configured series instead of assuming three games or
@@ -458,7 +458,8 @@ void ResultScoreLayer::showNotices() {
     m_noticesShown = true;
     if(!m_input.survivalRank && !m_seriesShown && !m_input.promotionStarted && m_input.beforeTier!=m_input.afterTier) {
         auto const up=rankTierOrder(m_input.afterTier)>rankTierOrder(m_input.beforeTier);
-        auto const text=i18n::text(up?(goldRankTier(m_input.afterTier)?"promoted":"division-up"):"demoted",up?(goldRankTier(m_input.afterTier)?"PROMOTED":"DIVISION UP"):"DEMOTED");
+        auto const base=baseTierPromotion(m_input.beforeTier,m_input.afterTier);
+        auto const text=i18n::text(up?(base?"promoted":"division-up"):"demoted",up?(base?"PROMOTED":"DIVISION UP"):"DEMOTED");
         auto* notice=menuLabel(text,.49f,{0,19},up?Gold:Red,FontWeight::Black);
         m_seriesRoot->addChild(notice,5);stamp(notice,0);
         auto* tier=menuLabel(rankTierDisplay(m_input.afterTier),.32f,{0,-3},tierColor(m_input.afterTier),FontWeight::ExtraBold);

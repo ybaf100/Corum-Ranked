@@ -273,7 +273,7 @@ std::optional<RankTransitionType> authoritativeTransitionType(
     if (event.placementCompleted && oldTier == "UNRANKED" && newTier != "UNRANKED") {
         return RankTransitionType::Placement;
     }
-    if (corum::ranked::goldRankTier(newTier) && corum::ranked::rankTierOrder(newTier)>corum::ranked::rankTierOrder(oldTier) && oldTier != "UNRANKED") {
+    if (corum::ranked::baseTierPromotion(oldTier, newTier) && corum::ranked::rankTierOrder(newTier)>corum::ranked::rankTierOrder(oldTier) && oldTier != "UNRANKED") {
         return RankTransitionType::Promotion;
     }
     if (event.demoted && (corum::ranked::goldRankTier(oldTier) || corum::ranked::rankTierBase(oldTier)!=corum::ranked::rankTierBase(newTier)) && oldTier != "UNRANKED" && newTier != "UNRANKED") {

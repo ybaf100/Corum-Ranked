@@ -118,7 +118,7 @@ struct ScoreAnimationInput {
     std::optional<int> survivalRank;
 
     ScoreMotion motion() const {
-        if(promoted && (survivalRank || goldRankTier(afterTier)))return ScoreMotion::Promotion;
+        if(promoted && (survivalRank || baseTierPromotion(beforeTier,afterTier)))return ScoreMotion::Promotion;
         if(demoted && (survivalRank || goldRankTier(beforeTier) || rankTierBase(beforeTier)!=rankTierBase(afterTier)))return ScoreMotion::Demotion;
         return ScoreMotion::Normal;
     }

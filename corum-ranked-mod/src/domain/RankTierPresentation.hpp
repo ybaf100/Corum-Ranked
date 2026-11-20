@@ -12,6 +12,12 @@ inline std::string rankTierBase(std::string tier) {
     return tier;
 }
 inline bool goldRankTier(std::string const& tier){return rankTierBase(tier)=="GOLD";}
+// A promotion that changes the base tier (BRONZE I -> SILVER III) or enters the
+// GOLD family plays the full promotion motion; a division step within a base
+// tier (BRONZE III -> BRONZE II) is a notice only.
+inline bool baseTierPromotion(std::string const& before,std::string const& after){
+    return goldRankTier(after)||rankTierBase(before)!=rankTierBase(after);
+}
 inline std::string rankTierTrackBase(std::string const& tier) {
     auto const base=rankTierBase(tier);
     return base=="AQUA"?"RED":base=="BRONZE"?"AQUA":base=="SILVER"?"BRONZE":base=="GOLD"?"SILVER":"";
