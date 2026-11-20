@@ -592,6 +592,20 @@ inline void setSurfaceAccent(CCNode* panel,ccColor3B color) {
 
 // A slanted slab: the face of an action. Filled, it is the primary action in
 // the signal colour (caption in AccentInk); outlined, it is a secondary one.
+// The key of a desktop keyboard shortcut, shown on its button's corner.
+inline CCNode* keycap(std::string const& key) {
+    auto* text = label(key, 0.17f, {}, Text, FontWeight::Black);
+    auto const width = std::max(13.0f, text->getScaledContentSize().width + 8.0f), height = 12.0f;
+    auto* root = CCNode::create();
+    root->setContentSize({width, height}); root->setAnchorPoint({0.5f, 0.5f});
+    auto* edge = CCLayerColor::create({GhostEdge.r, GhostEdge.g, GhostEdge.b, 255});
+    edge->setContentSize({width, height}); edge->setSkewX(8.0f); root->addChild(edge, 0);
+    auto* body = CCLayerColor::create({Ink.r, Ink.g, Ink.b, 255});
+    body->setContentSize({width - 2.0f, height - 2.0f}); body->setPosition({1.0f, 1.0f}); body->setSkewX(8.0f); root->addChild(body, 1);
+    text->setPosition({width / 2.0f, height / 2.0f}); root->addChild(text, 2);
+    return root;
+}
+
 inline CCNode* slab(
     CCSize size,
     CCPoint position,

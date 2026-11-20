@@ -2995,6 +2995,21 @@ class CorumRankedLayer final : public CCLayerColor {
     }
 
     // A ghost / filled skewed button (.btn.ghost / .btn) of a fixed size.
+    // Desktop: the button's keyboard key on its top-right corner (keyDown).
+    static void addKeyHint(CCMenuItemSpriteExtra* item, std::string const& key) {
+#if defined(GEODE_IS_DESKTOP)
+        if (!item || !item->isEnabled()) return;
+        auto* face = item->getNormalImage();
+        if (!face) return;
+        auto* cap = corum::ranked::ui::keycap(key);
+        auto const size = face->getContentSize();
+        cap->setPosition({size.width - 4.0f, size.height - 1.0f}); cap->setID("ranked-key-hint"_spr);
+        face->addChild(cap, 30);
+#else
+        (void)item; (void)key;
+#endif
+    }
+
     CCMenuItemSpriteExtra* boardButton(std::string const& text, CCSize box, CCPoint center, SEL_MenuHandler selector, float cssPx,
         bool filled, std::string const& id, bool enabled = true) {
         auto* face = corum::ranked::ui::slab(box, {}, filled ? corum::ranked::ui::AccentFill : ccc3(58, 63, 78), !filled, corum::ranked::ui::Ink);
@@ -3117,6 +3132,7 @@ class CorumRankedLayer final : public CCLayerColor {
                         ? (view.placement.active && view.placement.state == "STAGE_RESULT" ? menu_selector(CorumRankedLayer::onContinuePlacement) : menu_selector(CorumRankedLayer::onOpenPlacement))
                         : menu_selector(CorumRankedLayer::onJoin));
                 play->setPosition({x0 + width / 2.0f, heroY}); play->setEnabled(playLive); play->setID("ranked-start-button"_spr); m_menu->addChild(play);
+                addKeyHint(play, "ENTER");
                 auto* line = makeLabel(view.placement.required
                         ? (view.placement.active && view.placement.state == "STAGE_RESULT"
                             ? fmt::format("STAGE {} / {} SAVED", view.placement.currentStageIndex, view.placement.totalStages) : tr("choose-first-pool", "CHOOSE YOUR FIRST STAGE POOL"))
@@ -3133,6 +3149,7 @@ class CorumRankedLayer final : public CCLayerColor {
             auto* queue = CCMenuItemSpriteExtra::create(corum::ranked::ui::heroSlab({heroW, heroSize.height}, online, startLabel(tr("start-queue", "START QUEUE"), online)),
                 this, menu_selector(CorumRankedLayer::onSurvivalQueue));
             queue->setPosition({x0 + heroW / 2.0f, heroY}); queue->setEnabled(online); queue->setID("survival-start-button"_spr); m_menu->addChild(queue);
+            addKeyHint(queue, "ENTER");
             auto const sideX = x0 + heroW + px(36.0f);
             if (!view.survival.loaded || !view.survival.error.empty()) {
                 addButton(tr("retry","RETRY"), {sideX + 40.0f, heroY}, menu_selector(CorumRankedLayer::onRetrySurvival), false, 0.44f);
@@ -3863,6 +3880,7 @@ class CorumRankedLayer final : public CCLayerColor {
             corum::ranked::ui::fitMenuLabelWidth(note, rw, fontScale(13.0f), 0.1f); m_queueContents->addChild(note, 5);
             m_queueLeave = boardButton(tr("cancel-matching", "CANCEL MATCHING"), {rw, px(42.0f)}, {rx + rw / 2.0f, ry - 38.0f}, menu_selector(CorumRankedLayer::onLeave),
                 16.0f, false, "ranked-queue-leave"_spr);
+            addKeyHint(m_queueLeave, "ESC");
         } else {
             // ---- L5 (Survival): counts row, fat bar, seat grid, cancel row.
             auto const x0 = px(28.0f), x1 = win.width - px(28.0f), width = x1 - x0;
@@ -3933,6 +3951,7 @@ class CorumRankedLayer final : public CCLayerColor {
             corum::ranked::ui::fitMenuLabelWidth(note, std::max(40.0f, buttonsLeft - x0 - 10.0f), fontScale(13.0f), 0.1f); m_queueContents->addChild(note, 5);
             m_queueLeave = boardButton(tr("cancel-matching", "CANCEL MATCHING"), {px(170.0f), px(42.0f)}, {x1 - px(85.0f), bottom + 14.0f},
                 menu_selector(CorumRankedLayer::onSurvivalLeaveQueue), 16.0f, false, "survival-queue-leave"_spr);
+            addKeyHint(m_queueLeave, "ESC");
         }
         m_root = savedRoot; m_menu = savedMenu;
         setLobbyNodeInput(m_queueMenu,false);
@@ -4441,8 +4460,8 @@ class CorumRankedLayer final : public CCLayerColor {
             }
         }
         if (match.state != "MAP_PREPARE")
-            boardButton(tr("play-again", "PLAY AGAIN"), {mapW - px(36.0f), px(42.0f)}, {x0 + mapW / 2.0f, bottom + px(16.0f) + px(21.0f)},
-                menu_selector(CorumRankedLayer::onSoloPlayAgain), 16.0f, true, "ranked-placement-play-again"_spr);
+            addKeyHint(boardButton(tr("play-again", "PLAY AGAIN"), {mapW - px(36.0f), px(42.0f)}, {x0 + mapW / 2.0f, bottom + px(16.0f) + px(21.0f)},
+                menu_selector(CorumRankedLayer::onSoloPlayAgain), 16.0f, true, "ranked-placement-play-again"_spr), "ENTER");
 
         // Right: grade and score panel, then the attempts table (or, while
         // preparing, the download rows and options).
@@ -5133,7 +5152,7 @@ class CorumRankedLayer final : public CCLayerColor {
         if (m_selectedBan == kNoBanChoice) addChip(m_root, tr("no-ban", "NO BAN"), {px(28.0f), footY}, kGold, corum::ranked::ui::AccentInk, 16.0f);
         else if (m_pendingBan == kNoBanChoice) addChip(m_root, tr("banning", "BANNING..."), {px(28.0f), footY}, kGold, corum::ranked::ui::AccentInk, 16.0f);
         else if (m_selectedBan.empty() && m_pendingBan.empty())
-            boardButton(tr("no-ban", "NO BAN"), {px(150.0f), px(42.0f)}, {px(28.0f) + px(75.0f), footY}, menu_selector(CorumRankedLayer::onNoBan), 16.0f, false, "ranked-ban-none"_spr);
+            addKeyHint(boardButton(tr("no-ban", "NO BAN"), {px(150.0f), px(42.0f)}, {px(28.0f) + px(75.0f), footY}, menu_selector(CorumRankedLayer::onNoBan), 16.0f, false, "ranked-ban-none"_spr), "0");
         auto* rule = makeLabel(tr("ban-footer-note", "BAN AND NO BAN APPLY AT ONCE · A BANNED CARD DIMS AND DROPS"), fontScale(13.0f),
             {size.width - px(28.0f), footY}, corum::ranked::ui::TextMuted, "semibold", {1.0f, 0.5f});
         corum::ranked::ui::fitMenuLabelWidth(rule, size.width - px(56.0f) - px(150.0f) - 16.0f, fontScale(13.0f), 0.1f); m_root->addChild(rule, 5);
@@ -5198,6 +5217,8 @@ class CorumRankedLayer final : public CCLayerColor {
                 face->addChild(caption, 5);
                 auto* button = CCMenuItemSpriteExtra::create(face, this, menu_selector(CorumRankedLayer::onBan));
                 button->setPosition({x, actionY}); button->setTag(static_cast<int>(i)); m_menu->addChild(button);
+                // Keys 1-9 ban the card in that place.
+                if (i < 9) { button->setID(fmt::format("{}-{}", "ranked-ban-card"_spr, i + 1)); addKeyHint(button, std::to_string(i + 1)); }
             } else {
                 auto* face = corum::ranked::ui::slab({cardW - 12.0f, px(34.0f)}, {x, actionY}, ccc3(32, 35, 46));
                 m_root->addChild(face, 4);
@@ -5398,8 +5419,8 @@ class CorumRankedLayer final : public CCLayerColor {
             auto const canSpectate = match.spectatorLiveEnabled && RankedRuntime::get().canEnterCurrentLevelAsSpectator();
             m_soloSpectateButton = boardButton(tr("spectate-live", "SPECTATE"), {ghostW, px(34.0f)}, {mapX + px(16.0f) + ghostW / 2.0f, buttonsY},
                 menu_selector(CorumRankedLayer::onSpectateLive), 14.0f, false, "ranked-solo-spectate"_spr, canSpectate);
-            boardButton(tr("play-again", "PLAY AGAIN"), {playW, px(42.0f)}, {mapX + mapW - px(16.0f) - playW / 2.0f, buttonsY},
-                menu_selector(CorumRankedLayer::onSoloPlayAgain), 16.0f, true, "ranked-solo-play-again"_spr);
+            addKeyHint(boardButton(tr("play-again", "PLAY AGAIN"), {playW, px(42.0f)}, {mapX + mapW - px(16.0f) - playW / 2.0f, buttonsY},
+                menu_selector(CorumRankedLayer::onSoloPlayAgain), 16.0f, true, "ranked-solo-play-again"_spr), "ENTER");
         }
     }
 
@@ -6673,10 +6694,10 @@ class CorumRankedLayer final : public CCLayerColor {
         // MATCH HISTORY and LOBBY (ghosts, flex 1), 56 px tall.
         {
             auto const left = px(34.0f), gap = px(12.0f), unit = (size.width - 2.0f * left - 2.0f * gap) / 4.0f, footY = px(42.0f);
-            boardButton(tr("queue-again", "QUEUE AGAIN"), {unit * 2.0f, px(56.0f)}, {left + unit, footY}, menu_selector(CorumRankedLayer::onQueueAgain), 22.0f, true,
-                "ranked-result-queue-again"_spr);
-            boardButton(tr("match-history", "MATCH HISTORY"), {unit, px(56.0f)}, {left + unit * 2.0f + gap + unit / 2.0f, footY}, menu_selector(CorumRankedLayer::onHistory), 18.0f, false,
-                "ranked-result-history"_spr);
+            addKeyHint(boardButton(tr("queue-again", "QUEUE AGAIN"), {unit * 2.0f, px(56.0f)}, {left + unit, footY}, menu_selector(CorumRankedLayer::onQueueAgain), 22.0f, true,
+                "ranked-result-queue-again"_spr), "ENTER");
+            addKeyHint(boardButton(tr("match-history", "MATCH HISTORY"), {unit, px(56.0f)}, {left + unit * 2.0f + gap + unit / 2.0f, footY}, menu_selector(CorumRankedLayer::onHistory), 18.0f, false,
+                "ranked-result-history"_spr), "H");
             boardButton(tr("to-lobby", "LOBBY"), {unit, px(56.0f)}, {left + unit * 3.0f + gap * 2.0f + unit / 2.0f, footY}, menu_selector(CorumRankedLayer::onResultClose), 18.0f, false,
                 "ranked-result-lobby"_spr);
         }
@@ -6902,7 +6923,7 @@ class CorumRankedLayer final : public CCLayerColor {
             corum::ranked::ui::fitFullMenuLabel(caption,width-12,19,.29f);visual->addChild(caption,5);
             auto* button=CCMenuItemSpriteExtra::create(visual,this,menu_selector(CorumRankedLayer::onAchievementClaimAll));
             button->setID("ranked-achievement-claim-all"_spr);button->setPosition({size.width-px(28.0f)-70.0f-6.0f-width/2,size.height-kLobbyHeader/2.0f});
-            button->setEnabled(!view.achievements.loading && pendingRewards.rewards>0);m_menu->addChild(button);
+            button->setEnabled(!view.achievements.loading && pendingRewards.rewards>0);m_menu->addChild(button);addKeyHint(button,"ENTER");
         }
 
         if (view.achievements.loading && !view.achievements.loaded) {
@@ -8420,16 +8441,48 @@ class CorumRankedLayer final : public CCLayerColor {
     // Main lobby (L1) shortcuts: 1 = Survival, 2 = Solo Ranked, the same as
     // tapping that half (its ENTER shows the key). Inert under any popup or
     // overlay, and wherever the half is not offered.
+    //
+    // Other screens: Enter / Space press the screen's main button (START,
+    // QUEUE AGAIN, PLAY AGAIN, CLAIM ALL); 1-9 ban that map and 0 is NO BAN;
+    // H opens the result's match history; Esc cancels matching (keyBackClicked).
+    // Each of those buttons carries its key (addKeyHint).
     void keyDown(enumKeyCodes key, double timestamp) override {
-        auto const survival = key == KEY_One || key == KEY_NumPad1, solo = key == KEY_Two || key == KEY_NumPad2;
-        if ((survival || solo) && modeKeyAvailable()) {
-            if (auto* item = typeinfo_cast<CCMenuItemSpriteExtra*>(getChildByIDRecursive(survival ? "survival-card-select"_spr : "solo-ranked-card-select"_spr)))
-                if (item->isEnabled() && item->isVisible()) { onSelectMode(item); return; }
-        }
+        if (keyboardShortcut(key)) return;
         CCLayerColor::keyDown(key, timestamp);
     }
-    bool modeKeyAvailable() {
-        if (!isRunning() || !isKeypadEnabled() || m_page != Page::Live || m_uiFadingOut || m_modeNoticeOpen ||
+    bool keyboardShortcut(enumKeyCodes key) {
+        if (!keyboardAvailable()) return false;
+        auto const digit = key >= KEY_Zero && key <= KEY_Nine ? key - KEY_Zero : key >= KEY_NumPad0 && key <= KEY_NumPad9 ? key - KEY_NumPad0 : -1;
+        if (digit >= 1 && pressKeyTarget({fmt::format("{}-{}", "ranked-ban-card"_spr, digit)})) return true;
+        if (digit == 0 && pressKeyTarget({"ranked-ban-none"_spr})) return true;
+        if ((digit == 1 || digit == 2) && m_page == Page::Live) {
+            if (auto* item = keyTarget({digit == 1 ? "survival-card-select"_spr : "solo-ranked-card-select"_spr})) { onSelectMode(item); return true; }
+        }
+        if (key == KEY_Enter || key == KEY_Space)
+            return pressKeyTarget({"ranked-result-queue-again"_spr, "ranked-solo-play-again"_spr, "ranked-placement-play-again"_spr,
+                "ranked-start-button"_spr, "survival-start-button"_spr, "ranked-achievement-claim-all"_spr});
+        if (key == KEY_H) return pressKeyTarget({"ranked-result-history"_spr});
+        return false;
+    }
+    // The first listed button that is on screen and enabled.
+    CCMenuItemSpriteExtra* keyTarget(std::initializer_list<std::string> ids) {
+        for (auto const& id : ids) {
+            auto* item = typeinfo_cast<CCMenuItemSpriteExtra*>(getChildByIDRecursive(id));
+            if (!item || !item->isEnabled()) continue;
+            bool shown = true;
+            for (CCNode* node = item; node && shown; node = node->getParent()) shown = node->isVisible();
+            if (shown) return item;
+        }
+        return nullptr;
+    }
+    bool pressKeyTarget(std::initializer_list<std::string> ids) {
+        auto* item = keyTarget(ids);
+        if (!item) return false;
+        item->activate();
+        return true;
+    }
+    bool keyboardAvailable() {
+        if (!isRunning() || !isKeypadEnabled() || m_uiFadingOut || m_modeNoticeOpen || m_modeTransition.moving() ||
             m_rankTransitionLayer || m_gradeUpLayer || m_resultScoreLayer || m_resultScorePending) return false;
         if (auto* scene = CCDirector::sharedDirector()->getRunningScene())
             for (auto* child : CCArrayExt<CCNode*>(scene->getChildren()))
@@ -8442,6 +8495,10 @@ class CorumRankedLayer final : public CCLayerColor {
         if (m_modeNoticeOpen) { closeModeNotice(); syncLobbyInput(); return; }
         if (m_modeTransition.moving()) return;
         if (m_rankTransitionLayer || m_gradeUpLayer || m_resultScoreLayer || m_resultScorePending) return;
+#if defined(GEODE_IS_DESKTOP)
+        // While matching, Esc first cancels it (the button shows ESC).
+        if (keyboardAvailable() && pressKeyTarget({"ranked-queue-leave"_spr, "survival-queue-leave"_spr})) return;
+#endif
         if (m_page != Page::Live) {
             stepBack();
             return;

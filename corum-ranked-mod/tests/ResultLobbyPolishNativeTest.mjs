@@ -79,20 +79,45 @@ test('ALL RECORDS cards name the players of matches of up to two', () => {
     assert.match(row, /historyAllRecords\(\)&&total>0&&total<=2/);
 });
 
-test('desktop: 1 / 2 open Survival / Solo from the main lobby, with the key shown', () => {
+test('desktop keyboard: lobby, queue, ban, result, play again and claim all, each with its key shown', () => {
     assert.match(popup, /#if defined\(GEODE_IS_DESKTOP\)\s*\/\/ 1 \/ 2 open Survival \/ Solo from the main lobby \(keyDown\)\.\s*setKeyboardEnabled\(true\);/);
     const key = method(popup, 'void keyDown(enumKeyCodes key, double timestamp) override');
-    assert.match(key, /KEY_One \|\| key == KEY_NumPad1/);
-    assert.match(key, /KEY_Two \|\| key == KEY_NumPad2/);
-    assert.match(key, /survival-card-select"_spr : "solo-ranked-card-select"_spr/);
-    assert.match(key, /item->isEnabled\(\) && item->isVisible\(\)\) \{ onSelectMode\(item\); return; \}/);
-    assert.match(key, /CCLayerColor::keyDown\(key, timestamp\)/);
-    // Inert under popups, overlays and away from L1.
-    const available = method(popup, 'bool modeKeyAvailable()');
-    for (const guard of ['m_page != Page::Live', 'm_modeNoticeOpen', 'm_resultScoreLayer', 'typeinfo_cast<FLAlertLayer*>(child)', '!isKeypadEnabled()'])
+    assert.match(key, /if \(keyboardShortcut\(key\)\) return;\s*CCLayerColor::keyDown\(key, timestamp\);/);
+    const shortcut = method(popup, 'bool keyboardShortcut(enumKeyCodes key)');
+    // 1 / 2 on the main lobby; 1-9 / 0 on the ban board (number row and keypad).
+    assert.match(shortcut, /KEY_Zero && key <= KEY_Nine \? key - KEY_Zero : key >= KEY_NumPad0 && key <= KEY_NumPad9 \? key - KEY_NumPad0/);
+    assert.match(shortcut, /"ranked-ban-card"_spr, digit/);
+    assert.match(shortcut, /digit == 0 && pressKeyTarget\(\{"ranked-ban-none"_spr\}\)/);
+    assert.match(shortcut, /digit == 1 \? "survival-card-select"_spr : "solo-ranked-card-select"_spr/);
+    // Enter / Space: the screen's main button, in this order.
+    assert.match(shortcut, /key == KEY_Enter \|\| key == KEY_Space\)\s*return pressKeyTarget\(\{"ranked-result-queue-again"_spr, "ranked-solo-play-again"_spr, "ranked-placement-play-again"_spr,\s*"ranked-start-button"_spr, "survival-start-button"_spr, "ranked-achievement-claim-all"_spr\}\)/);
+    assert.match(shortcut, /key == KEY_H\) return pressKeyTarget\(\{"ranked-result-history"_spr\}\)/);
+    // Only an enabled button on screen (every ancestor visible) is pressed, as a click.
+    const target = method(popup, 'CCMenuItemSpriteExtra* keyTarget(');
+    assert.match(target, /!item \|\| !item->isEnabled\(\)/);
+    assert.match(target, /for \(CCNode\* node = item; node && shown; node = node->getParent\(\)\) shown = node->isVisible\(\);/);
+    assert.match(method(popup, 'bool pressKeyTarget('), /item->activate\(\);/);
+    // Inert under popups and overlays.
+    const available = method(popup, 'bool keyboardAvailable()');
+    for (const guard of ['m_modeNoticeOpen', 'm_modeTransition.moving()', 'm_resultScoreLayer', 'm_rankTransitionLayer', 'typeinfo_cast<FLAlertLayer*>(child)', '!isKeypadEnabled()'])
         assert(available.includes(guard), guard);
+    // Esc cancels matching before it navigates back.
+    const back = method(popup, 'void keyBackClicked() override');
+    assert.match(back, /pressKeyTarget\(\{"ranked-queue-leave"_spr, "survival-queue-leave"_spr\}\)\) return;/);
+    assert(back.indexOf('ranked-queue-leave') < back.indexOf('stepBack()'));
+    // Every target shows its key (desktop only, enabled buttons only).
+    const hint = method(popup, 'static void addKeyHint(CCMenuItemSpriteExtra* item, std::string const& key)');
+    assert.match(hint, /#if defined\(GEODE_IS_DESKTOP\)\s*if \(!item \|\| !item->isEnabled\(\)\) return;/);
+    for (const [id, cap] of [['ranked-start-button', 'ENTER'], ['survival-start-button', 'ENTER']])
+        assert.match(popup, new RegExp(`setID\\("${id}"_spr\\); m_menu->addChild\\(\\w+\\);\\s*addKeyHint\\(\\w+, "${cap}"\\);`), id);
+    for (const [id, cap] of [['ranked-ban-none', '0'], ['ranked-placement-play-again', 'ENTER'], ['ranked-solo-play-again', 'ENTER'],
+        ['ranked-result-queue-again', 'ENTER'], ['ranked-result-history', 'H']])
+        assert.match(popup, new RegExp(`"${id}"_spr\\), "${cap}"\\);`), id);
+    assert.equal((popup.match(/addKeyHint\(m_queueLeave, "ESC"\);/g) || []).length, 2);
+    assert.match(popup, /button->setID\(fmt::format\("\{\}-\{\}", "ranked-ban-card"_spr, i \+ 1\)\); addKeyHint\(button, std::to_string\(i \+ 1\)\);/);
+    assert.match(popup, /setID\("ranked-achievement-claim-all"_spr\)[\s\S]{0,400}addKeyHint\(button,"ENTER"\);/);
     assert.match(popup, /makeLabel\(survival \? "1" : "2", fontScale\(15\.0f\)/);
-    assert.match(popup, /tr\("mode-key-hint", "KEY"\)/);
+    assert.match(read('src/ui/RankedVisuals.hpp'), /inline CCNode\* keycap\(std::string const& key\)/);
 });
 
 test('tier guide: Survival promotion series and the Solo MASTER / CHAMPION panel', () => {
