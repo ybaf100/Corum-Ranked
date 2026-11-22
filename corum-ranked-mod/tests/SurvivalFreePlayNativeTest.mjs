@@ -60,7 +60,7 @@ struct SurvivalRuntime{
  std::string m_session="session",m_attempt;SurvivalFreePlayState m_freePlay;std::optional<WeakRef<CCScene>>m_freePlayOrigin,m_freePlayQuitScene;Ref<GJGameLevel>m_freePlayQuitLevel;bool m_freePlayReturnQueued=false,m_freePlayNativeQuitFinished=false;
  bool m_queueFreePlay=false,m_soloQueueFreePlay=false;static SurvivalRuntime& get(){static SurvivalRuntime r;return r;}
  bool active()const{return !m_view.id.empty();}bool freePlaying()const{return m_freePlay.active;}
- bool normalRoundCleared()const;bool officialRoundCleared()const;bool canFreePlay()const;bool beginFreePlay();bool freePlayReturnPending()const;bool beginFreePlayNativeQuit(GJGameLevel*);bool interceptFreePlayNativeQuit(GJGameLevel*)const;void finishFreePlayNativeQuit();void pumpFreePlayReturn();
+ bool normalRoundCleared()const;bool officialRoundCleared()const;bool canFreePlay()const;bool beginFreePlay();bool freePlayReturnPending()const;bool beginFreePlayNativeQuit(GJGameLevel*);bool interceptFreePlayNativeQuit(GJGameLevel*)const;void finishFreePlayNativeQuit();void pumpFreePlayReturn();int leaveRequests=0;void requestLeaveToMenu(){++leaveRequests;}
 };
 ${['bool SurvivalRuntime::officialRoundCleared()', 'bool SurvivalRuntime::normalRoundCleared()', 'bool SurvivalRuntime::canFreePlay()', 'bool SurvivalRuntime::beginFreePlay()', 'bool SurvivalRuntime::freePlayReturnPending()', 'bool SurvivalRuntime::beginFreePlayNativeQuit(', 'bool SurvivalRuntime::interceptFreePlayNativeQuit(', 'void SurvivalRuntime::finishFreePlayNativeQuit()', 'void SurvivalRuntime::pumpFreePlayReturn()'].map(n=>method(source,n)).join('\n')}
 }

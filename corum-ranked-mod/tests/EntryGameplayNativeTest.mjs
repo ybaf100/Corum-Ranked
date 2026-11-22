@@ -206,9 +206,10 @@ struct SurvivalRuntime {
 };
 }
 namespace corum::ranked {inline bool quitThroughSurvivalCompletionOverlay(PlayLayer*){return false;}}
+namespace corum::ranked::replay {inline int prewarms=0;inline void prewarmCbfCollisionWorld(PlayLayer*){++prewarms;}}
 struct CorumRankedPlayLayer:PlayLayer {
     struct Fields {
-        bool rankedInitialized=true,survivalWaiting=false,survivalWaitPaused=false,survivalResetDeferred=false;int survivalContext=1;
+        bool rankedInitialized=true,survivalWaiting=false,survivalWaitPaused=false,survivalResetDeferred=false,collisionManifestPrewarmed=false;int survivalContext=1;
         bool survivalLevel=false,survivalNativeClearFinished=false;bool nativeEntryHeld=true,autoExitRequested=false,entryWasPaused=false,entryNativeCompletionInProgress=false;
         bool entryTouchEnabled=true,entryKeyboardEnabled=true;
         bool entryUIKeyboardEnabled=false,entryUIKeypadEnabled=false,entryUIPauseEnabled=false;

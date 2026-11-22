@@ -84,6 +84,7 @@ struct SurvivalRuntime{SurvivalOutcomeChoice outcomeChoice()const{return Surviva
  bool observing()const{return observe;}
  void chooseOutcome(SurvivalOutcomeChoice choice){++choices;lastChoice=choice;}
  void leaveObserver(){observe=false;}
+ int leaveRequests=0;void requestLeaveToMenu(){++leaveRequests;}
 };
 struct Coordinator{std::uint64_t m_boardVisit=0;bool m_closed=false,m_motion=false,m_browsingBoard=false,m_manualMap=false;std::chrono::steady_clock::time_point m_eliminationUntil{};int confirmations=0;void confirmSurrender(){++confirmations;}
  ${back}

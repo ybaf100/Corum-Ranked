@@ -10,6 +10,15 @@ export interface PatchNote {
 
 export const PATCH_NOTES: readonly PatchNote[] = Object.freeze([
   {
+    version: "0.6.0-beta.93", date: "2026-11-23",
+    en: [
+      "Release of the beta.92 changes (the beta.92 build did not ship).",
+    ],
+    ko: [
+      "beta.92 변경사항을 배포합니다 (beta.92 빌드는 배포되지 않았습니다).",
+    ],
+  },
+  {
     version: "0.6.0-beta.92", date: "2026-11-23",
     en: [
       "Solo Ranked: pausing is locked for the last 10 seconds of the round timer.",
