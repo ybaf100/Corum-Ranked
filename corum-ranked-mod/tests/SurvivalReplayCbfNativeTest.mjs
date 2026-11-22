@@ -198,6 +198,16 @@ int main(){
   assert(actual["objectDiagnostics"].dump().size()<16384&&actual["objectDiagnostics"]["chunks"].size()<=32);
   retireNativeReplayFrame(&target);
  }
+ // A restart (new Source Attempt) on the same map keeps the proven manifest
+ // instead of re-serializing every object; a replaced object rebuilds it.
+ {PlayerObject a,b;PlayLayer target;target.m_player1=&a;target.m_player2=&b;PlayLayer::current=&target;
+  auto first=captureCbfInitial(&target,true);auto& world=collisionWorld();
+  target.collider.m_startPosition.x+=5;
+  auto restarted=captureCbfInitial(&target,true);assert(restarted["objects"]==first["objects"]&&world.identities.error().empty());
+  GameObject replacement;replacement.m_uniqueID=99;replacement.m_objectID=2;target.objects.values[0]=&replacement;
+  auto rebuilt=captureCbfInitial(&target,true);assert(rebuilt["objects"]!=first["objects"]);
+  retireNativeReplayFrame(&target);
+ }
  // A new official Source Attempt discards prior Native identity witnesses;
  // it does not mutate live Native collision dictionaries or scalar values.
  {PlayerObject a,b;PlayLayer source;source.m_player1=&a;source.m_player2=&b;PlayLayer::current=&source;sourceCbf=false;beginCbfNativeFrame(&source);source.checkCollisions(&a,0,true);finishCbfNativeFrame();

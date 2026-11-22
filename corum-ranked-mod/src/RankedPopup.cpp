@@ -11,6 +11,7 @@
 #include "HistoryLevelLookup.hpp"
 #include "ui/MapPoolVisuals.hpp"
 #include "ui/RankedGuideCarousel.hpp"
+#include "ui/RankedUpdateTabs.hpp"
 #include "SurvivalThumbnailProvider.hpp"
 #include "ui/ModeLobbyMotion.hpp"
 #include "ui/ModeSweepMotion.hpp"
@@ -2154,6 +2155,13 @@ class CorumRankedLayer final : public CCLayerColor {
             guide->setPosition({px(28.0f), bottom}); m_root->addChild(guide, 3);
         }
     }
+    void addUpdateTabs(std::string const& from, std::string const& to) {
+        auto const size = CCDirector::sharedDirector()->getWinSize();
+        auto const top = size.height - kLobbyHeader - 4.0f, bottom = 66.0f;
+        if (auto* tabs = corum::ranked::ui::RankedUpdateTabs::create({size.width - 2.0f * px(28.0f), top - bottom}, from, to)) {
+            tabs->setPosition({px(28.0f), bottom}); m_root->addChild(tabs, 3);
+        }
+    }
     // Dock: the state line over the fat live bar with its percent, a note under
     // it, and up to two actions on the right. The bar and percent are updated
     // every frame from update().
@@ -2193,8 +2201,9 @@ class CorumRankedLayer final : public CCLayerColor {
         addGateHeader("RANKED", "", busy ? tr("mod-updating", "UPDATING") : tr("mod-update", "MOD UPDATE"), corum::ranked::ui::AccentFill, corum::ranked::ui::AccentInk, corum::ranked::ui::Accent);
         boardButton(corum::ranked::ui::RankedModUpdateManager::get().channel() == "debug" ? "DEBUG" : "RELEASE", {72.0f, px(34.0f)},
             {size.width - px(28.0f) - 36.0f, size.height - kLobbyHeader / 2.0f}, menu_selector(CorumRankedLayer::onUpdateChannel), 13.0f, false, "ranked-update-channel"_spr, !busy && !restart);
-        // The guide's first card: installed > new version and the changes between.
-        addGuideCarousel(corum::ranked::ui::GuidePatchCard{update.installedVersion, update.targetVersion});
+        // Design C: [PATCH NOTES | HOW RANKED WORKS] tabs; the notes of every
+        // release being installed, newest first, then the installed one.
+        addUpdateTabs(update.installedVersion, update.targetVersion);
         auto const message = restart ? tr("mod-restart-ready", "Update installed. Press Restart to apply it.") :
             !update.error.empty() ? update.error : busy ? tr("mod-verifying", "Downloading and verifying the mod...") :
             tr("mod-update-required", "Update the mod before entering Ranked.");
@@ -8482,6 +8491,12 @@ class CorumRankedLayer final : public CCLayerColor {
             return pressKeyTarget({"ranked-result-queue-again"_spr, "ranked-solo-play-again"_spr, "ranked-placement-play-again"_spr,
                 "ranked-start-button"_spr, "survival-start-button"_spr, "ranked-achievement-claim-all"_spr});
         if (key == KEY_H) return pressKeyTarget({"ranked-result-history"_spr});
+        // Update screen: Tab switches PATCH NOTES / HOW RANKED WORKS, Up / Down the version.
+        if (auto* tabs = typeinfo_cast<corum::ranked::ui::RankedUpdateTabs*>(getChildByIDRecursive("ranked-update-tabs"_spr)); tabs && tabs->isVisible()) {
+            if (key == KEY_Tab) { tabs->toggleTab(); return true; }
+            if (key == KEY_Up || key == KEY_ArrowUp) return tabs->stepVersion(-1);
+            if (key == KEY_Down || key == KEY_ArrowDown) return tabs->stepVersion(1);
+        }
         return false;
     }
     // The first listed button that is on screen and enabled.

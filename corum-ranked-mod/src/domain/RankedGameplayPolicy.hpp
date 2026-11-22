@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+#include <optional>
 #include <string_view>
 
 namespace corum::ranked {
@@ -118,6 +120,13 @@ struct SpectatorLevelEntryInput {
         .startFreshAttempt = canStartFreshAttempt,
         .exitLocalGameplay = !canStartFreshAttempt,
     };
+}
+
+// Solo round timer: pausing is refused once 10 s or less remain (spectators
+// would otherwise watch a frozen frame across the round end).
+inline constexpr std::int64_t kSoloPauseLockMillis = 10'000;
+inline bool soloPauseLockedAt(std::optional<std::int64_t> remainingMillis) {
+    return remainingMillis.has_value() && *remainingMillis <= kSoloPauseLockMillis;
 }
 
 } // namespace corum::ranked

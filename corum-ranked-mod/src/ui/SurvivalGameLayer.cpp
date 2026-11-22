@@ -201,7 +201,9 @@ class SurvivalGameLayer final : public CCLayerColor {
         if(tag==16 && m_cardPages>1)m_cardPage=(m_cardPage+m_cardPages-1)%m_cardPages;
         if(tag==17 && m_cardPages>1)m_cardPage=(m_cardPage+1)%m_cardPages;
         if(tag==1)runtime.acknowledge();
-        if(tag==2){if(runtime.outcomeChoice()==SurvivalOutcomeChoice::LiveSpectate){SurvivalSpectatorRuntime::get().leave();runtime.chooseOutcome(SurvivalOutcomeChoice::Undecided);m_browsingBoard=true;}else if(runtime.observing()){runtime.leaveObserver();runtime.chooseOutcome(SurvivalOutcomeChoice::Standings);m_browsingBoard=true;}else confirmSurrender();}
+        if(tag==2){if(runtime.outcomeChoice()==SurvivalOutcomeChoice::LiveSpectate){SurvivalSpectatorRuntime::get().leave();runtime.chooseOutcome(SurvivalOutcomeChoice::Undecided);m_browsingBoard=true;}else if(runtime.observing()){runtime.leaveObserver();runtime.chooseOutcome(SurvivalOutcomeChoice::Standings);m_browsingBoard=true;}
+            // LEAVE after elimination: straight back to the Ranked lobby once the result settles.
+            else if(runtime.view().ownEliminated)runtime.requestLeaveToMenu();else confirmSurrender();}
         if(tag==7){if(runtime.view().ownEliminated){SurvivalSpectatorRuntime::get().leave();runtime.chooseOutcome(SurvivalOutcomeChoice::Observe);m_browsingBoard=false;m_manualMap=true;}else runtime.beginFreePlay();}
         if(tag==8){m_browsingBoard=false;runtime.refreshRound();}
         if(tag==9){m_browsingBoard=true;}
@@ -785,7 +787,7 @@ public:
         if(m_closed || m_motion || std::chrono::steady_clock::now()<m_eliminationUntil)return;
         auto& runtime=SurvivalRuntime::get();
         if(runtime.flowStage()==SurvivalFlowStage::EliminatedChoice || runtime.outcomeChoice()==SurvivalOutcomeChoice::LiveSpectate || runtime.observing()){
-            runtime.leaveObserver();runtime.chooseOutcome(SurvivalOutcomeChoice::PersonalResult);return;
+            runtime.leaveObserver();runtime.chooseOutcome(SurvivalOutcomeChoice::PersonalResult);runtime.requestLeaveToMenu();return;
         }
         if(runtime.view().result.isObject()){runtime.acknowledge();return;}
         // Both gameplay exit and this first Back are navigation only. The
@@ -794,6 +796,7 @@ public:
             m_browsingBoard=true;return;
         }
         if(!SurvivalRuntime::get().view().ownEliminated)confirmSurrender();
+        else SurvivalRuntime::get().requestLeaveToMenu();
     }
     void onExit() override {
         if(m_confirmation){if(auto popup=m_confirmation->lock())popup->cancel();m_confirmation.reset();}

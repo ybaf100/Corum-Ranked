@@ -10,6 +10,21 @@ export interface PatchNote {
 
 export const PATCH_NOTES: readonly PatchNote[] = Object.freeze([
   {
+    version: "0.6.0-beta.92", date: "2026-11-23",
+    en: [
+      "Solo Ranked: pausing is locked for the last 10 seconds of the round timer.",
+      "Survival: restarting no longer freezes the game for about a second, and the first attempt after the countdown no longer stutters.",
+      "Survival: leaving the round after elimination returns straight to the Ranked lobby.",
+      "Update screen: Patch Notes and How Ranked Works tabs. Every version being installed is listed with its full notes (Korean/English).",
+    ],
+    ko: [
+      "솔로 랭크: 라운드 타이머가 10초 남으면 일시정지할 수 없습니다.",
+      "서바이벌: 재시작할 때 약 1초 멈추던 현상과 카운트다운 직후 첫 시도의 끊김을 해결했습니다.",
+      "서바이벌: 탈락 후 라운드를 나가면 바로 랭크 로비로 돌아갑니다.",
+      "업데이트 화면: 패치 노트 / 랭크 안내 탭. 설치되는 모든 버전과 그 변경사항을 전부 볼 수 있습니다 (한국어/영어).",
+    ],
+  },
+  {
     version: "0.6.0-beta.91", date: "2026-11-22",
     en: [
       "Debug: the DEBUG menu now lists Bot Match, Spectate, Admin and Fixed Map Battle. The fixed-map screen uses the Corum style, and the bot difficulty is chosen in its opponent picker.",

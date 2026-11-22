@@ -28,6 +28,14 @@ public:
         }
         m_manifest=CollisionJson::object();m_manifest["schema"]=1;m_manifest["count"]=static_cast<std::int64_t>(m_objects.size());m_manifest["sha256"]=sha256Text(definitions.dump(matjson::NO_INDENTATION));
     }
+    // A restarted Source Attempt on the same map: the ordered objects, their
+    // runtime IDs and so the manifest are unchanged; only the per-attempt
+    // collision witnesses (and their error) start over.
+    void restartAttempt(){m_witnessed.clear();m_error.clear();}
+    bool sameInstance(std::size_t index,std::uintptr_t instance,int runtimeId)const{
+        return index<m_objects.size()&&instance&&m_objects[index].instance==instance&&m_objects[index].runtimeId==runtimeId;
+    }
+    std::size_t size()const{return m_objects.size();}
     CollisionJson const& manifest()const{return m_manifest;}
     // Diagnostic only: bounded field/chunk hashes locate an unstable Native
     // descriptor without weakening the ordered, full manifest comparison.

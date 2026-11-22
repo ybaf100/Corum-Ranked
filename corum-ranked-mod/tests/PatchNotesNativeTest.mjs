@@ -45,6 +45,11 @@ int main() {
     assert(between.size() == 5 && between[0].version == "0.6.0-beta.95" && between[4].version == "0.6.0-beta.91"); // newest five
     assert(patchNotesBetween(all, "", "0.6.0-beta.89").size() == 3); // unknown installed version
     assert(patchNotesBetween(all, "0.6.0-beta.95", "0.6.0-beta.95").empty());
+    // Update screen tabs: every release being installed (up to 12), then the installed one.
+    auto versions = updatePatchVersions(all, "v0.6.0-beta.88", "v0.6.0-beta.95");
+    assert(versions.fresh == 7 && versions.list.size() == 8 && versions.list[0].version == "0.6.0-beta.95" && versions.list[7].version == "0.6.0-beta.88");
+    assert(updatePatchVersions(all, "0.5.0", "0.6.0-beta.89").list.size() == 3 && updatePatchVersions(all, "0.5.0", "0.6.0-beta.89").fresh == 3);
+    assert(updatePatchShortVersion("0.6.0-beta.91") == "beta.91" && updatePatchShortVersion("0.6.0") == "0.6.0");
 }
 `);
         execFileSync('g++', ['-std=c++23', '-Wall', '-Wextra', '-Werror', '-isystem', json + '/include', '-isystem', result, join(dir, 'test.cpp'),
@@ -56,7 +61,13 @@ int main() {
 test('the update screen guide has 8 cards; the first is installed > new with the changes between', () => {
     const popup = read('src/RankedPopup.cpp');
     const update = popup.slice(popup.indexOf('void renderModUpdate()'), popup.indexOf('void onUpdateChannel(CCObject*)'));
-    assert.match(update, /addGuideCarousel\(corum::ranked::ui::GuidePatchCard\{update\.installedVersion, update\.targetVersion\}\);/);
+    // Design C: PATCH NOTES / HOW RANKED WORKS tabs on the update screen.
+    assert.match(update, /addUpdateTabs\(update\.installedVersion, update\.targetVersion\);/);
+    const tabs = read('src/ui/RankedUpdateTabs.hpp');
+    assert.match(tabs, /i18n::text\("patch-notes", "PATCH NOTES"\)/);
+    assert.match(tabs, /i18n::text\("guide-title", "HOW RANKED WORKS"\)/);
+    assert.match(tabs, /RankedGuideCarousel::create\(\{size\.width, size\.height - kBar - 1\.0f\}\)/);
+    assert.match(popup, /if \(key == KEY_Tab\) \{ tabs->toggleTab\(\); return true; \}/);
     assert.doesNotMatch(update, /RankedPatchNotesPopup/); // no popup on the update screen
     // The resources screen keeps the 7 guide cards.
     const resources = popup.slice(popup.indexOf('void renderResources()'), popup.indexOf('void renderPlacementPoolSelection('));

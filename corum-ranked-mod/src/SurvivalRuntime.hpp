@@ -86,6 +86,11 @@ public:
     bool canReplayCleared() const;
     bool armClearedReplay(GJGameLevel*,cocos2d::CCScene*);
     void leaveObserver();
+    // Eliminated and leaving the round: back to the Ranked lobby as soon as
+    // this match's result is settled (acknowledged then), with no stop on the
+    // standings or personal result board.
+    void requestLeaveToMenu();
+    [[nodiscard]] bool leavingToMenu() const {return !m_view.id.empty() && m_leaveToMenuMatch==m_view.id;}
     bool previouslyEntered() const;
     void noteNativeLaunch();
     void observerReturned();
@@ -215,6 +220,7 @@ private:
     std::chrono::steady_clock::time_point m_startRefusalLogAt{};
     int m_localAttempts=0;
     float m_tick=0;
+    std::string m_leaveToMenuMatch;
     bool m_creating=false,m_pollBusy=false,m_eventBusy=false,m_recoverBusy=false,m_needRecovery=false,m_queuePollBusy=false;
     std::uint64_t m_generation=0,m_queueGeneration=0,m_eventGeneration=0,m_pollGeneration=0;
     std::int64_t m_lastServerNow=0;

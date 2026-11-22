@@ -3,7 +3,7 @@
 #include <array>
 namespace corum::ranked {
 struct CatalogTranslation {char const* key;char const* english;char const* korean;};
-inline constexpr std::array<CatalogTranslation, 1149> kTranslations {{
+inline constexpr std::array<CatalogTranslation, 1154> kTranslations {{
     CatalogTranslation{"A logged-in Geometry Dash account is required.", "A logged-in Geometry Dash account is required.", "로그인된 Geometry Dash 계정이 필요합니다."},
     CatalogTranslation{"A mod update is required before entering Ranked.", "A mod update is required before entering Ranked.", "랭크에 입장하려면 모드를 업데이트하세요."},
     CatalogTranslation{"AUDIO_CACHE_INVALID", "Audio file is missing or empty · retry required", "음원 파일이 없거나 비어 있음 · 재시도 필요"},
@@ -920,6 +920,7 @@ inline constexpr std::array<CatalogTranslation, 1149> kTranslations {{
     CatalogTranslation{"skip-placement-warning", "SKIPPING ENDS PLACEMENT IMMEDIATELY AND CANNOT BE UNDONE.", "배치를 즉시 종료하며 되돌릴 수 없습니다."},
     CatalogTranslation{"solo-end-round-question", "End this round now using the current scores?", "현재 점수로 이번 라운드를 지금 종료할까요?"},
     CatalogTranslation{"solo-mode-line", "1V1 · BEST OF 3", "1대1 · 3판 2선승"},
+    CatalogTranslation{"solo-pause-locked", "Pause is locked for the last 10 seconds", "마지막 10초에는 일시정지할 수 없습니다"},
     CatalogTranslation{"solo-placement", "SOLO PLACEMENT", "싱글 배치"},
     CatalogTranslation{"solo-ranked", "SOLO RANKED", "솔로 랭크"},
     CatalogTranslation{"solo-start-line", "FIND A 1V1 MATCH · ONE PRIVATE BAN · BEST OF 3", "1대1 상대 찾기 · 맵 밴 1회 · 3판 2선승"},
@@ -1130,6 +1131,10 @@ inline constexpr std::array<CatalogTranslation, 1149> kTranslations {{
     CatalogTranslation{"update-channel-debug-note", "Development builds · password required", "개발용 · 비밀번호 필요"},
     CatalogTranslation{"update-channel-installed", "INSTALLED", "현재 설치"},
     CatalogTranslation{"update-channel-release-note", "Stable builds for everyone", "일반 사용자용 안정 버전"},
+    CatalogTranslation{"update-key-versions", "VERSION", "버전 이동"},
+    CatalogTranslation{"update-version-current", "CURRENT", "현재"},
+    CatalogTranslation{"update-version-new", "NEW", "새 버전"},
+    CatalogTranslation{"update-versions", "VERSIONS", "버전"},
     CatalogTranslation{"updating-map", "UPDATING MAP...", "맵 업데이트 중..."},
     CatalogTranslation{"version-or-newer", "OR NEWER", "이상"},
     CatalogTranslation{"version-or-older", "OR OLDER", "이하"},

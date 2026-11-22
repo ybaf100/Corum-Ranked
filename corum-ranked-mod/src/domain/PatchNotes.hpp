@@ -82,4 +82,22 @@ inline std::vector<PatchNoteView> patchNotesBetween(std::vector<PatchNoteView> c
     return result;
 }
 
+// The update screen's version list: the releases being installed (newest
+// first, at most `limit`), then the installed one. `fresh` counts the new.
+struct UpdatePatchVersions { std::vector<PatchNoteView> list; std::size_t fresh = 0; };
+inline UpdatePatchVersions updatePatchVersions(std::vector<PatchNoteView> const& notes, std::string const& from, std::string const& to, std::size_t limit = 12) {
+    UpdatePatchVersions result;
+    result.list = patchNotesBetween(notes, from, to, limit);
+    result.fresh = result.list.size();
+    auto const installed = patchVersionOrder(from);
+    if (installed[0] >= 0)
+        for (auto const& note : notes) if (patchVersionOrder(note.version) == installed) { result.list.push_back(note); break; }
+    return result;
+}
+// "0.6.0-beta.91" -> "beta.91" for the narrow version column.
+inline std::string updatePatchShortVersion(std::string const& version) {
+    auto const dash = version.rfind('-');
+    return dash == std::string::npos || dash + 1 >= version.size() ? version : version.substr(dash + 1);
+}
+
 } // namespace corum::ranked

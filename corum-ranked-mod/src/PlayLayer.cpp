@@ -2,6 +2,7 @@
 #include "spectator/SpectatorNativeWorldEvents.hpp"
 #include "replay/SurvivalReplayRuntime.hpp"
 #include "replay/SurvivalReplayRecorder.hpp"
+#include "replay/SurvivalReplayCbfNative.hpp"
 #include "ui/SurvivalOutcomePanel.hpp"
 #include "SurvivalSpectatorRuntime.hpp"
 #include "RankedRuntime.hpp"
@@ -243,6 +244,8 @@ public:
         corum::ranked::LevelPreparationContext survivalContext;
         corum::ranked::ui::SurvivalHud* survivalHud = nullptr;
         bool survivalWaiting = false;
+        bool collisionManifestPrewarmed = false;
+        bool soloPauseLockNoticed = false;
         // Restart freeze fix: what the wait itself changed, so it can be undone.
         bool survivalWaitPaused = false, survivalResetDeferred = false;
         bool rankedInitialized = false;
@@ -754,6 +757,10 @@ public:
             getParent()==director->getRunningScene() && !director->getNextScene();
         if(ownsScene)runtime.sceneEntered(m_fields->levelId);
         auto remaining=runtime.countdownMs();
+        // Once per scene, while gameplay is held: the replay collision manifest
+        // (every map object) would otherwise be built in the first played frame.
+        if(ownsScene && !std::exchange(m_fields->collisionManifestPrewarmed,true))
+            corum::ranked::replay::prewarmCbfCollisionWorld(static_cast<PlayLayer*>(this));
         if(m_fields->entryOverlay)m_fields->entryOverlay->present(runtime.view().ownEntered,remaining);
         m_queuedButtons.clear();FMODAudioEngine::sharedEngine()->pauseAllMusic(true);
         if(!runtime.canPlay() || !runtime.view().ownEntered || !remaining || *remaining>0 ||
@@ -1977,6 +1984,29 @@ public:
         PlayLayer::showCompleteText();
     }
 
+    // Solo: no pause in the last 10 s of the round timer (the HUD's remaining
+    // time). A pause there froze the opponent's spectator view across the
+    // round end and left the spectate state tangled (beta.90 PC logs).
+    bool soloPauseLocked() {
+        if (!m_fields->rankedInitialized || !m_fields->rankedLevel || m_fields->survivalLevel ||
+            m_fields->nativeEntryHeld || m_fields->spectatorMode || m_isPaused) return false;
+        auto& runtime = corum::ranked::RankedRuntime::get();
+        if (runtime.isSpectating() || runtime.view().stage != corum::ranked::RuntimeStage::Matched) return false;
+        auto const& match = runtime.view().match;
+        auto const remaining = runtime.nativeEntryStartGranted() && match.deathmatchSequence == 0
+            ? std::optional<std::int64_t>(300'000 + runtime.signedDeadlineMillis().value_or(0))
+            : runtime.signedDeadlineMillis();
+        return corum::ranked::soloPauseLockedAt(remaining);
+    }
+    void pauseGame(bool unfocused) {
+        if (soloPauseLocked()) {
+            log::info("[RankedPause] blocked: last 10 s of the round level={} unfocused={}", m_fields->levelId, unfocused);
+            if (!unfocused && !std::exchange(m_fields->soloPauseLockNoticed, true))
+                Notification::create(corum::ranked::i18n::text("solo-pause-locked", "Pause is locked for the last 10 seconds"), NotificationIcon::Warning, 1.5f)->show();
+            return;
+        }
+        PlayLayer::pauseGame(unfocused);
+    }
     void onQuit() {
         if(m_fields->survivalReplayLevel && !corum::ranked::resumeRankedPauseBeforeQuit(this))return;
         auto& survival=corum::ranked::SurvivalRuntime::get();

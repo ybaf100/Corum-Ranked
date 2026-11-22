@@ -1635,6 +1635,10 @@
     "en": "SKIPPING ENDS PLACEMENT IMMEDIATELY AND CANNOT BE UNDONE.",
     "ko": "배치를 즉시 종료하며 되돌릴 수 없습니다."
   },
+  "solo-pause-locked": {
+    "en": "Pause is locked for the last 10 seconds",
+    "ko": "마지막 10초에는 일시정지할 수 없습니다"
+  },
   "solo-placement": {
     "en": "SOLO PLACEMENT",
     "ko": "싱글 배치"
@@ -2314,6 +2318,22 @@
   "history-connection-help": {
     "en": "Reconnect to continue viewing your match history.",
     "ko": "경기 기록을 계속 보려면 다시 접속하세요."
+  },
+  "update-key-versions": {
+    "en": "VERSION",
+    "ko": "버전 이동"
+  },
+  "update-version-current": {
+    "en": "CURRENT",
+    "ko": "현재"
+  },
+  "update-version-new": {
+    "en": "NEW",
+    "ko": "새 버전"
+  },
+  "update-versions": {
+    "en": "VERSIONS",
+    "ko": "버전"
   },
   "update-channel": {
     "en": "UPDATE CHANNEL",

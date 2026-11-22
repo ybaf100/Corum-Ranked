@@ -90,6 +90,7 @@ void SurvivalRuntime::tick() {
     pumpSurvivalQueueOverlay();
     SurvivalSpectatorRuntime::get().tick();
     pumpSurrenderReturn();
+    if(leavingToMenu() && (m_view.result.isObject() || m_view.state=="CANCELLED"))acknowledge();
     if(token.empty())return;
     RankedRuntime::get().updateSessionHeartbeat();
     if(!active()) {
@@ -716,8 +717,15 @@ bool SurvivalRuntime::armClearedReplay(GJGameLevel* level,CCScene* origin){
 void SurvivalRuntime::markPersonalResultRequested(){
     Mod::get()->setSavedValue(resultFlowKey()+":requested",true);(void)Mod::get()->saveData();
 }
+void SurvivalRuntime::requestLeaveToMenu(){
+    if(!active() || !m_view.ownEliminated)return;
+    geode::log::info("[SurvivalResult] leave to menu requested match={} settled={}",m_view.id,m_view.result.isObject());
+    m_leaveToMenuMatch=m_view.id;m_ackRetryAt={};
+    if(m_view.result.isObject() || m_view.state=="CANCELLED")acknowledge();
+}
 void SurvivalRuntime::leaveObserver(){
     if(!observing())return;
+    requestLeaveToMenu();
     chooseOutcome(SurvivalOutcomeChoice::Undecided);
     // Leaving after elimination goes to the personal result (pending until the
     // server settles LP). An undecided eliminated player had no screen with any
@@ -760,7 +768,12 @@ bool SurvivalRuntime::beginFreePlayNativeQuit(GJGameLevel* level) {
 bool SurvivalRuntime::interceptFreePlayNativeQuit(GJGameLevel* level) const {
     return freePlayReturnPending() && m_freePlayQuitLevel && m_freePlayQuitLevel.data()==level;
 }
-void SurvivalRuntime::finishFreePlayNativeQuit() {m_freePlayNativeQuitFinished=true;pumpFreePlayReturn();}
+void SurvivalRuntime::finishFreePlayNativeQuit() {
+    // Quitting the observed map after elimination leaves the match (beta.90:
+    // the board stopped on standings until the player found LEAVE again).
+    if(m_freePlay.active && m_freePlay.observer && m_view.ownEliminated)requestLeaveToMenu();
+    m_freePlayNativeQuitFinished=true;pumpFreePlayReturn();
+}
 void SurvivalRuntime::pumpFreePlayReturn() {
     if(!freePlayReturnPending() || m_freePlayReturnQueued)return;
     auto* director=CCDirector::sharedDirector();auto* scene=director->getRunningScene();

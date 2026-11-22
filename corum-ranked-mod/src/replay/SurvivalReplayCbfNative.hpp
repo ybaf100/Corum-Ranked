@@ -28,6 +28,10 @@ void restoreCbfInitial(PlayLayer*,matjson::Value const&);
 // map references; null when one cannot be identified. Call after
 // captureCbfInitial(layer,true).
 matjson::Value captureCbfInitialCollisions(PlayLayer*);
+// Builds the map's collision manifest while the Survival countdown holds the
+// scene, so the first Source Attempt (and every restart) reuses it instead of
+// freezing its first gameplay frame. No-op without Click Between Frames.
+void prewarmCbfCollisionWorld(PlayLayer*);
 bool cbfInitialLogsKept(matjson::Value const& cbfInitial);
 // Playback: sets those targets on the players in this world (after the
 // player snapshot); returns a problem when one cannot be resolved.

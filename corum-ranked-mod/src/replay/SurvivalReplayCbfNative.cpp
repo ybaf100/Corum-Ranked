@@ -58,8 +58,24 @@ ReplayCollisionIdentity::Object collisionObject(PlayLayer* layer,std::size_t ind
     auto* object=typeinfo_cast<GameObject*>(layer->m_objects->objectAtIndex(static_cast<unsigned>(index)));
     return {reinterpret_cast<std::uintptr_t>(object),object?object->m_uniqueID:-1,collisionDefinition(object)};
 }
-void prepareCollisionWorld(PlayLayer* layer,bool reset=false){
+// Same PlayLayer, same ordered object instances and runtime IDs as the
+// manifest already proven for this map (a GD restart keeps every object).
+bool sameCollisionObjects(PlayLayer* layer,CollisionWorld const& world){
+    if(!layer||!layer->m_objects||world.owner!=layer||!world.error.empty())return false;
+    auto const count=layer->m_objects->count();
+    if(count!=world.identities.size()||count!=world.retained.size())return false;
+    for(unsigned i=0;i<count;++i){auto* object=typeinfo_cast<GameObject*>(layer->m_objects->objectAtIndex(i));
+        if(!object||!world.identities.sameInstance(i,reinterpret_cast<std::uintptr_t>(object),object->m_uniqueID))return false;}
+    return true;
+}
+void prepareCollisionWorld(PlayLayer* layer,bool reset=false,bool sourceRestart=false){
     auto& world=collisionWorld();if(world.owner==layer&&!reset)return;
+    // Every Survival restart begins a new Source Attempt. Re-proving the
+    // unchanged manifest serialized and hashed every map object about ten
+    // times (1.0-1.3 s frozen on each restart of a large map, beta.90 PC
+    // logs); keep it and start only the per-attempt witnesses over. Playback
+    // (prepareCbfInitialCollisionLogs) always re-proves the full manifest.
+    if(reset&&sourceRestart&&sameCollisionObjects(layer,world)){world.identities.restartAttempt();return;}
     world.retained.clear();world.error.clear();world.owner=layer;std::vector<ReplayCollisionIdentity::Object> objects;
     if(layer&&layer->m_objects&&layer->m_objects->count()>500000){world.identities.reset({});world.diagnostics=nullptr;world.error="CBF_MAP_OBJECT_BUDGET";return;}
     if(layer&&layer->m_objects){objects.reserve(layer->m_objects->count());world.retained.reserve(layer->m_objects->count());
@@ -348,7 +364,7 @@ Json captureCbfInitial(PlayLayer* layer,bool newSourceAttempt){
     Json value;value["schema"]=CbfBoundarySchema;value["players"]=Json::array();
     if(!layer)return value;
     if(newSourceAttempt&&(layer!=PlayLayer::get()||state().frame))return value;
-    prepareCollisionWorld(layer,newSourceAttempt);value["objects"]=collisionWorld().identities.manifest();value["objectDiagnostics"]=collisionWorld().diagnostics;
+    prepareCollisionWorld(layer,newSourceAttempt,newSourceAttempt);value["objects"]=collisionWorld().identities.manifest();value["objectDiagnostics"]=collisionWorld().diagnostics;
     for(auto* p:{layer->m_player1,layer->m_player2}){if(!p){value["players"].push(nullptr);continue;}Json item;item["lastPosition"]=point(p->m_lastPosition);auto logs=Json::array();for(auto* log:{p->m_collisionLogTop,p->m_collisionLogBottom,p->m_collisionLogLeft,p->m_collisionLogRight})logs.push(log?static_cast<int>(log->count()):-1);item["collisionLogs"]=logs;value["players"].push(item);}return value;
 }
 std::string prepareCbfInitialCollisionLogs(PlayLayer* layer,Json const& value,bool nativeResetOwned){
@@ -461,6 +477,10 @@ Json captureCbfInitialCollisions(PlayLayer* layer){
         targets.push(sides);logs.push(kept);
     }
     Json result;result["targets"]=targets;result["logs"]=logs;return result;
+}
+void prewarmCbfCollisionWorld(PlayLayer* layer){
+    if(!layer||!cbfMod()||state().frame)return;
+    prepareCollisionWorld(layer,true,true);
 }
 bool cbfInitialLogsKept(Json const& cbfInitial){
     for(auto const& player:cbfInitial["players"].asArray().unwrapOr(std::vector<Json>{}))
