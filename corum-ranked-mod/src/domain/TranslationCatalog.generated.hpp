@@ -3,7 +3,7 @@
 #include <array>
 namespace corum::ranked {
 struct CatalogTranslation {char const* key;char const* english;char const* korean;};
-inline constexpr std::array<CatalogTranslation, 1148> kTranslations {{
+inline constexpr std::array<CatalogTranslation, 1149> kTranslations {{
     CatalogTranslation{"A logged-in Geometry Dash account is required.", "A logged-in Geometry Dash account is required.", "로그인된 Geometry Dash 계정이 필요합니다."},
     CatalogTranslation{"A mod update is required before entering Ranked.", "A mod update is required before entering Ranked.", "랭크에 입장하려면 모드를 업데이트하세요."},
     CatalogTranslation{"AUDIO_CACHE_INVALID", "Audio file is missing or empty · retry required", "음원 파일이 없거나 비어 있음 · 재시도 필요"},
@@ -337,6 +337,7 @@ inline constexpr std::array<CatalogTranslation, 1148> kTranslations {{
     CatalogTranslation{"death-match", "DEATH MATCH", "데스 매치"},
     CatalogTranslation{"debug", "DEBUG", "디버그"},
     CatalogTranslation{"debug-bot", "BOT MATCH", "봇 매치"},
+    CatalogTranslation{"debug-fixed-map", "FIXED MAP BATTLE", "지정맵 매치"},
     CatalogTranslation{"debug-logs-busy", "SENDING...", "보내는 중..."},
     CatalogTranslation{"debug-logs-crash", "CRASH LOGS", "크래시 로그"},
     CatalogTranslation{"debug-logs-current", "NOW", "현재"},

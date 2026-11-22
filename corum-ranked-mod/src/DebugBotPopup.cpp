@@ -84,8 +84,6 @@ protected:
         m_actions->addChild(button(this, "Bot Ban", {105.0f, 104.0f}, menu_selector(DebugBotConfigPopup::onBan)));
         m_actions->addChild(button(this, "Discord", {105.0f, 67.0f}, menu_selector(DebugBotConfigPopup::onDiscord)));
         m_actions->addChild(button(this, "START", {320.0f, 44.0f}, menu_selector(DebugBotConfigPopup::onStart), 0.78f));
-        // Designated maps: vs this bot, or a challenge to a player in the lobby.
-        m_actions->addChild(button(this, "Fixed Maps", {180.0f, 44.0f}, menu_selector(DebugBotConfigPopup::onFixedMaps), 0.6f));
 
         m_difficulty = valueLabel({300.0f, 198.0f});
         m_scenario = valueLabel({285.0f, 151.0f});
@@ -131,17 +129,6 @@ protected:
         refreshValues();
     }
 
-    void onFixedMaps(CCObject* sender) {
-        corum::ranked::DebugBotMatchOptions options;
-        options.password = kDebugPassword;
-        options.difficulty = kDifficulties[m_difficultyIndex];
-        options.scenario = kScenarioValues[m_scenarioIndex];
-        options.botBan = m_randomBan ? "RANDOM" : "NO_BAN";
-        options.sendDiscordEvents = m_sendDiscord;
-        onClose(sender);
-        corum::ranked::showDebugFixedMapPopup(std::move(options));
-    }
-
     void onStart(CCObject* sender) {
         corum::ranked::RankedRuntime::get().startDebugBotMatch({
             .password = kDebugPassword,
@@ -168,10 +155,12 @@ public:
 class DebugBotPasswordPopup final : public Popup {
 protected:
     TextInput* m_password = nullptr;
+    bool m_fixedMaps = false;
 
-    bool init() override {
+    bool init(bool fixedMaps) {
+        m_fixedMaps = fixedMaps;
         if (!Popup::init(330.0f, 205.0f)) return false;
-        setTitle("DEBUG BOT MATCH", "goldFont.fnt", 0.65f, 22.0f);
+        setTitle(fixedMaps ? "FIXED MAP BATTLE" : "DEBUG BOT MATCH", "goldFont.fnt", 0.65f, 22.0f);
         m_password = TextInput::create(220.0f, "Password");
         m_password->setLabel("Password");
         m_password->setPasswordMode(true);
@@ -200,15 +189,25 @@ protected:
             return;
         }
         if (m_password) m_password->setString("");
+        if (m_fixedMaps) {
+            onClose(sender);
+            corum::ranked::DebugBotMatchOptions options;
+            options.password = kDebugPassword;
+            options.difficulty = "NORMAL";
+            options.scenario = "NORMAL_MATCH";
+            options.botBan = "NO_BAN";
+            corum::ranked::showDebugFixedMapPopup(std::move(options));
+            return;
+        }
         auto* next = DebugBotConfigPopup::create();
         onClose(sender);
         if (next) next->show();
     }
 
 public:
-    static DebugBotPasswordPopup* create() {
+    static DebugBotPasswordPopup* create(bool fixedMaps = false) {
         auto* popup = new DebugBotPasswordPopup();
-        if (popup && popup->init()) {
+        if (popup && popup->init(fixedMaps)) {
             popup->autorelease();
             return popup;
         }
@@ -223,6 +222,10 @@ namespace corum::ranked {
 
 void showDebugBotPasswordPopup() {
     if (auto* popup = DebugBotPasswordPopup::create()) popup->show();
+}
+
+void showDebugFixedMapPasswordPopup() {
+    if (auto* popup = DebugBotPasswordPopup::create(true)) popup->show();
 }
 
 } // namespace corum::ranked

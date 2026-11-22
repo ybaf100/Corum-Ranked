@@ -675,6 +675,10 @@
     "en": "BOT MATCH",
     "ko": "봇 매치"
   },
+  "debug-fixed-map": {
+    "en": "FIXED MAP BATTLE",
+    "ko": "지정맵 매치"
+  },
   "debug-player-totals": {
     "en": "Players: {} · Total: {}",
     "ko": "플레이어 {}명 · 총 {}명"

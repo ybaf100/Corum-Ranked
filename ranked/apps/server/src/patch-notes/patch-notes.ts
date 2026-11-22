@@ -10,6 +10,15 @@ export interface PatchNote {
 
 export const PATCH_NOTES: readonly PatchNote[] = Object.freeze([
   {
+    version: "0.6.0-beta.91", date: "2026-11-22",
+    en: [
+      "Debug: the DEBUG menu now lists Bot Match, Spectate, Admin and Fixed Map Battle. The fixed-map screen uses the Corum style, and the bot difficulty is chosen in its opponent picker.",
+    ],
+    ko: [
+      "디버그: DEBUG 메뉴에 봇 매치, 관전, Admin, 지정맵 매치가 나옵니다. 지정맵 화면을 Corum 스타일로 바꾸고, 봇 난이도는 상대 선택에서 고릅니다.",
+    ],
+  },
+  {
     version: "0.6.0-beta.90", date: "2026-11-22",
     en: [
       "Debug: fixed-map battles. Pick R1, R2, R3 and the Death Match map from the map pool and play them against the Debug Bot, or send them to a debug player in the lobby (that match counts for LP). No ban phase; empty slots are random.",

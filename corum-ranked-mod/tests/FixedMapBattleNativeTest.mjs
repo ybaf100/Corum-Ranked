@@ -48,10 +48,14 @@ test('debug client: fixed maps for the bot, lobby challenges and the incoming of
     const adopt = runtime.slice(runtime.indexOf('void RankedRuntime::adoptDebugChallengeMatch('), runtime.indexOf('bool RankedRuntime::prepareSurvivalDebugAdmission('));
     assert.match(adopt, /m_view\.stage != RuntimeStage::Ready \|\| m_controlBusy\) return;/);
     assert.match(adopt, /setStage\(RuntimeStage::Matched,/);
-    // The picker (design B) is opened from the Debug Bot settings.
+    // The picker (design B) is its own DEBUG menu entry behind the debug password.
+    const menu = read('src/debug/DebugMenuPopup.cpp');
+    assert.match(menu, /i18n::text\("debug-fixed-map","FIXED MAP BATTLE"\)/);
+    assert.match(menu, /if \(choice == 3\) corum::ranked::showDebugFixedMapPasswordPopup\(\);/);
     const popup = read('src/DebugBotPopup.cpp');
-    assert.match(popup, /button\(this, "Fixed Maps"/);
-    assert.match(popup, /corum::ranked::showDebugFixedMapPopup\(std::move\(options\)\);/);
+    assert.doesNotMatch(popup, /"Fixed Maps"/);
+    assert.match(popup, /if \(m_fixedMaps\) \{[\s\S]*?corum::ranked::showDebugFixedMapPopup\(std::move\(options\)\);/);
+    assert.match(popup, /void showDebugFixedMapPasswordPopup\(\) \{\s*if \(auto\* popup = DebugBotPasswordPopup::create\(true\)\) popup->show\(\);/);
     const picker = read('src/DebugFixedMapPopup.cpp');
     assert.match(picker, /self->m_order\.pick\(self->m_maps\[self->m_shown\[static_cast<std::size_t>\(row\)\]\]\.canonicalLevelId\);/);
     assert.match(picker, /runtime\.startDebugBotMatch\(options\);/);

@@ -70,7 +70,7 @@ namespace corum::ranked{inline std::optional<std::int64_t> parseIso8601Millis(st
 struct RankedRuntime{struct View{RuntimeStage stage=RuntimeStage::Ready;bool soloEnabled=true,survivalEnabled=true;bool accountActiveElsewhere=true;}v;std::string token="session";int reloads=0,takeovers=0,volumeUpdates=0;
  static RankedRuntime& get(){static RankedRuntime r;return r;}auto const& view()const{return v;}std::string spectatorLiveSessionToken()const{return token;}
  void applyAudioVolumes(matjson::Value const&){++volumeUpdates;}void observeSeasons(matjson::Value const&){++reloads;}void applyAdminProjection(matjson::Value const&,std::string const&){++reloads;}void begin(){++reloads;}void takeOverSession(){++takeovers;v.accountActiveElsewhere=false;}};
-inline int bots=0;void showDebugBotPasswordPopup(){++bots;}
+inline int bots=0,fixedMaps=0;void showDebugBotPasswordPopup(){++bots;}void showDebugFixedMapPasswordPopup(){++fixedMaps;}
 namespace i18n{std::string text(char const*,char const* english){return english;}std::string insertValue(std::string p,std::string const& v){if(auto at=p.find("{}");at!=std::string::npos)p.replace(at,2,v);return p;}}
 namespace ui{inline constexpr ccColor3B Red{255,60,60},Steel{80,120,220},Accent{64,224,255},Gold{255,205,65},Surface{8,15,25},SurfaceRaised{18,25,40},Text{230,235,244},TextMuted{150,150,150};
  enum class FontWeight{SemiBold,Bold,ExtraBold,Black};CCNode* surface(CCSize s,CCPoint p,ccColor3B,ccColor3B,int,bool){auto* n=CCNode::create();n->size=s;n->position=p;return n;}
@@ -94,8 +94,12 @@ using namespace corum::ranked;using namespace corum::ranked::debug;
 int main(){
  auto& runtime=RankedRuntime::get();auto* account=GJAccountManager::get();
  account->m_username="other";assert(!DebugAdminPopup::create());auto* denied=DebugMenuPopup::create();
- auto* actions=dynamic_cast<CCMenu*>(denied->m_mainLayer->children[0]->children.back());assert(actions&&actions->children.size()==3);
- assert(!dynamic_cast<CCMenuItem*>(actions->children.back())->enabled);
+ auto* actions=dynamic_cast<CCMenu*>(denied->m_mainLayer->children[0]->children.back());assert(actions&&actions->children.size()==4);
+ // BOT MATCH, SPECTATE, Admin, FIXED MAP BATTLE; Admin is locked for other accounts.
+ for(int tag=0;tag<4;++tag)assert(dynamic_cast<CCNode*>(actions->children[static_cast<std::size_t>(tag)])->tag==tag);
+ assert(!dynamic_cast<CCMenuItem*>(actions->children[2])->enabled);
+ auto* survivalMenu=DebugMenuPopup::create(RankedMode::Survival);auto* survivalActions=dynamic_cast<CCMenu*>(survivalMenu->m_mainLayer->children[0]->children.back());
+ assert(survivalActions->children.size()==2);
  account->m_username="hwanhee1";auto* admin=DebugAdminPopup::create();assert(admin);admin->show();
  admin->execute(1,false);assert(web::jobs.empty());admin->m_password->setString("password");
  for(auto value:{"","-1","1.5","2147483648"}){admin->m_lp->setString(value);admin->execute(1,false);}assert(web::jobs.empty());
@@ -118,6 +122,8 @@ int main(){
  runtime.v.stage=RuntimeStage::Matched;assert(!DebugAdminPopup::create());runtime.v.stage=RuntimeStage::Ready;
  auto* debug=DebugMenuPopup::create();debug->show();CCMenuItemSpriteExtra first;first.setTag(0);debug->onSelect(&first);
  assert(bots==0&&debug->parent);drainMainQueue();assert(bots==1&&!debug->parent);
+ auto* fixed=DebugMenuPopup::create();fixed->show();CCMenuItemSpriteExtra fourth;fourth.setTag(3);fixed->onSelect(&fourth);
+ drainMainQueue();assert(fixedMaps==1&&bots==1&&!fixed->parent);
  // The music entry retires the Admin owner before opening its own authenticated modal.
  auto* owner=DebugAdminPopup::create();owner->m_scope=2;owner->refreshScope();owner->show();CCMenuItemSpriteExtra music;music.setTag(7);
  owner->onAction(&music);assert(!owner->m_closed);owner->m_password->setString("password");
