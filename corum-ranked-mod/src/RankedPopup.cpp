@@ -853,6 +853,9 @@ class CorumRankedLayer final : public CCLayerColor {
         updateAutomation();
         resumeModeSelectionAfterQueue(runtime.view());
         leaveMapPoolOnMatch(runtime.view());
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+        offerDebugChallenge(runtime.view());
+#endif
 
         if (m_rankTransitionLayer || m_gradeUpLayer || m_resultScoreLayer || m_resultScorePending) {
             updateDynamicUi(); syncAudioMode(); return;
@@ -2217,6 +2220,22 @@ class CorumRankedLayer final : public CCLayerColor {
         }
     }
 
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+    // Debug: a fixed-map challenge from a player in the lobby (scores LP).
+    std::string m_offeredChallenge;
+    void offerDebugChallenge(RuntimeView const& view) {
+        if (view.stage != RuntimeStage::Ready || view.debugIncoming.empty()) return;
+        auto const& challenge = view.debugIncoming.front();
+        if (challenge.id == m_offeredChallenge) return;
+        m_offeredChallenge = challenge.id;
+        std::string maps;
+        for (auto const& [slot, title] : challenge.maps) maps += fmt::format("{}{}: {}", maps.empty() ? "" : "\n", slot, title.empty() ? "RANDOM" : title);
+        auto const body = fmt::format("<cy>{}</c> challenges you to a <cg>fixed-map battle</c>.\nIt counts for LP like any Ranked match.\n\n{}", challenge.from, maps);
+        createQuickPopup("FIXED MAP CHALLENGE", body, "DECLINE", "ACCEPT", [id = challenge.id](FLAlertLayer*, bool accept) {
+            RankedRuntime::get().answerDebugChallenge(id, accept);
+        });
+    }
+#endif
     void onUpdateChannel(CCObject*){openUpdateChannel(true);}
     // The update screen's channel chip, or Settings' UPDATE CHANNEL button
     // (any stage): a new channel restarts the runtime, which gates entry on

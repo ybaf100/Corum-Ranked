@@ -10,6 +10,15 @@ export interface PatchNote {
 
 export const PATCH_NOTES: readonly PatchNote[] = Object.freeze([
   {
+    version: "0.6.0-beta.90", date: "2026-11-22",
+    en: [
+      "Debug: fixed-map battles. Pick R1, R2, R3 and the Death Match map from the map pool and play them against the Debug Bot, or send them to a debug player in the lobby (that match counts for LP). No ban phase; empty slots are random.",
+    ],
+    ko: [
+      "디버그: 지정맵 배틀. 맵 풀에서 R1, R2, R3, 데스매치 맵을 골라 디버그 봇과 하거나, 로비에 있는 디버그 플레이어에게 보낼 수 있습니다 (이 경기는 LP에 반영). 밴 단계는 없고 빈 칸은 무작위입니다.",
+    ],
+  },
+  {
     version: "0.6.0-beta.89", date: "2026-11-20",
     en: [
       "Update screen: the guide now has 8 cards; the first shows your version > the new version with every change in between (the newest 5 releases).",

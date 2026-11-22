@@ -202,3 +202,47 @@ export const selectDeathmatchMap = (
   }
   return snapshotMap(chosen);
 };
+
+/** A designated-map match (debug): the round maps in order and an optional
+ * Death Match map, by canonical id. */
+export interface FixedMapRequest {
+  readonly rounds: readonly (string | null)[];
+  readonly deathmatch?: string | null;
+}
+export interface FixedMatchMaps {
+  readonly rounds: readonly RankedMapSnapshot[];
+  readonly deathmatch: RankedMapSnapshot | null;
+}
+
+/**
+ * Resolves a designated-map request against the active map pool: exactly
+ * `roundCount` round maps in the requested order, each empty slot filled from
+ * `fillers` (unused, in order). An unknown or repeated map is refused.
+ */
+export const resolveFixedMatchMaps = (
+  request: FixedMapRequest,
+  maps: readonly RankedMap[],
+  fillers: readonly RankedMapSnapshot[],
+  roundCount: number,
+): FixedMatchMaps => {
+  const canonical = canonicalActiveMaps(maps);
+  const find = (id: string): RankedMapSnapshot => {
+    const map = canonical.find((entry) => entry.canonicalLevelId === id);
+    if (!map) throw new RankedDomainError("INVALID_CONFIG", `Map ${id} is not in the active map pool`, { canonicalLevelId: id });
+    return snapshotMap(map);
+  };
+  if (request.rounds.length > roundCount) {
+    throw new RankedDomainError("INVALID_CONFIG", `At most ${roundCount} round maps can be chosen`, { roundCount });
+  }
+  const chosen = request.rounds.map((id) => (id ? find(id) : null));
+  const ids = chosen.filter((map): map is RankedMapSnapshot => map !== null).map((map) => map.canonicalLevelId);
+  if (new Set(ids).size !== ids.length) throw new RankedDomainError("INVALID_CONFIG", "A map can be chosen for one round only", {});
+  const spare = fillers.filter((map) => !ids.includes(map.canonicalLevelId));
+  const rounds: RankedMapSnapshot[] = [];
+  for (let index = 0; index < roundCount; index++) {
+    const map = chosen[index] ?? spare.shift();
+    if (!map) throw new RankedDomainError("INSUFFICIENT_POOL_MAPS", "Not enough maps to fill the rounds", { roundCount });
+    rounds.push(map);
+  }
+  return Object.freeze({ rounds: Object.freeze(rounds), deathmatch: request.deathmatch ? find(request.deathmatch) : null });
+};

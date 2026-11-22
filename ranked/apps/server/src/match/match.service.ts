@@ -139,6 +139,8 @@ interface LockedMatchRow {
   effective_tier: string;
   candidate_maps_snapshot: unknown;
   selected_round_maps_snapshot: unknown | null;
+  /** Designated maps (debug): rounds in order, optional Death Match map. */
+  fixed_maps?: unknown | null;
   series_state: unknown;
   state: MatchState;
   state_version: number;
@@ -2209,13 +2211,17 @@ export class MatchService {
     const candidates = parseJson<RankedMapSnapshot[]>(match.candidate_maps_snapshot);
     const series = parseJson<MatchSeriesState>(match.series_state);
     const banEnabled = mapBanOf(series);
-    const resolution = resolveBans(
-      candidates,
-      banEnabled && match.ban_a_confirmed_at ? match.ban_a_canonical_id : null,
-      banEnabled && match.ban_b_confirmed_at ? match.ban_b_canonical_id : null,
-      this.random,
-      roundMapCountOf(matchFormatOf(series)),
-    );
+    const fixed = match.fixed_maps ? parseJson<{ rounds: RankedMapSnapshot[] }>(match.fixed_maps) : null;
+    // Designated maps are played in their chosen order (no bans were offered).
+    const resolution = fixed && fixed.rounds.length === roundMapCountOf(matchFormatOf(series))
+      ? { selectedRoundMaps: fixed.rounds }
+      : resolveBans(
+        candidates,
+        banEnabled && match.ban_a_confirmed_at ? match.ban_a_canonical_id : null,
+        banEnabled && match.ban_b_confirmed_at ? match.ban_b_canonical_id : null,
+        this.random,
+        roundMapCountOf(matchFormatOf(series)),
+      );
     const readyDeadline = new Date(
       now.getTime() + resourcePrepareSeconds(config.operational.timeouts.readySeconds) * 1_000,
     );
@@ -3296,7 +3302,9 @@ export class MatchService {
 
     const effectiveTier = match.effective_tier as RankedConfigSnapshot["operational"]["tierBands"][number]["tier"];
     const band = tierBandFor(effectiveTier, config.operational.tierBands);
-    const map = selectDeathmatchMap(
+    // A designated Death Match map is used for every Death Match.
+    const fixedDeathmatch = match.fixed_maps ? parseJson<{ deathmatch: RankedMapSnapshot | null }>(match.fixed_maps).deathmatch : null;
+    const map = fixedDeathmatch ?? selectDeathmatchMap(
       band.deathmatchPool,
       deathmatchEligibleMaps,
       priorCanonicalIds,

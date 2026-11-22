@@ -3,6 +3,7 @@
 #if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
 
 #include "RankedRuntime.hpp"
+#include "DebugFixedMapPopup.hpp"
 
 #include <Geode/Geode.hpp>
 #include <Geode/ui/Popup.hpp>
@@ -83,6 +84,8 @@ protected:
         m_actions->addChild(button(this, "Bot Ban", {105.0f, 104.0f}, menu_selector(DebugBotConfigPopup::onBan)));
         m_actions->addChild(button(this, "Discord", {105.0f, 67.0f}, menu_selector(DebugBotConfigPopup::onDiscord)));
         m_actions->addChild(button(this, "START", {320.0f, 44.0f}, menu_selector(DebugBotConfigPopup::onStart), 0.78f));
+        // Designated maps: vs this bot, or a challenge to a player in the lobby.
+        m_actions->addChild(button(this, "Fixed Maps", {180.0f, 44.0f}, menu_selector(DebugBotConfigPopup::onFixedMaps), 0.6f));
 
         m_difficulty = valueLabel({300.0f, 198.0f});
         m_scenario = valueLabel({285.0f, 151.0f});
@@ -126,6 +129,17 @@ protected:
     void onDiscord(CCObject*) {
         m_sendDiscord = !m_sendDiscord;
         refreshValues();
+    }
+
+    void onFixedMaps(CCObject* sender) {
+        corum::ranked::DebugBotMatchOptions options;
+        options.password = kDebugPassword;
+        options.difficulty = kDifficulties[m_difficultyIndex];
+        options.scenario = kScenarioValues[m_scenarioIndex];
+        options.botBan = m_randomBan ? "RANDOM" : "NO_BAN";
+        options.sendDiscordEvents = m_sendDiscord;
+        onClose(sender);
+        corum::ranked::showDebugFixedMapPopup(std::move(options));
     }
 
     void onStart(CCObject* sender) {

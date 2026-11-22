@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { signalAfterCommit } from "../database/database-work.js";
 import {
+  BadRequestException,
   ConflictException,
   Inject,
   Injectable,
@@ -13,7 +14,11 @@ import {
   createMatchSeries,
   displayedTierForProfile,
   effectiveTierForMatch,
+  RankedDomainError,
+  resolveFixedMatchMaps,
+  roundMapCountOf,
   selectCandidateMaps,
+  type FixedMapRequest,
   tierBandFor,
   type MatchmakingPolicy,
   type RandomSource,
@@ -54,6 +59,8 @@ export interface DebugBotMatchSettings {
   readonly botBan: DebugBotBan;
   readonly sendDiscordEvents: boolean;
   readonly mmrOffset: number;
+  /** Designated maps: no ban phase, these rounds in order. */
+  readonly fixedMaps?: FixedMapRequest | null;
 }
 
 export interface DebugBotMatchCreation {
@@ -312,6 +319,7 @@ export class QueueService {
           botSessionId,
         },
         updateQueue: false,
+        fixedMaps: settings.fixedMaps ?? null,
       });
       const botContext: RankedSessionContext = {
         sessionId: botSessionId,
@@ -330,6 +338,64 @@ export class QueueService {
         botContext,
         settings,
       };
+    });
+  }
+
+  /**
+   * A debug lobby challenge was accepted: a scoring Ranked match between the
+   * challenger and `target` on the designated maps (no ban phase). Both must
+   * be connected, placed, out of the queue and without an active match.
+   */
+  public async createChallengeMatch(
+    challenger: RankedSessionContext,
+    target: RankedSessionContext,
+    body: EnvironmentRecheckDto,
+    fixedMaps: FixedMapRequest,
+  ): Promise<{ matchId: string; challengerMatchToken: string; targetMatchToken: string }> {
+    return this.config.withAdmission(async () => {
+      this.sessions.assertEnvironment(body.installedMods);
+      const config = this.config.getSnapshot();
+      if (!config.operational.enabled || !config.operational.timeouts || !config.operational.mmrPolicy) {
+        throw new ServiceUnavailableException("Ranked is not operationally configured");
+      }
+      const mmrPolicy = config.operational.mmrPolicy;
+      for (const player of [challenger, target]) await this.matches.settleActiveMatchesForPlayer(player.playerId);
+      const now = this.clock.now();
+      return this.database.transaction(async (transaction) => {
+        // One lock order for both players (no deadlock with a reverse challenge).
+        const ordered = [challenger, target].sort((a, b) => a.playerId.localeCompare(b.playerId));
+        for (const player of ordered) await this.lockAdmission(transaction, player);
+        const rows: QueueRow[] = [];
+        for (const player of [challenger, target]) {
+          const profile = await this.lockProfile(transaction, player.playerId);
+          await this.assertPlacementComplete(transaction, profile, player.playerId, mmrPolicy.placementGames);
+          await this.assertNoActiveMatch(transaction, player.playerId);
+          const queued = await transaction.query<{ status: string }>(
+            "SELECT status FROM ranked_queue_entries WHERE player_id = $1 FOR UPDATE",
+            [player.playerId],
+          );
+          if (queued.rows[0]?.status === "QUEUED") throw new ConflictException("A player is in the public Ranked queue");
+          rows.push({
+            player_id: player.playerId,
+            session_id: player.sessionId,
+            hidden_mmr_snapshot: Number(profile.hidden_mmr),
+            joined_at: now,
+            last_heartbeat_at: now,
+            status: "MATCHED",
+            matched_match_id: null,
+          });
+        }
+        const matchId = await this.createMatch(transaction, rows[0]!, rows[1]!, config, now, {
+          matchType: "RANKED_PVP",
+          updateQueue: false,
+          fixedMaps,
+        });
+        return {
+          matchId,
+          challengerMatchToken: this.tokens.deriveMatchToken(matchId, challenger.playerId, challenger.sessionId),
+          targetMatchToken: this.tokens.deriveMatchToken(matchId, target.playerId, target.sessionId),
+        };
+      });
     });
   }
 
@@ -541,6 +607,8 @@ export class QueueService {
       readonly debugBotConfig?: Readonly<Record<string, unknown>> | null;
       readonly discordEventsEnabled?: boolean;
       readonly updateQueue?: boolean;
+      /** Designated maps (debug): no ban phase, these rounds in order. */
+      readonly fixedMaps?: FixedMapRequest | null;
     } = {},
   ): Promise<string> {
     if (!config.operational.timeouts) throw new Error("Missing timeout policy");
@@ -553,15 +621,29 @@ export class QueueService {
     // Format and ban are per effective tier (Ranked Tiers sheet); defaults BO3 + ban.
     const seriesOptions = {
       format: effectiveBand.matchFormat === "SINGLE" ? "SINGLE" as const : "BO3" as const,
-      mapBan: effectiveBand.mapBan !== false,
+      mapBan: effectiveBand.mapBan !== false && !options.fixedMaps,
     };
-    const candidates = selectCandidateMaps(
+    const drawn = selectCandidateMaps(
       effective.tier,
       effectiveBand.mainPool,
       config.maps,
       this.random,
       candidateMapCountOf(seriesOptions.format),
     );
+    // Designated maps replace the draw: the chosen rounds (empty slots from
+    // the draw), offered as the candidates, and played in order without bans.
+    let fixedMaps = null;
+    if (options.fixedMaps) {
+      try {
+        // A one-round (SINGLE) tier plays the first chosen map only.
+        const roundCount = roundMapCountOf(seriesOptions.format);
+        fixedMaps = resolveFixedMatchMaps({ ...options.fixedMaps, rounds: options.fixedMaps.rounds.slice(0, roundCount) }, config.maps, drawn, roundCount);
+      } catch (error) {
+        if (error instanceof RankedDomainError) throw new BadRequestException(error.message);
+        throw error;
+      }
+    }
+    const candidates = fixedMaps ? fixedMaps.rounds : drawn;
     const configSnapshotId = await this.persistConfigSnapshot(transaction, config);
     const matchId = this.ids.next();
     const readyDeadline = new Date(
@@ -600,12 +682,12 @@ export class QueueService {
          candidate_maps_snapshot, series_state, state, state_version,
          deadline_at, ready_deadline_at, last_heartbeat_a_at, last_heartbeat_b_at,
          rules_version, match_type, debug_bot_config, discord_events_enabled,
-         debug_config, debug_discord_events, created_at
+         debug_config, debug_discord_events, created_at, fixed_maps
        ) VALUES (
          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
          $11::jsonb, $12::jsonb, 'MATCHED', 1,
          $13, $13, $15, $15, $14, $16, $17::jsonb, $18,
-         $17::jsonb, $19, $15
+         $17::jsonb, $19, $15, $20::jsonb
        )`,
       [
         matchId,
@@ -627,6 +709,7 @@ export class QueueService {
         serializedDebugConfig,
         discordEventsEnabled,
         debugDiscordEvents,
+        fixedMaps === null ? null : JSON.stringify(fixedMaps),
       ],
     );
     for (const participant of [playerA, playerB]) {

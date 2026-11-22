@@ -1434,6 +1434,12 @@ void RankedRuntime::startDebugBotMatch(DebugBotMatchOptions options) {
     body["scenario"] = options.scenario;
     body["botBan"] = options.botBan;
     body["sendDiscordEvents"] = options.sendDiscordEvents;
+    if (!options.fixedRounds.empty() || !options.fixedDeathmatch.empty()) {
+        auto rounds = matjson::Value::array();
+        for (auto const& id : options.fixedRounds) rounds.push(id);
+        body["fixedMaps"]["rounds"] = rounds;
+        body["fixedMaps"]["deathmatch"] = options.fixedDeathmatch;
+    }
     body["installedMods"] = installedModsJson();
     auto request = baseRequest(m_sessionToken);
     request.bodyJSON(body);
@@ -1466,6 +1472,115 @@ void RankedRuntime::startDebugBotMatch(DebugBotMatchOptions options) {
             pollMatch();
         }
     );
+}
+
+namespace {
+DebugChallengeView parseDebugChallenge(matjson::Value const& value) {
+    DebugChallengeView view;
+    view.id = value["id"].asString().unwrapOr(""); view.status = value["status"].asString().unwrapOr("");
+    view.from = value["from"].asString().unwrapOr(""); view.to = value["to"].asString().unwrapOr("");
+    view.expiresAt = value["expiresAt"].asString().unwrapOr("");
+    view.matchId = value["matchId"].asString().unwrapOr(""); view.matchToken = value["matchToken"].asString().unwrapOr("");
+    view.side = value["side"].asString().unwrapOr("");
+    if (value["maps"].isArray()) for (auto const& map : value["maps"].asArray().unwrap())
+        view.maps.emplace_back(map["slot"].asString().unwrapOr(""), map["title"].asString().unwrapOr(""));
+    return view;
+}
+}
+
+void RankedRuntime::fetchDebugLobby() {
+    if (m_sessionToken.empty()) return;
+    auto request = baseRequest(m_sessionToken);
+    m_debugLobbyRequest.spawn(request.get(endpoint("/api/ranked/debug/challenges/lobby")), [this](web::WebResponse response) {
+        m_view.debugLobby.clear(); m_view.debugLobbyLoaded = true;
+        if (!successful(response)) { m_view.debugChallengeError = responseError(response); ++m_view.revision; return; }
+        auto const root = response.json().unwrapOr(matjson::Value());
+        if (root["players"].isArray()) for (auto const& player : root["players"].asArray().unwrap())
+            m_view.debugLobby.push_back({player["playerId"].asString().unwrapOr(""), player["name"].asString().unwrapOr(""),
+                player["tier"].asString().unwrapOr(""), static_cast<int>(player["lp"].asInt().unwrapOr(0))});
+        m_view.debugChallengeError.clear(); ++m_view.revision;
+    });
+}
+
+void RankedRuntime::sendDebugChallenge(std::string const& password, std::string const& targetPlayerId,
+    std::vector<std::string> const& rounds, std::string const& deathmatch) {
+    if (m_sessionToken.empty() || m_view.stage != RuntimeStage::Ready) return;
+    m_installedMods = captureInstalledMods();
+    auto const decision = evaluateEnvironment(m_installedMods, m_environmentPolicy);
+    if (!decision.allowed) { showEnvironmentWarning(decision, true); return; }
+    matjson::Value body;
+    body["password"] = password; body["targetPlayerId"] = targetPlayerId;
+    auto list = matjson::Value::array(); for (auto const& id : rounds) list.push(id);
+    body["fixedMaps"]["rounds"] = list; body["fixedMaps"]["deathmatch"] = deathmatch;
+    body["installedMods"] = installedModsJson();
+    auto request = baseRequest(m_sessionToken); request.bodyJSON(body);
+    m_view.debugChallengeError.clear(); ++m_view.revision;
+    m_debugChallengeAction.spawn(request.post(endpoint("/api/ranked/debug/challenges")), [this](web::WebResponse response) {
+        if (!successful(response)) { m_view.debugChallengeError = responseError(response); ++m_view.revision; return; }
+        auto const root = response.json().unwrapOr(matjson::Value());
+        m_view.debugOutgoing = parseDebugChallenge(root["challenge"]);
+        m_nextDebugChallengePollAt = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        ++m_view.revision;
+    });
+}
+
+void RankedRuntime::answerDebugChallenge(std::string const& id, bool accept) {
+    if (m_sessionToken.empty()) return;
+    auto request = baseRequest(m_sessionToken);
+    if (accept) {
+        if (m_view.stage != RuntimeStage::Ready) return;
+        m_installedMods = captureInstalledMods();
+        matjson::Value body; body["installedMods"] = installedModsJson(); request.bodyJSON(body);
+    }
+    auto const path = fmt::format("/api/ranked/debug/challenges/{}/{}", id, accept ? "accept" : "decline");
+    std::erase_if(m_view.debugIncoming, [&](auto const& c) { return c.id == id; }); ++m_view.revision;
+    m_debugChallengeAction.spawn(request.post(endpoint(path)), [this, accept](web::WebResponse response) {
+        if (!successful(response)) { m_view.debugChallengeError = responseError(response); ++m_view.revision; return; }
+        if (!accept) return;
+        auto const root = response.json().unwrapOr(matjson::Value());
+        adoptDebugChallengeMatch(root["matchId"].asString().unwrapOr(""), root["matchToken"].asString().unwrapOr(""), root["side"].asString().unwrapOr("B"));
+    });
+}
+
+void RankedRuntime::cancelDebugChallenge(std::string const& id) {
+    if (m_sessionToken.empty()) return;
+    auto request = baseRequest(m_sessionToken);
+    m_debugChallengeAction.spawn(request.post(endpoint(fmt::format("/api/ranked/debug/challenges/{}/cancel", id))), [this](web::WebResponse response) {
+        if (!successful(response)) { m_view.debugChallengeError = responseError(response); ++m_view.revision; return; }
+        m_view.debugOutgoing = parseDebugChallenge(response.json().unwrapOr(matjson::Value())["challenge"]); ++m_view.revision;
+    });
+}
+
+// Debug clients idle in the lobby look for invites (and their own accepted
+// challenge) every 3 s.
+void RankedRuntime::pollDebugChallenges() {
+    if (m_sessionToken.empty()) return;
+    m_nextDebugChallengePollAt = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    auto request = baseRequest(m_sessionToken);
+    m_debugChallengeRequest.spawn(request.get(endpoint("/api/ranked/debug/challenges")), [this](web::WebResponse response) {
+        if (!successful(response)) return;
+        auto const root = response.json().unwrapOr(matjson::Value());
+        m_view.debugIncoming.clear();
+        if (root["incoming"].isArray()) for (auto const& item : root["incoming"].asArray().unwrap()) m_view.debugIncoming.push_back(parseDebugChallenge(item));
+        m_view.debugOutgoing = root["outgoing"].isObject() ? std::optional(parseDebugChallenge(root["outgoing"])) : std::nullopt;
+        ++m_view.revision;
+        auto const& out = m_view.debugOutgoing;
+        if (out && out->status == "ACCEPTED" && !out->matchId.empty() && out->matchId != m_debugAdoptedMatch)
+            adoptDebugChallengeMatch(out->matchId, out->matchToken, out->side.empty() ? "A" : out->side);
+    });
+}
+
+void RankedRuntime::adoptDebugChallengeMatch(std::string const& matchId, std::string const& matchToken, std::string const& side) {
+    if (matchId.empty() || matchToken.empty() || matchId == m_debugAdoptedMatch || m_view.stage != RuntimeStage::Ready || m_controlBusy) return;
+    m_debugAdoptedMatch = matchId;
+    invalidatePollRequest();
+    m_view.match = {};
+    m_view.match.matchId = matchId; m_view.match.side = side;
+    m_matchToken = matchToken;
+    m_view.debugIncoming.clear();
+    setStage(RuntimeStage::Matched, "Fixed-map challenge accepted. Confirm Ready.");
+    m_nextPollAt = std::chrono::steady_clock::now();
+    pollMatch();
 }
 
 bool RankedRuntime::prepareSurvivalDebugAdmission(matjson::Value& body) {
@@ -4504,6 +4619,9 @@ void RankedRuntime::tick() {
         if (m_view.stage == RuntimeStage::Queued) pollQueue();
         if (m_view.stage == RuntimeStage::Matched) pollMatch();
     }
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+    if (m_view.stage == RuntimeStage::Ready && now >= m_nextDebugChallengePollAt) pollDebugChallenges();
+#endif
     if (
         m_attemptBusy &&
         m_attemptRequestStartedAt != std::chrono::steady_clock::time_point{} &&

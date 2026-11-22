@@ -30,7 +30,7 @@ import {
 } from "../queue/queue.service.js";
 import type { InstalledModDto } from "../session/session.dto.js";
 import type { RankedSessionContext } from "../session/session.types.js";
-import type { CreateDebugBotMatchDto } from "./debug-bot.dto.js";
+import { fixedMapRequestOf, type CreateDebugBotMatchDto } from "./debug-bot.dto.js";
 import { createDebugBotAttemptPlan } from "./debug-bot.behavior.js";
 
 interface BotDriver {
@@ -113,6 +113,7 @@ export class DebugBotService implements OnModuleInit, OnApplicationShutdown {
       botBan: body.botBan,
       sendDiscordEvents: body.sendDiscordEvents,
       mmrOffset: configuration.difficulties[body.difficulty].mmrOffset,
+      fixedMaps: fixedMapRequestOf(body.fixedMaps),
     };
     const creation = await this.queue.createDebugBotMatch(session, body, settings);
     if (settings.scenario === "FORCE_WIN" || settings.scenario === "FORCE_LOSE") {

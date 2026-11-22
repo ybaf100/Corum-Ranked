@@ -387,8 +387,20 @@ struct DebugBotMatchOptions {
     std::string scenario;
     std::string botBan;
     bool sendDiscordEvents = false;
+    // Designated maps by canonical id: rounds in order ("" = random), the
+    // Death Match map ("" = random). Empty = the normal draw and bans.
+    std::vector<std::string> fixedRounds;
+    std::string fixedDeathmatch;
 };
 #endif
+
+// Debug lobby challenges (debug clients): designated maps sent to a player
+// idle in the lobby; accepting starts a scoring Ranked match on them.
+struct DebugLobbyPlayerView { std::string playerId, name, tier; int lp = 0; };
+struct DebugChallengeView {
+    std::string id, status, from, to, expiresAt, matchId, matchToken, side;
+    std::vector<std::pair<std::string, std::string>> maps; // slot, title ("" = random)
+};
 
 struct RankedAudioResourceView {
     std::string key;
@@ -475,6 +487,11 @@ struct RuntimeView {
     RuntimeStage stage = RuntimeStage::Idle;
     // Debug Bot match creation reuses JoiningQueue; it is not a queue to show.
     bool debugBotCreating = false;
+    std::vector<DebugLobbyPlayerView> debugLobby;
+    bool debugLobbyLoaded = false;
+    std::vector<DebugChallengeView> debugIncoming;
+    std::optional<DebugChallengeView> debugOutgoing;
+    std::string debugChallengeError;
     std::string status;
     std::string error;
     bool accountActiveElsewhere = false;
@@ -596,6 +613,11 @@ public:
     // Compatibility overload for alpha.4 callers that still pass password separately.
     // Keep this through alpha.5 so stale DebugBotPopup layouts compile on every target.
     void startDebugBotMatch(std::string const& password, DebugBotMatchOptions options);
+    void fetchDebugLobby();
+    void sendDebugChallenge(std::string const& password, std::string const& targetPlayerId,
+        std::vector<std::string> const& rounds, std::string const& deathmatch);
+    void answerDebugChallenge(std::string const& id, bool accept);
+    void cancelDebugChallenge(std::string const& id);
 #endif
 
     [[nodiscard]] RuntimeView const& view() const;
@@ -807,6 +829,13 @@ private:
     bool m_songBypassAllowed = false;
     bool m_placementResultAcknowledged = false;
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_controlRequest;
+#if defined(CORUM_RANKED_DEBUG_BOT_MATCH)
+    geode::async::TaskHolder<geode::utils::web::WebResponse> m_debugChallengeRequest, m_debugLobbyRequest, m_debugChallengeAction;
+    std::chrono::steady_clock::time_point m_nextDebugChallengePollAt{};
+    std::string m_debugAdoptedMatch;
+    void pollDebugChallenges();
+    void adoptDebugChallengeMatch(std::string const& matchId, std::string const& matchToken, std::string const& side);
+#endif
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_warmRequest;
     std::chrono::steady_clock::time_point m_warmedAt{};
     geode::async::TaskHolder<geode::utils::web::WebResponse> m_historyRequest;
