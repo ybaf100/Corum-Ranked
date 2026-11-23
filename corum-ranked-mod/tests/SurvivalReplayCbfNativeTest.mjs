@@ -202,8 +202,14 @@ int main(){
  // instead of re-serializing every object; a replaced object rebuilds it.
  {PlayerObject a,b;PlayLayer target;target.m_player1=&a;target.m_player2=&b;PlayLayer::current=&target;
   auto first=captureCbfInitial(&target,true);auto& world=collisionWorld();
-  target.collider.m_startPosition.x+=5;
   auto restarted=captureCbfInitial(&target,true);assert(restarted["objects"]==first["objects"]&&world.identities.error().empty());
+  // A definition that changed since the cached build (countdown vs started
+  // level) rebuilds: the manifest always equals a full rebuild, so a kept
+  // collision target still matches its object (beta.93 regression).
+  target.collider.m_startPosition.x+=5;
+  auto moved=captureCbfInitial(&target,true);assert(moved["objects"]!=first["objects"]);
+  auto const at=world.identities.index(target.collider.m_uniqueID);assert(at);
+  assert(world.identities.initialReference(target.collider.m_uniqueID,collisionObject(&target,*at),0,0));
   GameObject replacement;replacement.m_uniqueID=99;replacement.m_objectID=2;target.objects.values[0]=&replacement;
   auto rebuilt=captureCbfInitial(&target,true);assert(rebuilt["objects"]!=first["objects"]);
   retireNativeReplayFrame(&target);

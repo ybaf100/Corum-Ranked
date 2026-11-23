@@ -42,6 +42,8 @@ PlayerObject* playerAt(int index){return !state().layer?nullptr:index?state().la
 void fail(std::string reason,Json expected=nullptr,Json actual=nullptr);
 struct CollisionWorld {
     PlayLayer* owner=nullptr;std::string error;ReplayCollisionIdentity identities;std::vector<Ref<GameObject>> retained;Json diagnostics;
+    // Per object, a digest of exactly the fields collisionDefinition() reads.
+    std::vector<std::uint64_t> digests;
 };
 CollisionWorld& collisionWorld(){static auto* value=new CollisionWorld;return *value;}
 Json collisionDefinition(GameObject* object){
@@ -53,6 +55,18 @@ Json collisionDefinition(GameObject* object){
     auto* values=reinterpret_cast<short const*>(object->m_groups);for(int i=0;i<object->m_groupCount;++i)groups.push(values[i]);definition.push(std::move(groups));
     return definition;
 }
+// FNV-1a over the raw definition fields (no JSON, no allocation): equal
+// digests mean collisionDefinition() would produce the same entry.
+std::uint64_t collisionDefinitionDigest(GameObject* object){
+    if(!object)return 0;
+    std::uint64_t h=1469598103934665603ull;
+    auto mix=[&](void const* data,std::size_t size){auto const* b=static_cast<unsigned char const*>(data);for(std::size_t i=0;i<size;++i){h^=b[i];h*=1099511628211ull;}};
+    mix(&object->m_objectID,sizeof(object->m_objectID));
+    float const values[]={object->m_startPosition.x,object->m_startPosition.y,object->m_startRotationX,object->m_startRotationY,object->m_startScaleX,object->m_startScaleY};
+    mix(values,sizeof(values));mix(&object->m_groupCount,sizeof(object->m_groupCount));
+    if(object->m_groups&&object->m_groupCount>0&&object->m_groupCount<=4096)mix(object->m_groups,sizeof(short)*static_cast<std::size_t>(object->m_groupCount));
+    return h;
+}
 ReplayCollisionIdentity::Object collisionObject(PlayLayer* layer,std::size_t index){
     if(!layer||!layer->m_objects||index>=layer->m_objects->count())return {};
     auto* object=typeinfo_cast<GameObject*>(layer->m_objects->objectAtIndex(static_cast<unsigned>(index)));
@@ -63,9 +77,13 @@ ReplayCollisionIdentity::Object collisionObject(PlayLayer* layer,std::size_t ind
 bool sameCollisionObjects(PlayLayer* layer,CollisionWorld const& world){
     if(!layer||!layer->m_objects||world.owner!=layer||!world.error.empty())return false;
     auto const count=layer->m_objects->count();
-    if(count!=world.identities.size()||count!=world.retained.size())return false;
+    if(count!=world.identities.size()||count!=world.retained.size()||count!=world.digests.size())return false;
     for(unsigned i=0;i<count;++i){auto* object=typeinfo_cast<GameObject*>(layer->m_objects->objectAtIndex(i));
-        if(!object||!world.identities.sameInstance(i,reinterpret_cast<std::uintptr_t>(object),object->m_uniqueID))return false;}
+        if(!object||!world.identities.sameInstance(i,reinterpret_cast<std::uintptr_t>(object),object->m_uniqueID))return false;
+        // beta.93: the definitions (start values, groups) read during the
+        // countdown differ from the started level's. A stale manifest failed
+        // every kept-collision restart (INITIAL_COLLISION_IDENTITY_UNAVAILABLE).
+        if(world.digests[i]!=collisionDefinitionDigest(object))return false;}
     return true;
 }
 void prepareCollisionWorld(PlayLayer* layer,bool reset=false,bool sourceRestart=false){
@@ -76,10 +94,11 @@ void prepareCollisionWorld(PlayLayer* layer,bool reset=false,bool sourceRestart=
     // logs); keep it and start only the per-attempt witnesses over. Playback
     // (prepareCbfInitialCollisionLogs) always re-proves the full manifest.
     if(reset&&sourceRestart&&sameCollisionObjects(layer,world)){world.identities.restartAttempt();return;}
-    world.retained.clear();world.error.clear();world.owner=layer;std::vector<ReplayCollisionIdentity::Object> objects;
+    world.retained.clear();world.digests.clear();world.error.clear();world.owner=layer;std::vector<ReplayCollisionIdentity::Object> objects;
     if(layer&&layer->m_objects&&layer->m_objects->count()>500000){world.identities.reset({});world.diagnostics=nullptr;world.error="CBF_MAP_OBJECT_BUDGET";return;}
     if(layer&&layer->m_objects){objects.reserve(layer->m_objects->count());world.retained.reserve(layer->m_objects->count());
-        for(unsigned i=0;i<layer->m_objects->count();++i){auto* object=typeinfo_cast<GameObject*>(layer->m_objects->objectAtIndex(i));world.retained.emplace_back(object);objects.push_back(collisionObject(layer,i));}}
+        world.digests.reserve(layer->m_objects->count());
+        for(unsigned i=0;i<layer->m_objects->count();++i){auto* object=typeinfo_cast<GameObject*>(layer->m_objects->objectAtIndex(i));world.retained.emplace_back(object);world.digests.push_back(collisionDefinitionDigest(object));objects.push_back(collisionObject(layer,i));}}
     world.identities.reset(std::move(objects));
     world.diagnostics=world.identities.diagnostics();
 }
@@ -353,7 +372,7 @@ void noteCbfNativeCollisionCandidates(PlayLayer* owner,PlayerObject* player,Game
     auto& candidates=s.collisionCandidates[playerIndex(player)];for(std::size_t i=0;i<count;++i)if(objects[i]){if(!candidates.contains(objects[i])&&candidates.size()>=8192){fail("CBF_COLLISION_CANDIDATE_BUDGET");return;}auto inserted=candidates.insert(objects[i]).second;auto actor=playerIndex(player);if(inserted&&s.candidateEvidenceCount[actor]<16){auto* object=objects[i];s.candidateEvidence[actor][s.candidateEvidenceCount[actor]++]={object->m_objectID,object->m_uniqueID,object->m_startPosition.x,object->m_startPosition.y};}}
 }
 void retireNativeReplayFrame(PlayLayer* owner){
-    auto& world=collisionWorld();if(world.owner==owner){world.retained.clear();world.owner=nullptr;world.identities.reset({});world.diagnostics=nullptr;}
+    auto& world=collisionWorld();if(world.owner==owner){world.retained.clear();world.digests.clear();world.owner=nullptr;world.identities.reset({});world.diagnostics=nullptr;}
     auto& c=inputClock();if(c.owner==owner){++c.generation;c.active=false;c.owner=nullptr;c.replay=nullptr;}
     auto& s=state();if(s.layer==owner){++s.epoch;s.frame=s.root=false;s.layer=nullptr;s.playback=nullptr;s.nativePlayer=s.shipPlayer=nullptr;s.depth=0;}
 }

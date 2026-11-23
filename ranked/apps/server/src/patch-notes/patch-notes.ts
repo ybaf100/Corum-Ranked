@@ -10,6 +10,15 @@ export interface PatchNote {
 
 export const PATCH_NOTES: readonly PatchNote[] = Object.freeze([
   {
+    version: "0.6.0-beta.94", date: "2026-11-23",
+    en: [
+      "Survival replays: fixed restarted attempts not being recorded since beta.93, which made their replays unavailable.",
+    ],
+    ko: [
+      "서바이벌 리플레이: beta.93부터 재시작한 시도가 녹화되지 않아 리플레이를 재생할 수 없던 문제를 고쳤습니다.",
+    ],
+  },
+  {
     version: "0.6.0-beta.93", date: "2026-11-23",
     en: [
       "Release of the beta.92 changes (the beta.92 build did not ship).",
